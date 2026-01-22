@@ -1,12 +1,42 @@
 #include <Arduino.h>
 
+#include "lidar/lidar.h"
+#include "lidar/utils/moving_average.h"
+#include "ui/display_ui.h"
+
+static Lidar lidar;
+static MovingAverage filter;
+static DisplayUI ui;
+
 void setup() {
   Serial.begin(115200);
-  delay(200);
-  Serial.println("Mega ready");
+
+  if (!lidar.begin()) {
+    Serial.println("Device did not acknowledge! Freezing.");
+    while (1) {}
+  }
+
+  ui.begin();
+  ui.setAverageHz(2);
 }
 
 void loop() {
-  Serial.println("tick");
-  delay(1000);
+  static DisplayData data = {};
+  float distanceCm = 0.0f;
+  if (lidar.update(distanceCm)) {
+    filter.push(distanceCm);
+    float avg = filter.average();
+
+    Serial.print("New distance: ");
+    Serial.print(distanceCm);
+    Serial.println(" cm");
+
+    Serial.print("Moving average: ");
+    Serial.println(avg);
+    Serial.println(" cm");
+
+    data.averageCm = avg;
+  }
+
+  ui.update(data);
 }
