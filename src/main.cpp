@@ -1,16 +1,24 @@
 #include <Arduino.h>
 
+#include "compass/compass.h"
 #include "lidar/lidar.h"
 #include "lidar/utils/moving_average.h"
 #include "motor/motor.h"
+#include "joystick/joystick.h"
 #include "ui/display_ui.h"
 
+static Compass compass;
 static Lidar lidar;
 static MovingAverage filter;
 static DisplayUI ui;
 
 void setup() {
   Serial.begin(115200);
+
+  if (!compass.begin()) {
+    Serial.println("Compass not responding! Freezing.");
+    while (1) {}
+  }
 
   if (!lidar.begin()) {
     Serial.println("Device did not acknowledge! Freezing.");
