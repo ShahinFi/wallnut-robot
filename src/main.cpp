@@ -2,6 +2,7 @@
 
 #include "lidar/lidar.h"
 #include "lidar/utils/moving_average.h"
+#include "motor/motor.h"
 #include "ui/display_ui.h"
 
 static Lidar lidar;
@@ -16,8 +17,9 @@ void setup() {
     while (1) {}
   }
 
+  motorInit();
   ui.begin();
-  ui.setAverageHz(2);
+  ui.setFieldHz(DisplayField::Average, 1);
 }
 
 void loop() {
