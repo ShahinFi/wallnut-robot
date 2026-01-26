@@ -6,14 +6,23 @@ struct DisplayData {
   float averageCm;
 };
 
+enum class DisplayField : uint8_t {
+  Average = 0,
+  FieldCount
+};
+
 class DisplayUI {
 public:
   DisplayUI();
   void begin();
-  void setAverageHz(uint8_t hz);
+  void setFieldHz(DisplayField field, uint8_t hz);
   void update(const DisplayData &data);
 
 private:
-  uint32_t lastAverageMs;
-  uint32_t averageIntervalMs;
+  struct FieldTimer {
+    uint32_t lastMs;
+    uint32_t intervalMs;
+  };
+
+  FieldTimer timers[static_cast<uint8_t>(DisplayField::FieldCount)];
 };
