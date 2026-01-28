@@ -2,7 +2,7 @@
 
 class MovingAverage {
 public:
-  static const int N = 10;
+  static const int N = 5;
 
   MovingAverage();
   void push(float x);

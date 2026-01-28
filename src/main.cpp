@@ -4,49 +4,62 @@
 #include "lidar/lidar.h"
 #include "lidar/utils/moving_average.h"
 #include "motor/motor.h"
-#include "joystick/joystick.h"
-#include "ui/display_ui.h"
 
-static Compass compass;
-static Lidar lidar;
-static MovingAverage filter;
-static DisplayUI ui;
+#include "tasks/room_measure/room_measure_task.h"
+
+static Compass         compass;
+static Lidar           lidar;
+static MovingAverage   lidarAvg;
+static RoomMeasureTask roomTask;
 
 void setup() {
   Serial.begin(115200);
 
+  // --- Hardware ---
   if (!compass.begin()) {
-    Serial.println("Compass not responding! Freezing.");
+    Serial.println("Compass failed");
     while (1) {}
   }
 
   if (!lidar.begin()) {
-    Serial.println("Device did not acknowledge! Freezing.");
+    Serial.println("LiDAR failed");
     while (1) {}
   }
 
   motorInit();
-  ui.begin();
-  ui.setFieldHz(DisplayField::Average, 1);
+
+  // --- Room measurement physical config ONLY ---
+  RoomMeasureTask::Config cfg;
+  cfg.lidarToCenterOffsetCm = 18.0f;   // measured once
+  cfg.ceilingHeightCm       = 100.0f;  // task requirement
+
+  roomTask.setConfig(cfg);
+  roomTask.reset();
+
+  Serial.println("Room measurement ready. Send 'm' to start.");
 }
 
 void loop() {
-  static DisplayData data = {};
-  float distanceCm = 0.0f;
-  if (lidar.update(distanceCm)) {
-    filter.push(distanceCm);
-    float avg = filter.average();
+  // ---- Compass (continuous heading) ----
+  CompassData heading;
+  if (!compass.read(heading)) return;
 
-    Serial.print("New distance: ");
-    Serial.print(distanceCm);
-    Serial.println(" cm");
-
-    Serial.print("Moving average: ");
-    Serial.println(avg);
-    Serial.println(" cm");
-
-    data.averageCm = avg;
+  // ---- LiDAR (moving averaged) ----
+  float lidarCm = 0.0f;
+  if (lidar.update(lidarCm)) {
+    lidarAvg.push(lidarCm);
   }
 
-  ui.update(data);
+  const float lidarFilteredCm = lidarAvg.average();
+
+  // ---- Start measurement ----
+  if (Serial.available()) {
+    const char c = Serial.read();
+    if ((c == 'm' || c == 'M') && !roomTask.active()) {
+      roomTask.begin(heading.headingDegContinuous);
+    }
+  }
+
+  // ---- Run task ----
+  roomTask.update(heading.headingDegContinuous, lidarFilteredCm);
 }
