@@ -1,18 +1,19 @@
+// actions/drive_straight.cpp
 #include "actions/drive_straight.h"
 
 #include <math.h>
 #include "motor/motor.h"
 
-static inline float clamp01(float x) {
-  if (x < 0.0f) return 0.0f;
-  if (x > 1.0f) return 1.0f;
+static inline float clampSigned1(float x) {
+  if (x < -1.0f) return -1.0f;
+  if (x >  1.0f) return  1.0f;
   return x;
 }
 
 DriveStraight::DriveStraight()
 : cfg_{},
   state_(State::Idle),
-  infiniteDistance_(false),   // NEW
+  infiniteDistance_(false),
   targetTravelCm_(0.0f),
   startTravelCm_(0.0f),
   remainingTravelCm_(0.0f),
@@ -30,11 +31,11 @@ void DriveStraight::begin(float headingDegContinuous,
                           float requestedSpeed) {
   stopMotors();
 
-  // NEW: allow "no distance" mode when targetTravelCm < 0
+  // Allow "no distance" mode when targetTravelCm < 0
   infiniteDistance_ = (targetTravelCm < 0.0f);
   if (infiniteDistance_) targetTravelCm = 0.0f; // keep internal values benign
 
-  requestedSpeed_    = clamp01(requestedSpeed);
+  requestedSpeed_    = clampSigned1(requestedSpeed);
   targetTravelCm_    = targetTravelCm;
   startTravelCm_     = avgTravelCm;
   remainingTravelCm_ = targetTravelCm;
@@ -44,7 +45,7 @@ void DriveStraight::begin(float headingDegContinuous,
 
   startMs_ = millis();
 
-  // NEW: only allow immediate success when we actually have a distance target
+  // Only allow immediate success when we actually have a distance target
   if (!infiniteDistance_ && targetTravelCm_ <= cfg_.distanceToleranceCm) {
     state_ = State::Succeeded;
     return;
@@ -63,9 +64,10 @@ bool DriveStraight::update(float headingDegContinuous, float avgTravelCm) {
     return true;
   }
 
-  // NEW: distance stop condition only when not infinite
+  // Distance stop condition only when not infinite.
+  // Use ABS traveled so it behaves even if requestedSpeed is negative.
   if (!infiniteDistance_) {
-    const float traveledCm = avgTravelCm - startTravelCm_;
+    const float traveledCm = fabsf(avgTravelCm - startTravelCm_);
     remainingTravelCm_ = targetTravelCm_ - traveledCm;
 
     if (remainingTravelCm_ <= cfg_.distanceToleranceCm) {
@@ -75,23 +77,40 @@ bool DriveStraight::update(float headingDegContinuous, float avgTravelCm) {
     }
   }
 
-  // Heading hold: error = target - current (shortest signed)
-  headingErrorDeg_ = wrapDegDiff180(headingHoldDeg_, headingDegContinuous);
+  // HEADING HOLD (continuous/unwrapped):
+  // Do NOT wrap to [-180,180] because that will flip sign after 180° and "lose" heading.
+  headingErrorDeg_ = headingHoldDeg_ - headingDegContinuous;
 
   // Base forward speed with tapering
-  const float remainingAbs = fabsf(remainingTravelCm_);
-  const float speedCmd = computeForwardSpeed(requestedSpeed_, remainingAbs);
+  const float speedMag = fabsf(requestedSpeed_);
+  float speedCmd = speedMag;
 
-  const float base = speedCmd * cfg_.motorForwardSign;
+  if (speedCmd > cfg_.maxSpeed) speedCmd = cfg_.maxSpeed;
+  if (speedCmd > 0.0f && speedCmd < cfg_.minSpeed) speedCmd = cfg_.minSpeed;
+
+  if (!infiniteDistance_) {
+    const float remainingAbs = fabsf(remainingTravelCm_);
+    speedCmd = computeForwardSpeed(speedCmd, remainingAbs);
+  }
+
+  const float dir = (requestedSpeed_ >= 0.0f) ? 1.0f : -1.0f;
+  const float base = speedCmd * dir * cfg_.motorForwardSign;
 
   // Heading correction (deg -> speed)
-  float corr = cfg_.kpHeading * headingErrorDeg_;
+  float corr = 0.0f;
+  if (fabsf(headingErrorDeg_) > cfg_.headingDeadbandDeg) {
+    corr = cfg_.kpHeading * cfg_.headingCorrectionSign * headingErrorDeg_;
+  }
   if (corr >  cfg_.maxCorrection) corr =  cfg_.maxCorrection;
   if (corr < -cfg_.maxCorrection) corr = -cfg_.maxCorrection;
 
   // Differential steering
-  const float leftCmd  = base - corr;
-  const float rightCmd = base + corr;
+  float leftCmd  = base - corr;
+  float rightCmd = base + corr;
+
+  // IMPORTANT: clamp outputs after correction so motorDrive never sees >1 or <-1.
+  leftCmd  = clampSigned1(leftCmd);
+  rightCmd = clampSigned1(rightCmd);
 
   motorDrive(leftCmd, rightCmd);
   return false;
@@ -106,7 +125,7 @@ void DriveStraight::reset() {
   stopMotors();
   state_ = State::Idle;
 
-  infiniteDistance_ = false; // NEW
+  infiniteDistance_ = false;
 
   targetTravelCm_ = 0.0f;
   startTravelCm_ = 0.0f;
@@ -127,6 +146,14 @@ DriveStraight::State DriveStraight::state() const { return state_; }
 float DriveStraight::remainingCm() const { return remainingTravelCm_; }
 float DriveStraight::headingErrorDeg() const { return headingErrorDeg_; }
 
+void DriveStraight::setRequestedSpeed(float requestedSpeed) {
+  requestedSpeed_ = clampSigned1(requestedSpeed);
+}
+
+void DriveStraight::setHeadingHoldDeg(float headingDegContinuous) {
+  headingHoldDeg_ = headingDegContinuous;
+}
+
 void DriveStraight::stopMotors() {
   motorDrive(0.0f, 0.0f);
 }
@@ -146,12 +173,4 @@ float DriveStraight::computeForwardSpeed(float requestedSpeed, float remainingCm
   if (tapered > speed) tapered = speed;
 
   return tapered;
-}
-
-// Returns shortest signed (target - current) in [-180, +180]
-float DriveStraight::wrapDegDiff180(float targetDeg, float currentDeg) {
-  float d = targetDeg - currentDeg;
-  while (d > 180.0f)  d -= 360.0f;
-  while (d < -180.0f) d += 360.0f;
-  return d;
 }

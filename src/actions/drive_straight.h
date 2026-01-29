@@ -13,6 +13,8 @@ public:
     float    minSpeed            = 0.2f;   // minimum during taper (prevents stall)
     float    maxSpeed            = 0.8f;   // cap speed
     float    kpHeading           = 0.02f;  // (deg -> speed) proportional correction
+    float    headingDeadbandDeg  = 1.5f;  // no correction within this error
+    float    headingCorrectionSign = -1.0f; // +1 or -1 to match turn direction
     float    maxCorrection       = 0.3f;   // clamp correction magnitude
     uint32_t timeoutMs           = 8000;   // safety timeout
     float    motorForwardSign    = 1.0f;   // +1 or -1 depending on wiring
@@ -30,7 +32,7 @@ public:
   // - targetTravelCm < 0  : drive indefinitely (no distance stop condition)
   // headingDegContinuous: current continuous heading (unwrapped degrees).
   // avgTravelCm: current unsigned travel reading (cm), typically odometry.avgCm.
-  // requestedSpeed: 0..1
+  // requestedSpeed: -1..1 (sign = direction)
   void begin(float headingDegContinuous, float avgTravelCm, float targetTravelCm, float requestedSpeed);
 
   // Tick with latest sensors; drives motors. Returns true when finished.
@@ -38,6 +40,10 @@ public:
 
   void cancel();   // stop, state=Cancelled
   void reset();    // stop, state=Idle
+
+  // Update controls while running (optional)
+  void setRequestedSpeed(float requestedSpeed);   // -1..1
+  void setHeadingHoldDeg(float headingDegContinuous);
 
   bool active() const;
   bool succeeded() const;
