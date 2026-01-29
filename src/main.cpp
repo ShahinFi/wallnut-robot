@@ -11,6 +11,7 @@
 #include "tasks/wall_align_90/wall_align_90_task.h"
 #include "tasks/wall_sequence/wall_sequence_task.h"
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
+#include "tasks/sequence_executor/sequence_executor_task.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
@@ -26,7 +27,17 @@ static DriveStraight   driveStraight;
 static WallAlign90Task wallAlignTask;
 static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
+static SequenceExecutorTask seqExecTask;
 static uint32_t        lastEncDbgMs = 0;
+
+static SequenceStep seqSteps[] = {
+  {SequenceStepType::MoveToDistance, 20.0f},
+  {SequenceStepType::TurnDeg, -90.0f},
+  {SequenceStepType::MoveToDistance, 30.0f},
+  {SequenceStepType::TurnDeg, 40.0f},
+  {SequenceStepType::MoveToDistance, 50.0f},
+  {SequenceStepType::End, 0.0f}
+};
 
 void setup() {
   Serial.begin(115200);
@@ -71,8 +82,10 @@ void setup() {
   wallAlignTask.reset();
   wallSeqTask.reset();
   encCalTask.reset();
+  seqExecTask.setSequence(seqSteps);
+  seqExecTask.reset();
 
-  Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal.");
+  Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'q' exec.");
 }
 
 void loop() {
@@ -96,6 +109,7 @@ void loop() {
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       roomTask.begin(heading.headingDegContinuous);
     }
     if (c == 'f' || c == 'F') {
@@ -104,6 +118,7 @@ void loop() {
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       if (!followTask.active()) followTask.begin(heading.headingDegContinuous, 0.0f);
     }
     if (c == 'd' || c == 'D') {
@@ -112,6 +127,7 @@ void loop() {
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
       driveStraight.begin(heading.headingDegContinuous, od.avgCm, 20.0f, 0.5f);
@@ -122,6 +138,7 @@ void loop() {
       if (driveStraight.active()) driveStraight.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
       wallAlignTask.begin(heading.headingDegContinuous, od.avgCm);
@@ -132,6 +149,7 @@ void loop() {
       if (driveStraight.active()) driveStraight.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
       wallSeqTask.begin(heading.headingDegContinuous, od.avgCm);
@@ -142,9 +160,21 @@ void loop() {
       if (driveStraight.active()) driveStraight.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
       encCalTask.begin(heading.headingDegContinuous, od.avgCm);
+    }
+    if (c == 'q' || c == 'Q') {
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveStraight.active()) driveStraight.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      encoderReset();
+      OdometryData od = odom.read();
+      seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
     }
     if (c == 'c' || c == 'C') {
       if (followTask.active()) followTask.cancel();
@@ -152,11 +182,15 @@ void loop() {
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
     }
   }
 
   // ---- Run tasks/actions ----
-  if (encCalTask.active()) {
+  if (seqExecTask.active()) {
+    OdometryData od = odom.read();
+    seqExecTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+  } else if (encCalTask.active()) {
     OdometryData od = odom.read();
     encCalTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
   } else if (wallSeqTask.active()) {
