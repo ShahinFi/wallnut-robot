@@ -59,3 +59,24 @@ async function pollLidar() {
 
 setInterval(pollLidar, 1000);
 pollLidar();
+
+// Compass polling
+const compassWebValueEl = document.getElementById("compassWebValue");
+async function pollCompass() {
+  try {
+    const res = await fetch("/compassdata");
+    if (!res.ok) return;
+    const text = await res.text();
+    if (compassWebValueEl) {
+      const parts = text.trim().split(",");
+      const deg = parts[0] || "--";
+      const label = parts[1] || "";
+      compassWebValueEl.innerText = `${deg}° ${label}`;
+    }
+  } catch (e) {
+    // ignore transient errors
+  }
+}
+
+setInterval(pollCompass, 1000);
+pollCompass();
