@@ -21,6 +21,7 @@ SequenceExecutorTask::SequenceExecutorTask()
   ui_(),
   driveActive_(false),
   targetCm_(0.0f),
+  moveByCm_(0.0f),
   stepStartMs_(0),
   totalDrivenCm_(0.0f),
   lastAvgCm_(0.0f),
@@ -36,12 +37,7 @@ SequenceExecutorTask::SequenceExecutorTask()
 
 void SequenceExecutorTask::setSequence(const SequenceStep* steps) {
   steps_ = steps;
-  totalSteps_ = 0;
-  if (!steps_) return;
-  for (uint16_t i = 0; i < 1000; ++i) {
-    if (steps_[i].type == SequenceStepType::End) break;
-    ++totalSteps_;
-  }
+  totalSteps_ = 0;  // no max steps; optional total display only
 }
 
 void SequenceExecutorTask::setAlignHeading(float headingDegContinuous) {
@@ -117,7 +113,8 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     return true;
   }
 
-  const bool inMove = (step.type == SequenceStepType::MoveToDistance);
+  const bool inMove = (step.type == SequenceStepType::MoveToDistance ||
+                       step.type == SequenceStepType::MoveByDistance);
   if (inMove && avgTravelCm >= lastAvgCm_) {
     totalDrivenCm_ += (avgTravelCm - lastAvgCm_);
   }
@@ -144,6 +141,23 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     const float signedSpeed = (error >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
     drive_.setRequestedSpeed(signedSpeed);
     drive_.update(headingDegContinuous, avgTravelCm);
+    return false;
+  }
+
+  if (step.type == SequenceStepType::MoveByDistance) {
+    ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
+                    SequenceExecutorUI::StepLabel::Move);
+    const bool done = drive_.update(headingDegContinuous, avgTravelCm);
+    if (done) {
+      if (drive_.timedOut()) {
+        ui_.showFailed("Drive timeout");
+        setState_(State::Failed);
+        return true;
+      }
+      driveActive_ = false;
+      ++stepIndex_;
+      startStep_(headingDegContinuous, avgTravelCm);
+    }
     return false;
   }
 
@@ -196,6 +210,9 @@ void SequenceExecutorTask::startStep_(float headingDegContinuous, float avgTrave
   if (step.type == SequenceStepType::MoveToDistance) {
     targetCm_ = step.value;
     startMove_(headingDegContinuous, avgTravelCm);
+  } else if (step.type == SequenceStepType::MoveByDistance) {
+    moveByCm_ = step.value;
+    startMove_(headingDegContinuous, avgTravelCm);
   } else if (step.type == SequenceStepType::TurnDeg) {
     startTurn_(headingDegContinuous);
   }
@@ -203,7 +220,14 @@ void SequenceExecutorTask::startStep_(float headingDegContinuous, float avgTrave
 
 void SequenceExecutorTask::startMove_(float headingDegContinuous, float avgTravelCm) {
   if (!driveActive_) {
-    drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
+    const SequenceStep& step = steps_[stepIndex_];
+    if (step.type == SequenceStepType::MoveByDistance) {
+      const float dist = fabsf(moveByCm_);
+      const float dir = (moveByCm_ >= 0.0f) ? 1.0f : -1.0f;
+      drive_.begin(headingDegContinuous, avgTravelCm, dist, dir * kMoveSpeed);
+    } else {
+      drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
+    }
     drive_.setHeadingHoldDeg(headingDegContinuous);
     driveActive_ = true;
   }

@@ -19,7 +19,11 @@ void SequenceExecutorUI::showRunning(float distanceCm, float totalCm, uint16_t s
   lcdWrite(0, 0, "Seq Exec");
 
   char line1[21];
-  snprintf(line1, sizeof(line1), "Step:%2d/%2d", (int)stepIndex, (int)totalSteps);
+  if (totalSteps == 0) {
+    snprintf(line1, sizeof(line1), "Step:%2d/--", (int)stepIndex);
+  } else {
+    snprintf(line1, sizeof(line1), "Step:%2d/%2d", (int)stepIndex, (int)totalSteps);
+  }
   lcdWrite(1, 0, line1);
 
   const char* l = "MOVE";

@@ -6,7 +6,7 @@
 #include "actions/turn_to_angle.h"
 #include "tasks/sequence_executor/ui/sequence_executor_ui.h"
 
-enum class SequenceStepType : uint8_t { MoveToDistance, TurnDeg, End };
+enum class SequenceStepType : uint8_t { MoveToDistance, MoveByDistance, TurnDeg, End };
 
 struct SequenceStep {
   SequenceStepType type;
@@ -51,6 +51,7 @@ private:
 
   bool     driveActive_;
   float    targetCm_;
+  float    moveByCm_;
   uint32_t stepStartMs_;
 
   float totalDrivenCm_;
