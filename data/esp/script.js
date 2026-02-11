@@ -43,3 +43,19 @@ function faceNorth() {
   fetch("/north");
   console.log("face north");
 }
+
+// Lidar polling
+const lidarValueEl = document.getElementById("lidarValue");
+async function pollLidar() {
+  try {
+    const res = await fetch("/lidar");
+    if (!res.ok) return;
+    const text = await res.text();
+    if (lidarValueEl) lidarValueEl.innerText = text.trim();
+  } catch (e) {
+    // ignore transient errors
+  }
+}
+
+setInterval(pollLidar, 1000);
+pollLidar();

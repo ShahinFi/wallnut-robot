@@ -13,6 +13,7 @@
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
 #include "tasks/sequence_executor/sequence_executor_task.h"
 #include "esp/esp_uart.h"
+#include "telemetry/lidar_telemetry.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
@@ -69,6 +70,7 @@ void setup() {
   lcdInit();
   encoderInit();
   espSetup();
+  lidarTelemetryInit(1000);
 
   // --- Odometry (set your pulses/meter) ---
   odom.setPulsesPerMeter(787.0f);
@@ -113,6 +115,7 @@ void loop() {
   }
 
   const float lidarFilteredCm = lidarAvg.average();
+  lidarTelemetryUpdate(lidarFilteredCm);
 
   EspCommand espCmd;
   if (espPoll(espCmd)) {

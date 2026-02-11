@@ -5,6 +5,7 @@
 // ====== Wi-Fi credentials ======
 const char* ssid = "Titenet-IoT";
 const char* password = "7kDtaphg";
+String lidarData = "0 cm";
 
 ESP8266WebServer server(80);
 
@@ -13,6 +14,7 @@ void handleNotFound();
 void handleMove(int distance);
 void handleNorth();
 void handleCompass();
+void handleLidar();
 void listAllFiles();
 
 void setup() {
@@ -68,6 +70,7 @@ void setup() {
   server.on("/backwards20", []() { handleMove(-20); });
   server.on("/compass", handleCompass);
   server.on("/north", []() { handleNorth(); });
+  server.on("/lidar", handleLidar);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -76,6 +79,13 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n');
+    if (data.startsWith("LIDAR:")) {
+      lidarData = data.substring(6);
+    }
+  }
 }
 
 void listAllFiles() {
@@ -128,4 +138,8 @@ void handleCompass() {
 void handleNorth() {
   Serial.println("North");
   server.send(200, "text/plain", "North OK");
+}
+
+void handleLidar() {
+  server.send(200, "text/plain", lidarData);
 }
