@@ -21,6 +21,8 @@ public:
   SequenceExecutorTask();
 
   void setSequence(const SequenceStep* steps);
+  void setAlignHeading(float headingDegContinuous);
+  void clearAlignHeading();
   void begin(float headingDegContinuous, float avgTravelCm);
   bool update(float headingDegContinuous, float avgTravelCm, float lidarAvgCm);
 
@@ -36,6 +38,7 @@ private:
   void startMove_(float headingDegContinuous, float avgTravelCm);
   void startTurn_(float headingDegContinuous);
   bool stepTimedOut_() const;
+  static float wrapDegDiff180_(float targetDeg, float currentDeg);
 
   const SequenceStep* steps_;
   uint16_t stepIndex_;
@@ -52,4 +55,8 @@ private:
 
   float totalDrivenCm_;
   float lastAvgCm_;
+
+  bool  alignEnabled_; 
+  bool  aligning_;
+  float alignHeadingDeg_;
 };

@@ -23,7 +23,10 @@ SequenceExecutorTask::SequenceExecutorTask()
   targetCm_(0.0f),
   stepStartMs_(0),
   totalDrivenCm_(0.0f),
-  lastAvgCm_(0.0f) {
+  lastAvgCm_(0.0f),
+  alignEnabled_(false),
+  aligning_(false),
+  alignHeadingDeg_(0.0f) {
   DriveStraight::Config dcfg = drive_.config();
   dcfg.slowDownCm = 0.0f;
   dcfg.minSpeed   = kMoveSpeed;
@@ -41,6 +44,16 @@ void SequenceExecutorTask::setSequence(const SequenceStep* steps) {
   }
 }
 
+void SequenceExecutorTask::setAlignHeading(float headingDegContinuous) {
+  alignHeadingDeg_ = headingDegContinuous;
+  alignEnabled_ = true;
+}
+
+void SequenceExecutorTask::clearAlignHeading() {
+  alignEnabled_ = false;
+  aligning_ = false;
+}
+
 void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) {
   if (!steps_) return;
   ui_.begin();
@@ -52,7 +65,14 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   totalDrivenCm_ = 0.0f;
   lastAvgCm_ = avgTravelCm;
   setState_(State::Running);
-  startStep_(headingDegContinuous, avgTravelCm);
+  if (alignEnabled_) {
+    const float delta = wrapDegDiff180_(alignHeadingDeg_, headingDegContinuous);
+    turn_.begin(headingDegContinuous, delta, kTurnSpeed);
+    stepStartMs_ = millis();
+    aligning_ = true;
+  } else {
+    startStep_(headingDegContinuous, avgTravelCm);
+  }
 }
 
 bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm, float lidarAvgCm) {
@@ -62,6 +82,25 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   if (!steps_) {
     setState_(State::Failed);
     return true;
+  }
+
+  if (aligning_) {
+    ui_.showRunning(lidarAvgCm, totalDrivenCm_, 0, totalSteps_, SequenceExecutorUI::StepLabel::Turn);
+    if (stepTimedOut_()) {
+      ui_.showFailed("Align timeout");
+      setState_(State::Failed);
+      return true;
+    }
+    const bool done = turn_.update(headingDegContinuous);
+    if (!done) return false;
+    if (turn_.timedOut() || !turn_.succeeded()) {
+      ui_.showFailed("Align failed");
+      setState_(State::Failed);
+      return true;
+    }
+    aligning_ = false;
+    startStep_(headingDegContinuous, avgTravelCm);
+    return false;
   }
 
   const SequenceStep& step = steps_[stepIndex_];
@@ -176,4 +215,11 @@ void SequenceExecutorTask::startTurn_(float headingDegContinuous) {
 
 bool SequenceExecutorTask::stepTimedOut_() const {
   return (millis() - stepStartMs_) >= kStepTimeoutMs;
+}
+
+float SequenceExecutorTask::wrapDegDiff180_(float targetDeg, float currentDeg) {
+  float d = targetDeg - currentDeg;
+  while (d > 180.0f)  d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  return d;
 }

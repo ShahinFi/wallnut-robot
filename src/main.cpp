@@ -29,13 +29,13 @@ static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
 static uint32_t        lastEncDbgMs = 0;
+static bool            seqHeadingSet = false;
+static float           seqHeadingHoldDeg = 0.0f;
 
 static SequenceStep seqSteps[] = {
-  {SequenceStepType::MoveToDistance, 20.0f},
-  {SequenceStepType::TurnDeg, -90.0f},
-  {SequenceStepType::MoveToDistance, 30.0f},
-  {SequenceStepType::TurnDeg, 40.0f},
-  {SequenceStepType::MoveToDistance, 50.0f},
+  {SequenceStepType::MoveToDistance, 34.5f},
+  {SequenceStepType::TurnDeg, 90.0f},
+  {SequenceStepType::MoveToDistance, 27.2f},
   {SequenceStepType::End, 0.0f}
 };
 
@@ -85,7 +85,7 @@ void setup() {
   seqExecTask.setSequence(seqSteps);
   seqExecTask.reset();
 
-  Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'q' exec.");
+  Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
 }
 
 void loop() {
@@ -165,6 +165,12 @@ void loop() {
       OdometryData od = odom.read();
       encCalTask.begin(heading.headingDegContinuous, od.avgCm);
     }
+    if (c == 'h' || c == 'H') {
+      seqHeadingHoldDeg = heading.headingDegContinuous;
+      seqHeadingSet = true;
+      Serial.print("Seq heading set: ");
+      Serial.println(seqHeadingHoldDeg, 2);
+    }
     if (c == 'q' || c == 'Q') {
       if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
@@ -174,7 +180,12 @@ void loop() {
       if (encCalTask.active()) encCalTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+      if (!seqHeadingSet) {
+        Serial.println("Seq heading not set. Press 'h' first.");
+      } else {
+        seqExecTask.setAlignHeading(seqHeadingHoldDeg);
+        seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+      }
     }
     if (c == 'c' || c == 'C') {
       if (followTask.active()) followTask.cancel();
