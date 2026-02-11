@@ -14,6 +14,7 @@
 #include "tasks/sequence_executor/sequence_executor_task.h"
 #include "esp/esp_uart.h"
 #include "telemetry/telemetry.h"
+#include "telemetry/telemetry_test.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
@@ -70,7 +71,7 @@ void setup() {
   lcdInit();
   encoderInit();
   espSetup();
-  telemetryInit(1000);
+  telemetryInit(200);
 
   // --- Odometry (set your pulses/meter) ---
   odom.setPulsesPerMeter(787.0f);
@@ -116,6 +117,7 @@ void loop() {
 
   const float lidarFilteredCm = lidarAvg.average();
   telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel);
+  telemetryTestUpdate(lidarFilteredCm);
 
   EspCommand espCmd;
   if (espPoll(espCmd)) {
@@ -249,6 +251,9 @@ void loop() {
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
+    }
+    if (c == 't' || c == 'T') {
+      telemetryTestStart();
     }
   }
 

@@ -6,6 +6,7 @@
 const char* ssid = "Titenet-IoT";
 const char* password = "7kDtaphg";
 String lidarData = "0 cm";
+String lidarPacket = "LIDAR:0,SEQ:0,T:0";
 String compassData = "0,N";
 
 ESP8266WebServer server(80);
@@ -86,7 +87,11 @@ void loop() {
   if (Serial.available() > 0) {
     String data = Serial.readStringUntil('\n');
     if (data.startsWith("LIDAR:")) {
-      lidarData = data.substring(6);
+      lidarPacket = data;
+      String payload = lidarPacket;
+      int comma = payload.indexOf(',');
+      if (comma >= 0) payload = payload.substring(0, comma);
+      lidarData = payload;
     } else if (data.startsWith("COMPASS:")) {
       compassData = data.substring(8);
     }
@@ -146,7 +151,7 @@ void handleNorth() {
 }
 
 void handleLidar() {
-  server.send(200, "text/plain", lidarData);
+  server.send(200, "text/plain", lidarPacket);
 }
 
 void handleCompassData() {

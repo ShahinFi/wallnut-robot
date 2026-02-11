@@ -46,19 +46,63 @@ function faceNorth() {
 
 // Lidar polling
 const lidarValueEl = document.getElementById("lidarValue");
+
 async function pollLidar() {
   try {
     const res = await fetch("/lidar");
     if (!res.ok) return;
     const text = await res.text();
-    if (lidarValueEl) lidarValueEl.innerText = text.trim();
+    const trimmed = text.trim();
+    // Expected format: LIDAR:<cm>,SEQ:<n>,T:<ms>
+    let display = trimmed;
+    if (trimmed.includes(",")) {
+      const first = trimmed.split(",")[0];
+      if (first.startsWith("LIDAR:")) {
+        display = first.substring(6);
+      }
+    } else if (trimmed.startsWith("LIDAR:")) {
+      display = trimmed.substring(6);
+    }
+    if (lidarValueEl) lidarValueEl.innerText = display.trim() + " cm";
+
+    // Console-only stats
+    if (trimmed.includes("SEQ:") && trimmed.includes("T:")) {
+      const parts = trimmed.split(",");
+      const seqStr = parts[1].split(":")[1];
+      const tStr = parts[2].split(":")[1];
+      const seq = parseInt(seqStr, 10);
+      const t = parseInt(tStr, 10);
+      if (!isNaN(seq)) {
+        if (window._lastSeq !== undefined && seq > window._lastSeq + 1) {
+          window._dropCount = (window._dropCount || 0) + (seq - window._lastSeq - 1);
+        }
+        window._lastSeq = seq;
+      }
+      if (!isNaN(t)) {
+        window._recvCount = (window._recvCount || 0) + 1;
+        window._lastTs = t;
+      }
+    }
   } catch (e) {
     // ignore transient errors
   }
 }
 
-setInterval(pollLidar, 1000);
+setInterval(pollLidar, 20);
 pollLidar();
+
+// Console-only summary every 5s
+setInterval(() => {
+  const recv = window._recvCount || 0;
+  const drop = window._dropCount || 0;
+  const now = Date.now();
+  if (!window._startTs) window._startTs = now;
+  const elapsed = (now - window._startTs) / 1000.0;
+  if (elapsed <= 0) return;
+  const hz = recv / elapsed;
+  const dropsPct = (recv + drop) > 0 ? (drop / (recv + drop)) * 100.0 : 0;
+  console.log(`WEB rate ${hz.toFixed(1)} Hz, drops ${dropsPct.toFixed(1)}%`);
+}, 5000);
 
 // Compass polling
 const compassWebValueEl = document.getElementById("compassWebValue");
