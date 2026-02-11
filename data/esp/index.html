@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wroom Wroom!</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="favicon.ico" />
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <h1>Motor Control</h1>
+    <div class="container">
+      <button class="button" onclick="forwards5()">FORWARDS<br />5cm</button>
+      <button class="button" onclick="forwards20()">FORWARDS<br />20cm</button>
+      <button class="button button2" onclick="backwards5()">BACKWARDS<br />5cm</button>
+      <button class="button button2" onclick="backwards20()">BACKWARDS<br />20cm</button>
+    </div>
+
+    <h1>Compass Control</h1>
+    <input type="range" min="-360" max="360" step="5" id="compassSlider" oninput="updateCompass(this.value)" onchange="sendCompassValue(this.value)" value="0" />
+    <div id="compassValue">0°</div>
+
+    <div class="north-container">
+      <button class="button button-round" onclick="faceNorth()">Face North</button>
+    </div>
+  </body>
+</html>
