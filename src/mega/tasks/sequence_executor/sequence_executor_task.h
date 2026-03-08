@@ -39,6 +39,7 @@ private:
   void startTurn_(float headingDegContinuous);
   bool stepTimedOut_() const;
   static float wrapDegDiff180_(float targetDeg, float currentDeg);
+  bool handleMoveGuard_(float headingDegContinuous, float avgTravelCm, float lidarAvgCm);
 
   const SequenceStep* steps_;
   uint16_t stepIndex_;
@@ -60,4 +61,8 @@ private:
   bool  alignEnabled_; 
   bool  aligning_;
   float alignHeadingDeg_;
+
+  enum class MoveGuardState : uint8_t { None, Turning };
+  MoveGuardState moveGuardState_;
+  uint8_t moveGuardTurnsDone_;
 };

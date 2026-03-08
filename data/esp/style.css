@@ -119,6 +119,20 @@ html {
   color: #46aaff;
 }
 
+.warning {
+  margin-top: 6px;
+  padding: 6px 12px;
+  border: 2px solid #d60000;
+  color: #d60000;
+  font-weight: bold;
+  border-radius: 6px;
+  background: #fff2f2;
+}
+
+.hidden {
+  display: none;
+}
+
 .compass-box {
   margin-top: 20px;
   display: flex;

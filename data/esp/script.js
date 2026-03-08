@@ -46,6 +46,7 @@ function faceNorth() {
 
 // Lidar polling
 const lidarValueEl = document.getElementById("lidarValue");
+const lidarWarningEl = document.getElementById("lidarWarning");
 
 async function pollLidar() {
   try {
@@ -64,6 +65,15 @@ async function pollLidar() {
       display = trimmed.substring(6);
     }
     if (lidarValueEl) lidarValueEl.innerText = display.trim() + " cm";
+
+    const dist = parseFloat(display);
+    if (lidarWarningEl) {
+      if (!isNaN(dist) && dist < 10) {
+        lidarWarningEl.classList.remove("hidden");
+      } else {
+        lidarWarningEl.classList.add("hidden");
+      }
+    }
 
     // Console-only stats
     if (trimmed.includes("SEQ:") && trimmed.includes("T:")) {
