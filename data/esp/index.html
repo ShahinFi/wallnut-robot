@@ -9,40 +9,72 @@
     <script src="script.js" defer></script>
   </head>
   <body>
-    <h1>Motor Control</h1>
-    <div class="container">
-      <button class="button" onclick="forwards5()">FORWARDS<br />5cm</button>
-      <button class="button" onclick="forwards20()">FORWARDS<br />20cm</button>
-      <button class="button button2" onclick="backwards5()">BACKWARDS<br />5cm</button>
-      <button class="button button2" onclick="backwards20()">BACKWARDS<br />20cm</button>
-    </div>
+    <div class="app">
+      <header class="top">
+        <div>
+          <div class="tag">AUTONOMOUS ROBOT CONTROL</div>
+          <h1>ROVER COMMAND INTERFACE</h1>
+          <div class="sub">navigation & sensor dashboard</div>
+        </div>
+      </header>
 
-    <h1>Compass Control</h1>
-    <input type="range" min="-360" max="360" step="5" id="compassSlider" oninput="updateCompass(this.value)" onchange="sendCompassValue(this.value)" value="0" />
-    <div id="compassValue">0°</div>
+      <main class="grid">
+        <section class="panel drive">
+          <h2>Movement</h2>
+          <div class="container">
+            <button class="button fwd" onclick="forwards5()">FORWARD<br />5cm</button>
+            <button class="button fwd" onclick="forwards20()">FORWARD<br />20cm</button>
+            <button class="button back" onclick="backwards5()">BACKWARD<br />5cm</button>
+            <button class="button back" onclick="backwards20()">BACKWARD<br />20cm</button>
+          </div>
+        </section>
 
-    <div class="north-container">
-      <button class="button button-round" onclick="faceNorth()">Face North</button>
-    </div>
+        <section class="panel turn">
+          <h2>Turning</h2>
+          <label class="label" for="compassSlider">Turn Angle</label>
+          <input
+            type="range"
+            min="-360"
+            max="360"
+            step="5"
+            id="compassSlider"
+            oninput="updateCompass(this.value)"
+            onchange="sendCompassValue(this.value)"
+            value="0"
+          />
+          <div id="compassValue">0°</div>
 
-    <h1>Lidar</h1>
-    <div class="lidar-box">
-      <div class="lidar-label">LIDAR</div>
-      <div id="lidarValue">-- cm</div>
-      <div id="lidarWarning" class="warning hidden">Warning!</div>
-    </div>
+          <div class="north-container">
+            <button class="button button-round" onclick="faceNorth()">FACE NORTH</button>
+          </div>
+        </section>
 
-    <h1>Compass</h1>
-    <div class="compass-box">
-      <div class="compass-label">COMPASS</div>
-      <div id="compassWebValue">--</div>
-    </div>
+        <section class="panel sensor">
+          <h2>Lidar</h2>
+          <div class="readout">
+            <div class="mini-label">DISTANCE</div>
+            <div id="lidarValue">-- cm</div>
+            <div id="lidarWarning" class="warning hidden">Warning!</div>
+          </div>
+        </section>
 
-    <h1>Color</h1>
-    <div class="color-box">
-      <div class="color-label">RGB</div>
-      <div id="colorValue">--</div>
-      <div id="colorSwatch" class="color-swatch"></div>
+        <section class="panel sensor">
+          <h2>Compass</h2>
+          <div class="readout">
+            <div class="mini-label">HEADING</div>
+            <div id="compassWebValue">--</div>
+          </div>
+        </section>
+
+        <section class="panel sensor">
+          <h2>Color Sensor</h2>
+          <div class="readout">
+            <div class="mini-label">RGB</div>
+            <div id="colorValue">--</div>
+            <div id="colorSwatch" class="color-swatch"></div>
+          </div>
+        </section>
+      </main>
     </div>
   </body>
 </html>

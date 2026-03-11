@@ -1,180 +1,350 @@
-html {
-  font-family: Helvetica; /* The text will be in a nice, clean font called Helvetica */
-  display: flex; /* We make everything flexible, like stretching playdough */
-  justify-content: left; /* All the stuff inside will be pushed to the left side */
-  height: 100vh; /* The page will be as tall as your whole screen */
-  margin: 0; /* No extra space around the page’s edges */
-  text-align: center; /* All the words inside will be in the middle */
-  box-sizing: border-box; /* We include the border in the size, like wrapping a gift tightly */
+:root {
+  --bg1: #07030f;
+  --bg2: #170a2b;
+  --panel: rgba(18, 10, 34, 0.88);
+  --line: rgba(255, 255, 255, 0.08);
+
+  --pink: #ff4fd8;
+  --hot: #ff2fa8;
+  --cyan: #58f3ff;
+  --purple: #9b6bff;
+  --yellow: #ffd76a;
+  --text: #fff4fd;
+  --muted: #cfc2eb;
+  --danger: #ff5f87;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: Arial, Helvetica, sans-serif;
+  color: var(--text);
+  background:
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px),
+    radial-gradient(circle at top, #2a1244 0%, var(--bg2) 35%, var(--bg1) 100%);
+  background-size: 32px 32px, 32px 32px, auto;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.app {
+  width: min(1200px, calc(100vw - 20px));
+  margin: 0 auto;
+  padding: 10px;
+}
+
+.top,
+.panel {
+  background: var(--panel);
+  border: 1px solid rgba(255, 79, 216, 0.28);
+  border-radius: 22px;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+}
+
+.top {
+  padding: 18px 20px;
+  margin-bottom: 10px;
+  position: relative;
+  overflow: hidden;
+}
+
+.tag,
+.sub,
+h1,
+h2 {
+  margin: 0;
+}
+
+.tag {
+  color: var(--cyan);
+  font-size: 12px;
+  letter-spacing: .28em;
+  margin-bottom: 8px;
+}
+
+h1 {
+  font-size: clamp(28px, 5vw, 48px);
+  line-height: 1;
+  text-shadow: 0 0 14px rgba(255, 79, 216, 0.45);
+}
+
+.sub {
+  margin-top: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  grid-template-areas:
+    "drive turn lidar"
+    "drive turn compass"
+    "drive turn color";
+}
+
+.drive { grid-area: drive; }
+.turn { grid-area: turn; }
+.grid > .panel:nth-child(3) { grid-area: lidar; }
+.grid > .panel:nth-child(4) { grid-area: compass; }
+.grid > .panel:nth-child(5) { grid-area: color; }
+
+.panel {
+  padding: 16px;
+}
+
+h2 {
+  font-size: 14px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 14px;
 }
 
 .container {
-  display: flex; /* The container inside will also stretch, like playdough */
-  flex-wrap: wrap; /* If there's too much inside, it will wrap onto the next line */
-  justify-content: center; /* Everything inside will be centered */
-  gap: 15px; /* Leave a little space between the buttons */
-  max-width: 400px; /* The container will not get too wide, like a small box */
-  margin-top: 20px; /* Move the container down a little from the top */
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
 
 .button {
-  user-select: none; /* You can't accidentally select the button with your mouse */
-  background-color: #46ff46; /* The button will be green */
-  border: none; /* No border around the button */
-  color: #555555; /* The text on the button will be dark grey */
-  padding: 12px 28px; /* The button will have some space inside, like a pillow */
-  font-size: 24px; /* The words on the button will be big and easy to read */
-  cursor: pointer; /* The mouse pointer will turn into a hand when you hover over it */
-  width: 190px; /* The button will be a specific width */
-  height: 100px; /* The button will be a certain height, like a big rectangle */
-  display: flex; /* The button will stretch like playdough again */
-  align-items: center; /* The words will be centered inside the button */
-  justify-content: center; /* The words will be in the middle of the button */
-  text-align: center; /* The text inside the button will be centered */
-  border-radius: 5px; /* The corners of the button will be rounded, not sharp */
+  border: 0;
+  cursor: pointer;
+  color: white;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-align: center;
+  padding: 18px 14px;
+  min-height: 110px;
+  clip-path: polygon(12% 0, 100% 0, 88% 100%, 0 100%);
+  transition: transform .12s ease, box-shadow .12s ease;
+  box-shadow: 0 10px 20px rgba(0,0,0,.3);
 }
 
-.button2 {
-  background-color: #555555; /* This button will have a dark grey color */
-  color: #46ff46; /* The text will be bright green */
+.button:hover {
+  transform: translateY(-2px);
+}
+
+.button:active {
+  transform: scale(.98);
+}
+
+.fwd {
+  background: linear-gradient(135deg, rgba(88,243,255,.95), rgba(78,111,255,.75));
+  color: #12081f;
+  box-shadow: 0 0 20px rgba(88,243,255,.28), 0 10px 20px rgba(0,0,0,.3);
+}
+
+.back {
+  background: linear-gradient(135deg, rgba(255,79,216,.95), rgba(155,107,255,.75));
+  box-shadow: 0 0 20px rgba(255,79,216,.28), 0 10px 20px rgba(0,0,0,.3);
+}
+
+.label,
+.mini-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  font-size: 12px;
+}
+
+.label {
+  display: block;
+  margin-bottom: 12px;
 }
 
 #compassSlider {
-  width: 100%; /* The slider will stretch across the whole screen */
-  height: 15px; /* The slider will be nice and tall */
-  display: flex; /* The slider will stretch like playdough */
-  justify-content: center; /* Center the slider on the screen */
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  margin: 6px 0 0;
 }
 
-#compassSlider::-webkit-slider-runnable-track,
+#compassSlider::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--pink), var(--purple), var(--cyan));
+  border: 1px solid rgba(255,255,255,.16);
+}
+
 #compassSlider::-moz-range-track {
-  width: 98%; /* The track will be almost as wide as the slider */
-  height: 5px; /* The track will be thin, like a pencil line */
-  cursor: pointer; /* You can click and drag the slider */
-  background: #ebebeb; /* The track will be a light grey color */
-  border: 1px solid #555555; /* The track will have a little dark border */
-  border-radius: 5px; /* The edges of the track will be rounded */
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--pink), var(--purple), var(--cyan));
+  border: 1px solid rgba(255,255,255,.16);
 }
 
-#compassSlider::-webkit-slider-thumb,
+#compassSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  margin-top: -9px;
+  border-radius: 50%;
+  border: 2px solid white;
+  background: radial-gradient(circle at 30% 30%, white, #ffd7f3 28%, var(--hot) 70%);
+  box-shadow: 0 0 18px rgba(255,79,216,.5);
+}
+
 #compassSlider::-moz-range-thumb {
-  border: 2px solid #555555; /* The circle you drag will have a dark border */
-  height: 20px; /* The circle you drag will be 20px tall */
-  width: 20px; /* The circle will be 20px wide */
-  border-radius: 50%; /* The circle will be round, like a ball */
-  background: #46ff46; /* The circle will be bright green */
-  cursor: pointer; /* You can click and drag the circle */
-  margin-top: -1px; /* Move the circle up slightly so it fits on the track */
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid white;
+  background: radial-gradient(circle at 30% 30%, white, #ffd7f3 28%, var(--hot) 70%);
+  box-shadow: 0 0 18px rgba(255,79,216,.5);
+}
+
+#compassValue,
+#lidarValue,
+#compassWebValue,
+#colorValue {
+  font-weight: 900;
+  text-align: center;
 }
 
 #compassValue {
-  font-size: 1.5em; /* The font size showing the compass value will be big-ish */
-  margin-top: 10px; /* Leave some space above the number */
-  margin-left: 5px; /* Leave a tiny bit of space on the left of the number */
-  width: 100%; /* The box for the number will be as wide as the whole screen */
-  text-align: center; /* The number will be in the middle */
+  font-size: 34px;
+  color: var(--cyan);
+  margin-top: 14px;
+  text-shadow: 0 0 14px rgba(88,243,255,.35);
 }
 
 .north-container {
   display: flex;
   justify-content: center;
-  margin-top: 30px;
+  margin-top: 18px;
 }
 
 .button-round {
-  background-color: #46aaff; /* nice blue tone to stand out */
-  color: white;
-  border: none;
-  border-radius: 50%; /* makes it round */
-  width: 120px;
-  height: 120px;
-  font-size: 20px;
-  font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  transition: transform 0.1s ease-in-out, background-color 0.2s;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  clip-path: none;
+  padding: 0 10px;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,.35), transparent 28%),
+    radial-gradient(circle, rgba(255,215,106,.22), rgba(255,79,216,.18) 58%, rgba(16,8,26,.98) 100%);
+  border: 1px solid rgba(255,215,106,.5);
+  box-shadow:
+    0 0 24px rgba(255,215,106,.22),
+    0 0 20px rgba(255,79,216,.16);
 }
 
-.button-round:hover {
-  background-color: #3399ff;
-  transform: scale(1.05);
-}
-
-.lidar-box {
-  margin-top: 20px;
+.readout {
+  min-height: 190px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
-  gap: 6px;
-}
-
-.lidar-label {
-  font-size: 18px;
-  color: #555555;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  padding: 14px;
 }
 
 #lidarValue {
-  font-size: 32px;
-  font-weight: bold;
-  color: #46aaff;
+  font-size: clamp(32px, 4vw, 44px);
+  color: var(--yellow);
+  text-shadow: 0 0 14px rgba(255,215,106,.3);
+}
+
+#compassWebValue {
+  font-size: clamp(28px, 3.5vw, 40px);
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(88,243,255,.3);
+}
+
+#colorValue {
+  font-size: 20px;
+  color: var(--text);
+}
+
+.color-swatch {
+  width: 100px;
+  height: 100px;
+  border-radius: 16px;
+  border: 2px solid rgba(88,243,255,.4);
+  background: rgb(0, 0, 0);
+  box-shadow: 0 0 18px rgba(88,243,255,.16);
 }
 
 .warning {
-  margin-top: 6px;
-  padding: 6px 12px;
-  border: 2px solid #d60000;
-  color: #d60000;
-  font-weight: bold;
-  border-radius: 6px;
-  background: #fff2f2;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: white;
+  background: rgba(255,95,135,.18);
+  border: 1px solid rgba(255,95,135,.7);
+  font-weight: 800;
 }
 
 .hidden {
   display: none;
 }
 
-.compass-box {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+@media (max-width: 980px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "drive turn"
+      "lidar compass"
+      "color color";
+  }
 }
 
-.compass-label {
-  font-size: 18px;
-  color: #555555;
+@media (max-width: 680px) {
+  .grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "drive"
+      "turn"
+      "lidar"
+      "compass"
+      "color";
+  }
+
+  .container {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
-#compassWebValue {
-  font-size: 32px;
-  font-weight: bold;
-  color: #46ff46;
-}
+@media (max-width: 480px) {
+  .app {
+    width: calc(100vw - 12px);
+    padding: 6px;
+  }
 
-.color-box {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
+  .container {
+    grid-template-columns: 1fr;
+  }
 
-.color-label {
-  font-size: 18px;
-  color: #555555;
-}
+  .button {
+    min-height: 86px;
+    clip-path: polygon(8% 0, 100% 0, 92% 100%, 0 100%);
+  }
 
-#colorValue {
-  font-size: 20px;
-  font-weight: bold;
-  color: #555555;
-}
+  .button-round {
+    width: 112px;
+    height: 112px;
+  }
 
-.color-swatch {
-  width: 100px;
-  height: 100px;
-  border: 2px solid #555555;
-  border-radius: 6px;
-  background: rgb(0, 0, 0);
+  .readout {
+    min-height: 160px;
+  }
 }
