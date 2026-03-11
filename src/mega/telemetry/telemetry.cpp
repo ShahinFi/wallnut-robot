@@ -2,10 +2,14 @@
 
 static uint32_t gIntervalMs = 1000;
 static uint32_t gLastSendMs = 0;
+static uint32_t gRgbIntervalMs = 1000;
+static uint32_t gRgbLastSendMs = 0;
 
 void telemetryInit(uint32_t intervalMs) {
   gIntervalMs = intervalMs;
   gLastSendMs = 0;
+  gRgbIntervalMs = intervalMs;
+  gRgbLastSendMs = 0;
 }
 
 static bool shouldSendNow() {
@@ -23,4 +27,21 @@ void telemetryUpdate(float lidarCm, int headingDeg, const char* headingLabel) {
   Serial3.print(headingDeg);
   Serial3.print(",");
   Serial3.println(headingLabel ? headingLabel : "");
+}
+
+static bool shouldSendRgbNow() {
+  const uint32_t now = millis();
+  if (now - gRgbLastSendMs < gRgbIntervalMs) return false;
+  gRgbLastSendMs = now;
+  return true;
+}
+
+void telemetryRgbUpdate(uint8_t r, uint8_t g, uint8_t b) {
+  if (!shouldSendRgbNow()) return;
+  Serial3.print("RGB:");
+  Serial3.print(r);
+  Serial3.print(",");
+  Serial3.print(g);
+  Serial3.print(",");
+  Serial3.println(b);
 }

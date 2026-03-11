@@ -151,3 +151,30 @@ html {
   font-weight: bold;
   color: #46ff46;
 }
+
+.color-box {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-label {
+  font-size: 18px;
+  color: #555555;
+}
+
+#colorValue {
+  font-size: 20px;
+  font-weight: bold;
+  color: #555555;
+}
+
+.color-swatch {
+  width: 100px;
+  height: 100px;
+  border: 2px solid #555555;
+  border-radius: 6px;
+  background: rgb(0, 0, 0);
+}

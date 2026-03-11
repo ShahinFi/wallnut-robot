@@ -15,6 +15,7 @@
 #include "esp/esp_uart.h"
 #include "telemetry/telemetry.h"
 #include "telemetry/telemetry_test.h"
+#include "color/color_sensor.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
@@ -31,6 +32,8 @@ static WallAlign90Task wallAlignTask;
 static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
+static ColorSensor     colorSensor;
+static uint32_t        lastRgbMs = 0;
 static uint32_t        lastEncDbgMs = 0;
 static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
@@ -64,6 +67,10 @@ void setup() {
 
   if (!lidar.begin()) {
     Serial.println("LiDAR failed");
+    while (1) {}
+  }
+  if (!colorSensor.begin()) {
+    Serial.println("Color sensor failed");
     while (1) {}
   }
 
@@ -118,6 +125,15 @@ void loop() {
   const float lidarFilteredCm = lidarAvg.average();
   telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel);
   telemetryTestUpdate(lidarFilteredCm);
+
+  const uint32_t nowMs = millis();
+  if (nowMs - lastRgbMs >= 200U) {
+    lastRgbMs = nowMs;
+    ColorRgb rgb;
+    if (colorSensor.read(rgb)) {
+      telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
+    }
+  }
 
   EspCommand espCmd;
   if (espPoll(espCmd)) {

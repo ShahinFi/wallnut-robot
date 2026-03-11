@@ -116,6 +116,8 @@ setInterval(() => {
 
 // Compass polling
 const compassWebValueEl = document.getElementById("compassWebValue");
+const colorValueEl = document.getElementById("colorValue");
+const colorSwatchEl = document.getElementById("colorSwatch");
 async function pollCompass() {
   try {
     const res = await fetch("/compassdata");
@@ -134,3 +136,28 @@ async function pollCompass() {
 
 setInterval(pollCompass, 1000);
 pollCompass();
+
+// RGB polling
+async function pollRgb() {
+  try {
+    const res = await fetch("/rgb");
+    if (!res.ok) return;
+    const text = await res.text();
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("RGB:")) return;
+    const parts = trimmed.substring(4).split(",");
+    if (parts.length < 3) return;
+    const r = parseInt(parts[0], 10);
+    const g = parseInt(parts[1], 10);
+    const b = parseInt(parts[2], 10);
+    if ([r, g, b].some((v) => isNaN(v))) return;
+
+    if (colorValueEl) colorValueEl.innerText = `RGB ${r}, ${g}, ${b}`;
+    if (colorSwatchEl) colorSwatchEl.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+  } catch (e) {
+    // ignore transient errors
+  }
+}
+
+setInterval(pollRgb, 200);
+pollRgb();

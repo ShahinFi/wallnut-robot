@@ -8,6 +8,7 @@ const char* password = "7kDtaphg";
 String lidarData = "0 cm";
 String lidarPacket = "LIDAR:0,SEQ:0,T:0";
 String compassData = "0,N";
+String rgbPacket = "RGB:0,0,0";
 
 ESP8266WebServer server(80);
 
@@ -18,6 +19,7 @@ void handleNorth();
 void handleCompass();
 void handleLidar();
 void handleCompassData();
+void handleRgb();
 void listAllFiles();
 
 void setup() {
@@ -75,6 +77,7 @@ void setup() {
   server.on("/north", []() { handleNorth(); });
   server.on("/lidar", handleLidar);
   server.on("/compassdata", handleCompassData);
+  server.on("/rgb", handleRgb);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -94,6 +97,8 @@ void loop() {
       lidarData = payload;
     } else if (data.startsWith("COMPASS:")) {
       compassData = data.substring(8);
+    } else if (data.startsWith("RGB:")) {
+      rgbPacket = data;
     }
   }
 }
@@ -156,4 +161,8 @@ void handleLidar() {
 
 void handleCompassData() {
   server.send(200, "text/plain", compassData);
+}
+
+void handleRgb() {
+  server.send(200, "text/plain", rgbPacket);
 }
