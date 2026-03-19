@@ -11,6 +11,8 @@ String compassData = "0,N";
 String rgbPacket = "RGB:0,0,0";
 
 ESP8266WebServer server(80);
+static String serialLineBuf;
+static const size_t kMaxSerialLineLen = 128;
 
 // ====== Function Declarations ======
 void handleNotFound();
@@ -21,9 +23,11 @@ void handleLidar();
 void handleCompassData();
 void handleRgb();
 void listAllFiles();
+void processSerialLine(const String& data);
+void pollSerialNonBlocking();
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println();
   Serial.println("Booting...");
 
@@ -86,20 +90,39 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  pollSerialNonBlocking();
+}
 
-  if (Serial.available() > 0) {
-    String data = Serial.readStringUntil('\n');
-    if (data.startsWith("LIDAR:")) {
-      lidarPacket = data;
-      String payload = lidarPacket;
-      int comma = payload.indexOf(',');
-      if (comma >= 0) payload = payload.substring(0, comma);
-      lidarData = payload;
-    } else if (data.startsWith("COMPASS:")) {
-      compassData = data.substring(8);
-    } else if (data.startsWith("RGB:")) {
-      rgbPacket = data;
+void processSerialLine(const String& data) {
+  if (data.startsWith("LIDAR:")) {
+    lidarPacket = data;
+    String payload = lidarPacket;
+    int comma = payload.indexOf(',');
+    if (comma >= 0) payload = payload.substring(0, comma);
+    lidarData = payload;
+  } else if (data.startsWith("COMPASS:")) {
+    compassData = data.substring(8);
+  } else if (data.startsWith("RGB:")) {
+    rgbPacket = data;
+  }
+}
+
+void pollSerialNonBlocking() {
+  while (Serial.available() > 0) {
+    const char c = static_cast<char>(Serial.read());
+    if (c == '\n' || c == '\r') {
+      if (serialLineBuf.length() > 0) {
+        processSerialLine(serialLineBuf);
+        serialLineBuf = "";
+      }
+      continue;
     }
+
+    if (serialLineBuf.length() >= kMaxSerialLineLen) {
+      serialLineBuf = "";
+      continue;
+    }
+    serialLineBuf += c;
   }
 }
 

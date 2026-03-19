@@ -33,6 +33,7 @@ static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
 static ColorSensor     colorSensor;
+static bool            colorSensorOk = false;
 static uint32_t        lastRgbMs = 0;
 static uint32_t        lastEncDbgMs = 0;
 static bool            seqHeadingSet = false;
@@ -58,6 +59,7 @@ static SequenceStep seqSteps[] = {
 
 void setup() {
   Serial.begin(115200);
+  lcdInit();
 
   // --- Hardware ---
   if (!compass.begin()) {
@@ -69,13 +71,12 @@ void setup() {
     Serial.println("LiDAR failed");
     while (1) {}
   }
-  if (!colorSensor.begin()) {
-    Serial.println("Color sensor failed");
-    while (1) {}
+  colorSensorOk = colorSensor.begin();
+  if (!colorSensorOk) {
+    Serial.println("Color sensor failed (continuing without RGB telemetry)");
   }
 
   motorInit();
-  lcdInit();
   encoderInit();
   espSetup();
   telemetryInit(200);
@@ -127,7 +128,7 @@ void loop() {
   telemetryTestUpdate(lidarFilteredCm);
 
   const uint32_t nowMs = millis();
-  if (nowMs - lastRgbMs >= 200U) {
+  if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
     lastRgbMs = nowMs;
     ColorRgb rgb;
     if (colorSensor.read(rgb)) {

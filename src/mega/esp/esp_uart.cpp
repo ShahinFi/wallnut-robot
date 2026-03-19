@@ -3,7 +3,7 @@
 static String espInput;
 
 void espSetup() {
-  Serial3.begin(9600);
+  Serial3.begin(115200);
 }
 
 static bool parseLine(const String& line, EspCommand& out) {
