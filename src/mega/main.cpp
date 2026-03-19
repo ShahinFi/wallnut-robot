@@ -36,6 +36,8 @@ static ColorSensor     colorSensor;
 static bool            colorSensorOk = false;
 static uint32_t        lastRgbMs = 0;
 static uint32_t        lastEncDbgMs = 0;
+static bool            headingValid = false;
+static CompassData     lastHeading = {};
 static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
 static SequenceStep espSteps[] = {
@@ -115,7 +117,13 @@ void setup() {
 void loop() {
   // ---- Compass (continuous heading) ----
   CompassData heading;
-  if (!compass.read(heading)) return;
+  if (!compass.read(heading)) {
+    if (!headingValid) return;
+    heading = lastHeading;
+  } else {
+    lastHeading = heading;
+    headingValid = true;
+  }
 
   // ---- LiDAR (moving averaged) ----
   float lidarCm = 0.0f;

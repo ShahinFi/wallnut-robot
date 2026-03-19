@@ -6,17 +6,19 @@ namespace {
 const float    kToleranceCm    = 2.0f;
 const float    kMinValidCm     = 5.0f;
 const float    kMaxValidCm     = 800.0f;
-const float    kMoveSpeed      = 0.9f;
+const float    kMoveSpeed      = 1.0f;
 const float    kTurnSpeed      = 0.6f;
 const uint32_t kStepTimeoutMs  = 300000; // 5 minutes per step
 
 // Obstacle-aware MOVE speed policy (ESP MOVE only, TURN unaffected)
 const float kStopDistanceCm  = 10.0f;
+const float kClearDistanceCm = 12.0f;
 const float kSlowDistanceCm  = 30.0f;
-const float kSlowSpeedScale  = 0.30f;
+const float kSlowSpeedScale  = 0.45f;
 const float kFastSpeedScale  = 0.70f;
 const float kGuardTurnDeg    = 90.0f;
 const uint8_t kGuardMaxTurns = 4;
+const uint8_t kGuardClearStreakNeeded = 3;
 
 static float computeMoveSpeedScale(float lidarAvgCm) {
   if (!isfinite(lidarAvgCm)) return 0.0f;
@@ -44,10 +46,12 @@ SequenceExecutorTask::SequenceExecutorTask()
   aligning_(false),
   alignHeadingDeg_(0.0f),
   moveGuardState_(MoveGuardState::None),
-  moveGuardTurnsDone_(0) {
+  moveGuardTurnsDone_(0),
+  moveGuardClearStreak_(0) {
   DriveStraight::Config dcfg = drive_.config();
   dcfg.slowDownCm = 0.0f;
-  dcfg.minSpeed   = kMoveSpeed;
+  // Allow obstacle-based scaling (30%/70%) instead of clamping to full speed.
+  dcfg.minSpeed   = kMoveSpeed * kSlowSpeedScale;
   dcfg.maxSpeed   = kMoveSpeed;
   drive_.setConfig(dcfg);
 }
@@ -76,6 +80,7 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   driveActive_ = false;
   moveGuardState_ = MoveGuardState::None;
   moveGuardTurnsDone_ = 0;
+  moveGuardClearStreak_ = 0;
   stepIndex_ = 0;
   totalDrivenCm_ = 0.0f;
   lastAvgCm_ = avgTravelCm;
@@ -172,6 +177,9 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   if (step.type == SequenceStepType::MoveByDistance) {
     ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Move);
+    if (!driveActive_) {
+      startMove_(headingDegContinuous, avgTravelCm);
+    }
     const float scale = computeMoveSpeedScale(lidarAvgCm);
     const float baseSpeed = (moveByCm_ >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
     drive_.setRequestedSpeed(baseSpeed * scale);
@@ -221,6 +229,7 @@ void SequenceExecutorTask::reset() {
   driveActive_ = false;
   moveGuardState_ = MoveGuardState::None;
   moveGuardTurnsDone_ = 0;
+  moveGuardClearStreak_ = 0;
   ui_.begin();
   ui_.showIdle();
   setState_(State::Idle);
@@ -281,15 +290,32 @@ float SequenceExecutorTask::wrapDegDiff180_(float targetDeg, float currentDeg) {
 bool SequenceExecutorTask::handleMoveGuard_(float headingDegContinuous,
                                             float avgTravelCm,
                                             float lidarAvgCm) {
-  if (lidarAvgCm >= kStopDistanceCm) {
-    moveGuardState_ = MoveGuardState::None;
-    moveGuardTurnsDone_ = 0;
+  const SequenceStep& step = steps_[stepIndex_];
+  const bool forwardMoveBy =
+      (step.type == SequenceStepType::MoveByDistance) && (moveByCm_ > 0.0f);
+
+  // Guard-turn behavior is only for forward MoveByDistance commands.
+  // If too close during other move types, stop movement but do not auto-rotate.
+  if (moveGuardState_ == MoveGuardState::None && !forwardMoveBy) {
+    if (lidarAvgCm < kStopDistanceCm) {
+      drive_.setRequestedSpeed(0.0f);
+      return true;
+    }
     return false;
   }
 
   if (moveGuardState_ == MoveGuardState::None) {
+    if (lidarAvgCm >= kStopDistanceCm) return false;
+
+    // Preserve remaining distance before entering guard turn.
+    if (forwardMoveBy && driveActive_) {
+      const float remaining = drive_.remainingCm();
+      if (isfinite(remaining) && remaining > 0.0f) moveByCm_ = remaining;
+    }
+
     drive_.cancel();
     driveActive_ = false;
+    moveGuardClearStreak_ = 0;
     turn_.begin(headingDegContinuous, kGuardTurnDeg, kTurnSpeed);
     moveGuardState_ = MoveGuardState::Turning;
     return true;
@@ -304,19 +330,28 @@ bool SequenceExecutorTask::handleMoveGuard_(float headingDegContinuous,
     return true;
   }
 
-  moveGuardTurnsDone_++;
-  if (lidarAvgCm >= kStopDistanceCm) {
-    moveGuardState_ = MoveGuardState::None;
-    moveGuardTurnsDone_ = 0;
-    return false;
+  if (lidarAvgCm >= kClearDistanceCm) {
+    if (moveGuardClearStreak_ < 255) moveGuardClearStreak_++;
+    if (moveGuardClearStreak_ >= kGuardClearStreakNeeded) {
+      moveGuardState_ = MoveGuardState::None;
+      moveGuardTurnsDone_ = 0;
+      moveGuardClearStreak_ = 0;
+      startMove_(headingDegContinuous, avgTravelCm);
+      return false;
+    }
+    // Keep checking clear samples without moving.
+    return true;
   }
 
+  moveGuardClearStreak_ = 0;
+  moveGuardTurnsDone_++;
   if (moveGuardTurnsDone_ >= kGuardMaxTurns) {
     ui_.showFailed("Blocked 360");
     setState_(State::Failed);
     return true;
   }
 
+  moveGuardClearStreak_ = 0;
   turn_.begin(headingDegContinuous, kGuardTurnDeg, kTurnSpeed);
   return true;
 }

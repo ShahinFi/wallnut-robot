@@ -65,4 +65,5 @@ private:
   enum class MoveGuardState : uint8_t { None, Turning };
   MoveGuardState moveGuardState_;
   uint8_t moveGuardTurnsDone_;
+  uint8_t moveGuardClearStreak_;
 };
