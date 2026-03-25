@@ -16,6 +16,7 @@
 #include "telemetry/telemetry.h"
 #include "telemetry/telemetry_test.h"
 #include "color/color_sensor.h"
+#include "tasks/color_calibration/color_calibration_task.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
@@ -35,6 +36,8 @@ static SequenceExecutorTask seqExecTask;
 static ColorSensor     colorSensor;
 static bool            colorSensorOk = false;
 static uint32_t        lastRgbMs = 0;
+static ColorRgb        lastRgb = {0, 0, 0};
+static bool            lastRgbValid = false;
 static uint32_t        lastEncDbgMs = 0;
 static bool            headingValid = false;
 static CompassData     lastHeading = {};
@@ -44,6 +47,17 @@ static SequenceStep espSteps[] = {
   {SequenceStepType::End, 0.0f},
   {SequenceStepType::End, 0.0f}
 };
+
+static ColorCalibrationTask colorCalTask;
+
+static const int kButtonPin = 19;
+static const uint32_t kButtonDebounceMs = 250;
+static volatile bool gButtonEdge = false;
+static uint32_t gLastButtonMs = 0;
+
+static void onButtonIsr() {
+  gButtonEdge = true;
+}
 
 static float wrapDegDiff180(float targetDeg, float currentDeg) {
   float d = targetDeg - currentDeg;
@@ -79,6 +93,11 @@ void setup() {
   }
 
   motorInit();
+  pinMode(kButtonPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(kButtonPin), onButtonIsr, FALLING);
+
+  colorCalTask.loadFromEeprom();
+
   encoderInit();
   espSetup();
   telemetryInit(200);
@@ -140,8 +159,39 @@ void loop() {
     lastRgbMs = nowMs;
     ColorRgb rgb;
     if (colorSensor.read(rgb)) {
+      lastRgb = rgb;
+      lastRgbValid = true;
       telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
+    } else {
+      lastRgbValid = false;
     }
+  }
+
+  if (gButtonEdge) {
+    if (nowMs - gLastButtonMs >= kButtonDebounceMs) {
+      gButtonEdge = false;
+      if (digitalRead(kButtonPin) == LOW) {
+        gLastButtonMs = nowMs;
+        if (!colorCalTask.active()) {
+          if (roomTask.active()) roomTask.cancel();
+          if (followTask.active()) followTask.cancel();
+          if (driveStraight.active()) driveStraight.cancel();
+          if (wallAlignTask.active()) wallAlignTask.cancel();
+          if (wallSeqTask.active()) wallSeqTask.cancel();
+          if (encCalTask.active()) encCalTask.cancel();
+          if (seqExecTask.active()) seqExecTask.cancel();
+          motorDrive(0.0f, 0.0f);
+          colorCalTask.begin();
+        } else {
+          colorCalTask.onButtonPress(&lastRgb, lastRgbValid);
+        }
+      }
+    }
+  }
+
+  if (colorCalTask.active()) {
+    colorCalTask.update(&lastRgb, lastRgbValid);
+    return;
   }
 
   EspCommand espCmd;
