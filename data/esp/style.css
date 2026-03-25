@@ -348,3 +348,23 @@ h2 {
     min-height: 160px;
   }
 }
+
+.logout-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.button-outline {
+  min-height: 56px;
+  clip-path: none;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: transparent;
+  color: var(--text);
+  letter-spacing: .18em;
+  box-shadow: none;
+}
+
+.button-outline:hover {
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.2);
+}

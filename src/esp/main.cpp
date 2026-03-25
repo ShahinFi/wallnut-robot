@@ -5,6 +5,11 @@
 // ====== Wi-Fi credentials ======
 const char* ssid = "Titenet-IoT";
 const char* password = "7kDtaphg";
+
+// ====== HTTP Basic Auth ======
+const char* kAuthUser = "robot";
+const char* kAuthPass = "control";
+const char* kAuthRealm = "robot";
 String lidarData = "0 cm";
 String lidarPacket = "LIDAR:0,SEQ:0,T:0";
 String compassData = "0,N";
@@ -22,9 +27,12 @@ void handleCompass();
 void handleLidar();
 void handleCompassData();
 void handleRgb();
+void handleLogout();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
+bool requireAuth();
+void serveFileAuthed(const char* path, const char* contentType);
 
 void setup() {
   Serial.begin(115200);
@@ -58,20 +66,11 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  server.on("/", []() {
-    File file = LittleFS.open("/esp/index.html", "r");
-    if (!file) {
-      server.send(404, "text/plain", "index.html not found");
-      return;
-    }
-    server.streamFile(file, "text/html");
-    file.close();
-  });
-
-  server.serveStatic("/index.html", LittleFS, "/esp/index.html");
-  server.serveStatic("/style.css", LittleFS, "/esp/style.css");
-  server.serveStatic("/script.js", LittleFS, "/esp/script.js");
-  server.serveStatic("/favicon.ico", LittleFS, "/esp/favicon.png");
+  server.on("/", []() { serveFileAuthed("/esp/index.html", "text/html"); });
+  server.on("/index.html", []() { serveFileAuthed("/esp/index.html", "text/html"); });
+  server.on("/style.css", []() { serveFileAuthed("/esp/style.css", "text/css"); });
+  server.on("/script.js", []() { serveFileAuthed("/esp/script.js", "application/javascript"); });
+  server.on("/favicon.ico", []() { serveFileAuthed("/esp/favicon.png", "image/png"); });
 
   server.on("/forwards5", []() { handleMove(5); });
   server.on("/forwards20", []() { handleMove(20); });
@@ -82,6 +81,7 @@ void setup() {
   server.on("/lidar", handleLidar);
   server.on("/compassdata", handleCompassData);
   server.on("/rgb", handleRgb);
+  server.on("/logout", handleLogout);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -150,6 +150,7 @@ void listAllFiles() {
 }
 
 void handleNotFound() {
+  if (!requireAuth()) return;
   String message = "404: Not Found\n\n";
   message += "URI: ";
   message += server.uri();
@@ -159,11 +160,13 @@ void handleNotFound() {
 }
 
 void handleMove(int distance) {
+  if (!requireAuth()) return;
   Serial.println("Move: " + String(distance));
   server.send(200, "text/plain", "Move OK");
 }
 
 void handleCompass() {
+  if (!requireAuth()) return;
   if (server.hasArg("value")) {
     String valueString = server.arg("value");
     Serial.println("Turn: " + valueString);
@@ -174,18 +177,45 @@ void handleCompass() {
 }
 
 void handleNorth() {
+  if (!requireAuth()) return;
   Serial.println("North");
   server.send(200, "text/plain", "North OK");
 }
 
 void handleLidar() {
+  if (!requireAuth()) return;
   server.send(200, "text/plain", lidarPacket);
 }
 
 void handleCompassData() {
+  if (!requireAuth()) return;
   server.send(200, "text/plain", compassData);
 }
 
 void handleRgb() {
+  if (!requireAuth()) return;
   server.send(200, "text/plain", rgbPacket);
+}
+
+void handleLogout() {
+  if (!requireAuth()) return;
+  server.sendHeader("WWW-Authenticate", String("Basic realm=\"") + kAuthRealm + "\"");
+  server.send(401, "text/plain", "Logged out");
+}
+
+bool requireAuth() {
+  if (server.authenticate(kAuthUser, kAuthPass)) return true;
+  server.requestAuthentication(BASIC_AUTH, kAuthRealm);
+  return false;
+}
+
+void serveFileAuthed(const char* path, const char* contentType) {
+  if (!requireAuth()) return;
+  File file = LittleFS.open(path, "r");
+  if (!file) {
+    server.send(404, "text/plain", "File not found");
+    return;
+  }
+  server.streamFile(file, contentType);
+  file.close();
 }

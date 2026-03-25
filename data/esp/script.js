@@ -44,6 +44,12 @@ function faceNorth() {
   console.log("face north");
 }
 
+// Logout
+function logout() {
+  fetch("/logout", { cache: "no-store" });
+  console.log("logout");
+}
+
 // Lidar polling
 const lidarValueEl = document.getElementById("lidarValue");
 const lidarWarningEl = document.getElementById("lidarWarning");
