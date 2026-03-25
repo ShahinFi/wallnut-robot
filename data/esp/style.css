@@ -355,6 +355,12 @@ h2 {
   margin-top: 14px;
 }
 
+.maze-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
 .button-outline {
   min-height: 56px;
   clip-path: none;

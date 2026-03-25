@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 struct EspCommand {
-  enum class Type : uint8_t { None, Move, Turn, North } type;
+  enum class Type : uint8_t { None, Move, Turn, North, Maze } type;
   int value;
 };
 

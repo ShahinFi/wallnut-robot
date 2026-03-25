@@ -28,6 +28,7 @@ void handleLidar();
 void handleCompassData();
 void handleRgb();
 void handleLogout();
+void handleMaze();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
@@ -78,6 +79,7 @@ void setup() {
   server.on("/backwards20", []() { handleMove(-20); });
   server.on("/compass", handleCompass);
   server.on("/north", []() { handleNorth(); });
+  server.on("/maze", handleMaze);
   server.on("/lidar", handleLidar);
   server.on("/compassdata", handleCompassData);
   server.on("/rgb", handleRgb);
@@ -195,6 +197,12 @@ void handleCompassData() {
 void handleRgb() {
   if (!requireAuth()) return;
   server.send(200, "text/plain", rgbPacket);
+}
+
+void handleMaze() {
+  if (!requireAuth()) return;
+  Serial.println("Maze");
+  server.send(200, "text/plain", "Maze OK");
 }
 
 void handleLogout() {

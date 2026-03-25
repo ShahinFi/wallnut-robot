@@ -13,6 +13,7 @@ const int kEepromAddr = 16;
 ColorCalibrationTask::ColorCalibrationTask()
 : state_(State::Idle),
   refs_{},
+  hasCalibration_(false),
   lastUiMs_(0),
   doneStartMs_(0),
   ui_() {}
@@ -82,6 +83,8 @@ void ColorCalibrationTask::onButtonPress(const ColorRgb* live, bool liveValid) {
 
 bool ColorCalibrationTask::active() const { return state_ != State::Idle; }
 ColorCalibrationTask::State ColorCalibrationTask::state() const { return state_; }
+bool ColorCalibrationTask::hasCalibration() const { return hasCalibration_; }
+const ColorRgb* ColorCalibrationTask::refs() const { return refs_; }
 
 void ColorCalibrationTask::setState_(State s) { state_ = s; }
 
@@ -93,13 +96,18 @@ void ColorCalibrationTask::capture_(uint8_t index, const ColorRgb& rgb) {
 bool ColorCalibrationTask::saveToEeprom_() {
   EEPROM.put(kEepromAddr, kEepromMagic);
   EEPROM.put(kEepromAddr + sizeof(kEepromMagic), refs_);
+  hasCalibration_ = true;
   return true;
 }
 
 bool ColorCalibrationTask::loadFromEeprom() {
   uint16_t magic = 0;
   EEPROM.get(kEepromAddr, magic);
-  if (magic != kEepromMagic) return false;
+  if (magic != kEepromMagic) {
+    hasCalibration_ = false;
+    return false;
+  }
   EEPROM.get(kEepromAddr + sizeof(kEepromMagic), refs_);
+  hasCalibration_ = true;
   return true;
 }

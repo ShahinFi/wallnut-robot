@@ -44,6 +44,12 @@ function faceNorth() {
   console.log("face north");
 }
 
+// Solve maze
+function solveMaze() {
+  fetch("/maze");
+  console.log("solve maze");
+}
+
 // Logout
 function logout() {
   fetch("/logout", { cache: "no-store" });
