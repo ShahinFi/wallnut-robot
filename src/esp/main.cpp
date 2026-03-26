@@ -7,8 +7,8 @@ const char* ssid = "Titenet-IoT";
 const char* password = "7kDtaphg";
 
 // ====== HTTP Basic Auth ======
-const char* kAuthUser = "robot";
-const char* kAuthPass = "control";
+const char* kAuthUser = "RESET";
+const char* kAuthPass = "123456789";
 const char* kAuthRealm = "robot";
 String lidarData = "0 cm";
 String lidarPacket = "LIDAR:0,SEQ:0,T:0";
