@@ -110,7 +110,7 @@ async function pollLidar() {
   }
 }
 
-setInterval(pollLidar, 100);
+setInterval(pollLidar, 400);
 pollLidar();
 
 // Console-only summary every 5s
@@ -146,7 +146,7 @@ async function pollCompass() {
   }
 }
 
-setInterval(pollCompass, 250);
+setInterval(pollCompass, 400);
 pollCompass();
 
 // RGB polling
@@ -171,5 +171,5 @@ async function pollRgb() {
   }
 }
 
-setInterval(pollRgb, 250);
+setInterval(pollRgb, 400);
 pollRgb();
