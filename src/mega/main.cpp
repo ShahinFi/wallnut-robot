@@ -246,7 +246,9 @@ void loop() {
         cfg.backoffCm = 5.0f;
         cfg.turnDeg = 30.0f;
         cfg.cooldownMs = 400;
-        cfg.colorThreshold = 0.25f;
+        cfg.leftThreshold = 0.18f;
+        cfg.rightThreshold = 0.18f;
+        cfg.endThreshold = 0.14f;
         cfg.useNormalized = true;
         colorMazeTask.setConfig(cfg);
         colorMazeTask.setCalibration(colorCalTask.refs(), true);

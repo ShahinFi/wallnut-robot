@@ -14,7 +14,9 @@ public:
     float backoffCm = 5.0f;
     float turnDeg = 30.0f;
     uint32_t cooldownMs = 400;
-    float colorThreshold = 0.25f;
+    float leftThreshold = 0.18f;
+    float rightThreshold = 0.18f;
+    float endThreshold = 0.14f;
     bool useNormalized = true;
   };
 

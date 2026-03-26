@@ -167,12 +167,26 @@ ColorMazeTask::ColorClass ColorMazeTask::classify_(const ColorRgb& rgb) const {
   const float dRight = distSq_(rgb.r, rgb.g, rgb.b, refs_[1], cfg_.useNormalized);
   const float dEnd = distSq_(rgb.r, rgb.g, rgb.b, refs_[2], cfg_.useNormalized);
 
-  float best = dLeft;
-  ColorClass cls = ColorClass::Left;
-  if (dRight < best) { best = dRight; cls = ColorClass::Right; }
-  if (dEnd < best) { best = dEnd; cls = ColorClass::End; }
+  const bool leftInRange = dLeft <= (cfg_.leftThreshold * cfg_.leftThreshold);
+  const bool rightInRange = dRight <= (cfg_.rightThreshold * cfg_.rightThreshold);
+  const bool endInRange = dEnd <= (cfg_.endThreshold * cfg_.endThreshold);
 
-  if (best > cfg_.colorThreshold * cfg_.colorThreshold) return ColorClass::Floor;
+  float best = INFINITY;
+  ColorClass cls = ColorClass::Floor;
+
+  if (leftInRange && dLeft < best) {
+    best = dLeft;
+    cls = ColorClass::Left;
+  }
+  if (rightInRange && dRight < best) {
+    best = dRight;
+    cls = ColorClass::Right;
+  }
+  if (endInRange && dEnd < best) {
+    best = dEnd;
+    cls = ColorClass::End;
+  }
+
   return cls;
 }
 
