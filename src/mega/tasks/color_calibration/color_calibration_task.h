@@ -28,7 +28,6 @@ private:
   State state_;
   ColorRgb refs_[3];
   bool hasCalibration_;
-  uint32_t lastUiMs_;
   uint32_t doneStartMs_;
   ColorCalibrationUI ui_;
 };

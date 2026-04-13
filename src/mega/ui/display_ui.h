@@ -19,10 +19,4 @@ public:
   void update(const DisplayData &data);
 
 private:
-  struct FieldTimer {
-    uint32_t lastMs;
-    uint32_t intervalMs;
-  };
-
-  FieldTimer timers[static_cast<uint8_t>(DisplayField::FieldCount)];
 };

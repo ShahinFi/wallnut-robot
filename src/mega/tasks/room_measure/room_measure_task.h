@@ -49,7 +49,6 @@ private:
   RoomSweep360      sweep_;
   RoomScanCollector collect_;
   RoomMeasureUI     ui_;
-  uint32_t          lastUiUpdateMs_;
 
   // Result cache for UI
   float wallCm_[4];

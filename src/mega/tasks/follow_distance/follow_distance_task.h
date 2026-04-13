@@ -32,7 +32,6 @@ private:
 
   DriveStraight     drive_;
   FollowDistanceUI  ui_;
-  uint32_t          lastUiUpdateMs_;
 
   float lastErrorCm_;
   float headingHoldDeg_;

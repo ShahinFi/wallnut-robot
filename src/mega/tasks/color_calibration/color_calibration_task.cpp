@@ -4,7 +4,6 @@
 #include <EEPROM.h>
 
 namespace {
-const uint32_t kUiIntervalMs = 200;
 const uint32_t kDoneHoldMs = 2000;
 const uint16_t kEepromMagic = 0xC0A1;
 const int kEepromAddr = 16;
@@ -14,14 +13,12 @@ ColorCalibrationTask::ColorCalibrationTask()
 : state_(State::Idle),
   refs_{},
   hasCalibration_(false),
-  lastUiMs_(0),
   doneStartMs_(0),
   ui_() {}
 
 void ColorCalibrationTask::begin() {
   ui_.begin();
   ui_.showPrompt(1, nullptr, false);
-  lastUiMs_ = millis();
   doneStartMs_ = 0;
   setState_(State::Prompt1);
 }
@@ -37,9 +34,6 @@ void ColorCalibrationTask::update(const ColorRgb* live, bool liveValid) {
     }
     return;
   }
-
-  if (now - lastUiMs_ < kUiIntervalMs) return;
-  lastUiMs_ = now;
 
   if (state_ == State::Prompt1) ui_.showPrompt(1, live, liveValid);
   if (state_ == State::Prompt2) ui_.showPrompt(2, live, liveValid);

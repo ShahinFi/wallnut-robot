@@ -9,8 +9,6 @@ const float kMinValidCm        = 5.0f;
 const float kMaxValidCm        = 800.0f;
 const float kFollowSpeed       = 0.50f;
 const uint32_t kTimeoutMs      = 0xFFFFFFFFUL;
-const uint32_t kUiIntervalMs   = 300;
-
 static float computeSpeedFromError(float errorAbs) {
   if (errorAbs <= 0.0f) return 0.0f;
   return kFollowSpeed;
@@ -22,7 +20,6 @@ FollowDistanceTask::FollowDistanceTask()
   state_(State::Idle),
   drive_(),
   ui_(),
-  lastUiUpdateMs_(0),
   lastErrorCm_(0.0f) {
   DriveStraight::Config cfg = drive_.config();
   cfg.distanceToleranceCm = kToleranceCm;
@@ -53,7 +50,6 @@ void FollowDistanceTask::begin(float headingDegContinuous, float avgTravelCm) {
   drive_.setHeadingHoldDeg(headingDegContinuous);
   headingHoldDeg_ = headingDegContinuous;
 
-  lastUiUpdateMs_ = millis();
   lastErrorCm_ = 0.0f;
   state_ = State::Running;
 }
@@ -91,12 +87,8 @@ bool FollowDistanceTask::update(float headingDegContinuous, float avgTravelCm, f
     return true;
   }
 
-  const uint32_t now = millis();
-  if (now - lastUiUpdateMs_ >= kUiIntervalMs) {
-    lastUiUpdateMs_ = now;
-    ui_.showRunning(targetDistanceCm_, lidarAvgCm, lastErrorCm_,
-                    headingHoldDeg_, headingDegContinuous, status);
-  }
+  ui_.showRunning(targetDistanceCm_, lidarAvgCm, lastErrorCm_,
+                  headingHoldDeg_, headingDegContinuous, status);
 
   return false;
 }
@@ -111,7 +103,6 @@ void FollowDistanceTask::reset() {
   drive_.reset();
   ui_.begin();
   ui_.showIdle(targetDistanceCm_);
-  lastUiUpdateMs_ = millis();
   lastErrorCm_ = 0.0f;
   state_ = State::Idle;
 }

@@ -8,7 +8,6 @@ RoomMeasureTask::RoomMeasureTask()
   sweep_(),
   collect_(),
   ui_(),
-  lastUiUpdateMs_(0),
   wallCm_{0, 0, 0, 0},
   estimate_{} {
 
@@ -47,8 +46,6 @@ void RoomMeasureTask::begin(float headingDegContinuous) {
   collect_.reset();
   sweep_.begin(headingDegContinuous);
 
-  lastUiUpdateMs_ = millis();
-
   memset(wallCm_, 0, sizeof(wallCm_));
   estimate_ = RoomRectEstimateOutput{};
   estimate_.valid = false;
@@ -60,12 +57,8 @@ bool RoomMeasureTask::update(float headingDegContinuous, float lidarAvgCm) {
   if (state_ == State::Idle) return true;
   if (state_ != State::Running) return true;
 
-  // Progress UI (0.5s cadence)
-  const uint32_t now = millis();
-  if (now - lastUiUpdateMs_ >= 500UL) {
-    lastUiUpdateMs_ = now;
-    ui_.showRunning(sweep_.sweepDeg(), lidarAvgCm);
-  }
+  // Progress UI
+  ui_.showRunning(sweep_.sweepDeg(), lidarAvgCm);
 
   // Collect data during the sweep (lidarAvgCm is MOVING-AVERAGED)
   collect_.push(sweep_.sweepDeg(), lidarAvgCm);
@@ -130,8 +123,6 @@ void RoomMeasureTask::reset() {
 
   ui_.begin();
   ui_.showIdle();
-
-  lastUiUpdateMs_ = millis();
 
   memset(wallCm_, 0, sizeof(wallCm_));
   estimate_ = RoomRectEstimateOutput{};
