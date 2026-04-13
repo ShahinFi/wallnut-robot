@@ -5,11 +5,12 @@
 
 static LIDARLite_v4LED myLIDAR;
 
-Lidar::Lidar() : measuring(false) {}
+Lidar::Lidar() : measuring(false), rangeStartMs(0) {}
 
 bool Lidar::begin() {
   Wire.begin();
   measuring = false;
+  rangeStartMs = 0;
   return myLIDAR.begin();
 }
 
@@ -21,10 +22,15 @@ bool Lidar::update(float &distanceCm) {
   if (!measuring) {
     myLIDAR.takeRange();
     measuring = true;
+    rangeStartMs = millis();
     return false;
   }
 
   if (myLIDAR.getBusyFlag()) {
+    if (millis() - rangeStartMs > kRangeTimeoutMs) {
+      // Timeout: drop this measurement and allow a fresh start next call.
+      measuring = false;
+    }
     return false;
   }
 

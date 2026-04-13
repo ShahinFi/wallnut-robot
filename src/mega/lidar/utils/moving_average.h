@@ -10,4 +10,5 @@ public:
 
 private:
   float buf[N];
+  bool initialized;
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Arduino.h>
+
 class Lidar {
 public:
   Lidar();
@@ -9,4 +11,6 @@ public:
 
 private:
   bool measuring;
+  uint32_t rangeStartMs;
+  static const uint32_t kRangeTimeoutMs = 500;
 };

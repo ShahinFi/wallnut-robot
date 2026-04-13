@@ -2,9 +2,15 @@
 
 MovingAverage::MovingAverage() {
   for (int i = 0; i < N; ++i) buf[i] = 0.0f;
+  initialized = false;
 }
 
 void MovingAverage::push(float x) {
+  if (!initialized) {
+    for (int i = 0; i < N; ++i) buf[i] = x;
+    initialized = true;
+    return;
+  }
   for (int i = N - 1; i > 0; --i) {
     buf[i] = buf[i - 1];
   }
