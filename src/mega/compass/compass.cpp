@@ -6,7 +6,6 @@ Compass::Compass(uint8_t i2cAddress, uint8_t bearingReg)
   i2cAddress_(i2cAddress),
   bearingReg_(bearingReg),
   headingOffsetDeg_(0.0f),
-  maxDeltaHeadingDeg_(60.0f),
   state_{} {
   resetHeadingContinuous();
 }
@@ -35,13 +34,6 @@ float Compass::headingOffsetDeg() const {
   return headingOffsetDeg_;
 }
 
-void Compass::setMaxDeltaHeadingDeg(float maxDeltaHeadingDeg) {
-  maxDeltaHeadingDeg_ = maxDeltaHeadingDeg;
-}
-
-float Compass::maxDeltaHeadingDeg() const {
-  return maxDeltaHeadingDeg_;
-}
 
 // ---------------- Wrapped read (ONLY wrapped fields) ----------------
 
@@ -76,19 +68,24 @@ void Compass::updateHeadingDegContinuous(CompassData& io) {
     state_.prevHeadingDegWrapped = io.headingDegWrapped;
     state_.headingDegContinuous  = io.headingDegWrapped;
     state_.deltaHeadingDeg       = 0.0f;
+    state_.wrapCount             = 0;
   } else {
-    const float deltaHeadingDeg =
-        wrapDegDiff180(io.headingDegWrapped, state_.prevHeadingDegWrapped);
+    const float prev = state_.prevHeadingDegWrapped;
+    const float curr = io.headingDegWrapped;
 
-    if (fabs(deltaHeadingDeg) > maxDeltaHeadingDeg_) {
-      // Glitch: do not integrate, just re-baseline to current wrapped
-      state_.deltaHeadingDeg = 0.0f;
-      state_.prevHeadingDegWrapped = io.headingDegWrapped;
-    } else {
-      state_.deltaHeadingDeg = deltaHeadingDeg;
-      state_.headingDegContinuous += deltaHeadingDeg;
-      state_.prevHeadingDegWrapped = io.headingDegWrapped;
+    // Wrap tracking using thresholds:
+    // - if we crossed from high->low, increment wrap count
+    // - if we crossed from low->high, decrement wrap count
+    if (prev > 300.0f && curr < 60.0f) {
+      state_.wrapCount++;
+    } else if (prev < 60.0f && curr > 300.0f) {
+      state_.wrapCount--;
     }
+
+    const float continuous = curr + 360.0f * (float)state_.wrapCount;
+    state_.deltaHeadingDeg = continuous - state_.headingDegContinuous;
+    state_.headingDegContinuous = continuous;
+    state_.prevHeadingDegWrapped = curr;
   }
 
   // Export results into the reading struct (single source of truth for user)
@@ -112,6 +109,7 @@ void Compass::resetHeadingContinuous() {
   state_.prevHeadingDegWrapped = 0.0f;
   state_.headingDegContinuous  = 0.0f;
   state_.deltaHeadingDeg       = 0.0f;
+  state_.wrapCount             = 0;
 }
 
 const CompassContinuousState& Compass::continuousState() const {
@@ -147,13 +145,6 @@ float Compass::wrapDeg360(float headingDeg) {
   while (headingDeg < 0.0f)   headingDeg += 360.0f;
   while (headingDeg >= 360.0f) headingDeg -= 360.0f;
   return headingDeg;
-}
-
-float Compass::wrapDegDiff180(float aDeg, float bDeg) {
-  float d = aDeg - bDeg;
-  while (d > 180.0f)  d -= 360.0f;
-  while (d < -180.0f) d += 360.0f;
-  return d;
 }
 
 const char* Compass::dirLabelFromDeg(int headingDeg) {

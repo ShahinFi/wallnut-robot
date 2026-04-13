@@ -22,6 +22,7 @@ struct CompassContinuousState {
   float prevHeadingDegWrapped;
   float headingDegContinuous;
   float deltaHeadingDeg;
+  long  wrapCount;
 };
 
 class Compass {
@@ -41,9 +42,6 @@ public:
   void  setHeadingOffsetDeg(float headingOffsetDeg);
   float headingOffsetDeg() const;
 
-  void  setMaxDeltaHeadingDeg(float maxDeltaHeadingDeg);
-  float maxDeltaHeadingDeg() const;
-
   // Modular building blocks (kept public for testing/advanced use)
   bool readHeadingDegWrapped(CompassData& out);        // fills ONLY wrapped fields
   void updateHeadingDegContinuous(CompassData& io);    // fills ONLY continuous fields
@@ -60,7 +58,6 @@ private:
 
   // Math helpers
   static float wrapDeg360(float headingDeg);
-  static float wrapDegDiff180(float aDeg, float bDeg);
   static const char* dirLabelFromDeg(int headingDeg);
 
   // Wiring/config
@@ -70,7 +67,6 @@ private:
 
   // Parameters
   float headingOffsetDeg_;
-  float maxDeltaHeadingDeg_;
 
   // Continuous tracking state (history)
   CompassContinuousState state_;
