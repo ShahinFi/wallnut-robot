@@ -1,5 +1,19 @@
 const compassSlider = document.getElementById("compassSlider"); // Get the compass slider element from the HTML page
 
+// Pause polling while commands are in flight to prioritize control.
+let pendingCommands = 0;
+function sendCommand(path, options = {}) {
+  pendingCommands++;
+  return fetch(path, { cache: "no-store", ...options })
+    .catch(() => {})
+    .finally(() => {
+      pendingCommands = Math.max(0, pendingCommands - 1);
+    });
+}
+function pollingPaused() {
+  return pendingCommands > 0;
+}
+
 // Check if the compassSlider element exists and reset it to 0
 if (compassSlider) {
   const middleValue = 0;
@@ -14,7 +28,7 @@ function updateCompass(pos) {
 
 // Function to send the current compass value to the server
 function sendCompassValue(pos) {
-  fetch(`/compass?value=${pos}`); // Send the compass value to the server using a fetch request
+  sendCommand(`/compass?value=${pos}`); // Send the compass value to the server using a fetch request
   console.log("Compass value", pos); // Log the compass value to the console for debugging
 }
 
@@ -34,25 +48,25 @@ function backwards20() {
 
 // This is a general-purpose function that can handle different combinations of direction and distance
 function move(dir, dis) {
-  fetch(`/${dir}${dis}`); // Sends a request to the server with a URL constructed from the received direction and distance (e.g., /forwards5)
+  sendCommand(`/${dir}${dis}`); // Sends a request to the server with a URL constructed from the received direction and distance (e.g., /forwards5)
   console.log("Drive", dir, dis); // Log the movement command to the console for debugging
 }
 
 // Function to face north
 function faceNorth() {
-  fetch("/north");
+  sendCommand("/north");
   console.log("face north");
 }
 
 // Solve maze
 function solveMaze() {
-  fetch("/maze");
+  sendCommand("/maze");
   console.log("solve maze");
 }
 
 // Logout
 function logout() {
-  fetch("/logout", { cache: "no-store" });
+  sendCommand("/logout");
   console.log("logout");
 }
 
@@ -61,6 +75,7 @@ const lidarValueEl = document.getElementById("lidarValue");
 const lidarWarningEl = document.getElementById("lidarWarning");
 
 async function pollLidar() {
+  if (pollingPaused()) return;
   try {
     const res = await fetch("/lidar");
     if (!res.ok) return;
@@ -131,6 +146,7 @@ const compassWebValueEl = document.getElementById("compassWebValue");
 const colorValueEl = document.getElementById("colorValue");
 const colorSwatchEl = document.getElementById("colorSwatch");
 async function pollCompass() {
+  if (pollingPaused()) return;
   try {
     const res = await fetch("/compassdata");
     if (!res.ok) return;
@@ -151,6 +167,7 @@ pollCompass();
 
 // RGB polling
 async function pollRgb() {
+  if (pollingPaused()) return;
   try {
     const res = await fetch("/rgb");
     if (!res.ok) return;

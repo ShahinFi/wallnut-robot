@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap");
+
 :root {
   --bg1: #07030f;
   --bg2: #170a2b;
@@ -12,6 +14,10 @@
   --text: #fff4fd;
   --muted: #cfc2eb;
   --danger: #ff5f87;
+
+  --gap: 12px;
+  --pad: 14px;
+  --radius: 18px;
 }
 
 * {
@@ -22,7 +28,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
   color: var(--text);
   background:
     linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
@@ -33,19 +39,23 @@ body {
 
 body {
   overflow-x: hidden;
+  min-height: 100svh;
 }
 
 .app {
-  width: min(1200px, calc(100vw - 20px));
+  width: min(1200px, calc(100vw - 16px));
   margin: 0 auto;
-  padding: 10px;
+  padding: 8px;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
 }
 
 .top,
 .panel {
   background: var(--panel);
   border: 1px solid rgba(255, 79, 216, 0.28);
-  border-radius: 22px;
+  border-radius: var(--radius);
   box-shadow:
     0 12px 28px rgba(0, 0, 0, 0.35),
     inset 0 0 0 1px rgba(255, 255, 255, 0.03);
@@ -53,8 +63,8 @@ body {
 }
 
 .top {
-  padding: 18px 20px;
-  margin-bottom: 10px;
+  padding: 16px 18px;
+  margin-bottom: var(--gap);
   position: relative;
   overflow: hidden;
 }
@@ -68,19 +78,19 @@ h2 {
 
 .tag {
   color: var(--cyan);
-  font-size: 12px;
-  letter-spacing: .28em;
-  margin-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: .24em;
+  margin-bottom: 6px;
 }
 
 h1 {
-  font-size: clamp(28px, 5vw, 48px);
+  font-size: clamp(26px, 4.5vw, 46px);
   line-height: 1;
   text-shadow: 0 0 14px rgba(255, 79, 216, 0.45);
 }
 
 .sub {
-  margin-top: 8px;
+  margin-top: 6px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: .14em;
@@ -89,7 +99,7 @@ h1 {
 
 .grid {
   display: grid;
-  gap: 10px;
+  gap: var(--gap);
   grid-template-columns: 1.2fr 1fr 1fr;
   grid-template-areas:
     "drive turn lidar"
@@ -104,7 +114,9 @@ h1 {
 .grid > .panel:nth-child(5) { grid-area: color; }
 
 .panel {
-  padding: 16px;
+  padding: var(--pad);
+  display: flex;
+  flex-direction: column;
 }
 
 h2 {
@@ -112,13 +124,13 @@ h2 {
   letter-spacing: .18em;
   text-transform: uppercase;
   color: var(--text);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 
 .button {
@@ -128,11 +140,11 @@ h2 {
   font-weight: 800;
   letter-spacing: .08em;
   text-align: center;
-  padding: 18px 14px;
-  min-height: 110px;
-  clip-path: polygon(12% 0, 100% 0, 88% 100%, 0 100%);
-  transition: transform .12s ease, box-shadow .12s ease;
-  box-shadow: 0 10px 20px rgba(0,0,0,.3);
+  padding: 12px 12px;
+  min-height: 76px;
+  border-radius: 14px;
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  box-shadow: 0 8px 16px rgba(0,0,0,.28);
 }
 
 .button:hover {
@@ -144,14 +156,16 @@ h2 {
 }
 
 .fwd {
-  background: linear-gradient(135deg, rgba(88,243,255,.95), rgba(78,111,255,.75));
+  background: linear-gradient(135deg, rgba(88,243,255,.9), rgba(78,111,255,.7));
   color: #12081f;
-  box-shadow: 0 0 20px rgba(88,243,255,.28), 0 10px 20px rgba(0,0,0,.3);
+  border: 1px solid rgba(88, 243, 255, 0.6);
+  box-shadow: 0 0 18px rgba(88,243,255,.22), 0 8px 16px rgba(0,0,0,.28);
 }
 
 .back {
-  background: linear-gradient(135deg, rgba(255,79,216,.95), rgba(155,107,255,.75));
-  box-shadow: 0 0 20px rgba(255,79,216,.28), 0 10px 20px rgba(0,0,0,.3);
+  background: linear-gradient(135deg, rgba(255,79,216,.9), rgba(155,107,255,.7));
+  border: 1px solid rgba(255, 79, 216, 0.6);
+  box-shadow: 0 0 18px rgba(255,79,216,.22), 0 8px 16px rgba(0,0,0,.28);
 }
 
 .label,
@@ -164,7 +178,7 @@ h2 {
 
 .label {
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 #compassSlider {
@@ -219,21 +233,21 @@ h2 {
 }
 
 #compassValue {
-  font-size: 34px;
+  font-size: 30px;
   color: var(--cyan);
-  margin-top: 14px;
+  margin-top: 10px;
   text-shadow: 0 0 14px rgba(88,243,255,.35);
 }
 
 .north-container {
   display: flex;
   justify-content: center;
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 .button-round {
-  width: 128px;
-  height: 128px;
+  width: 108px;
+  height: 108px;
   border-radius: 50%;
   clip-path: none;
   padding: 0 10px;
@@ -247,7 +261,7 @@ h2 {
 }
 
 .readout {
-  min-height: 190px;
+  min-height: 160px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -277,8 +291,8 @@ h2 {
 }
 
 .color-swatch {
-  width: 100px;
-  height: 100px;
+  width: 84px;
+  height: 84px;
   border-radius: 16px;
   border: 2px solid rgba(88,243,255,.4);
   background: rgb(0, 0, 0);
@@ -322,11 +336,15 @@ h2 {
   .container {
     grid-template-columns: 1fr 1fr;
   }
+
+  .panel {
+    padding: 12px;
+  }
 }
 
 @media (max-width: 480px) {
   .app {
-    width: calc(100vw - 12px);
+    width: calc(100vw - 10px);
     padding: 6px;
   }
 
@@ -335,8 +353,8 @@ h2 {
   }
 
   .button {
-    min-height: 86px;
-    clip-path: polygon(8% 0, 100% 0, 92% 100%, 0 100%);
+    min-height: 68px;
+    border-radius: 12px;
   }
 
   .button-round {
@@ -345,25 +363,24 @@ h2 {
   }
 
   .readout {
-    min-height: 160px;
+    min-height: 140px;
   }
 }
 
 .logout-container {
   display: flex;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .maze-container {
   display: flex;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .button-outline {
-  min-height: 56px;
-  clip-path: none;
+  min-height: 48px;
   border: 1px solid rgba(255, 255, 255, 0.45);
   background: transparent;
   color: var(--text);
