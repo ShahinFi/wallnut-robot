@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include "odometry/odometry.h"
 
 // --- MOTORS ---
 // H-bridge control: direction pins + PWM pins per wheel
@@ -54,6 +55,17 @@ float motorLeftScale()  { return gLeftScale; }
 float motorRightScale() { return gRightScale; }
 
 void motorDrive(float leftCmd, float rightCmd) {
+  static int lastLeftSign = 1;
+  static int lastRightSign = 1;
+
+  if (leftCmd > 0.0f) lastLeftSign = 1;
+  else if (leftCmd < 0.0f) lastLeftSign = -1;
+
+  if (rightCmd > 0.0f) lastRightSign = 1;
+  else if (rightCmd < 0.0f) lastRightSign = -1;
+
+  odometrySetWheelDirection(lastLeftSign, lastRightSign);
+
   // Apply wheel compensation scaling, then clamp to [-1..1]
   const float left  = clampCmd(leftCmd  * gLeftScale);
   const float right = clampCmd(rightCmd * gRightScale);

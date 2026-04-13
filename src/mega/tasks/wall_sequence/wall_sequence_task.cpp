@@ -23,8 +23,7 @@ WallSequenceTask::WallSequenceTask()
   driveActive_(false),
   targetCm_(kTarget30Cm),
   startAvgCm_(0.0f),
-  totalDrivenCm_(0.0f),
-  lastAvgCm_(0.0f) {
+  totalDrivenCm_(0.0f) {
   DriveStraight::Config dcfg = drive_.config();
   dcfg.distanceToleranceCm = kToleranceCm;
   dcfg.slowDownCm          = 0.0f;
@@ -46,23 +45,15 @@ void WallSequenceTask::begin(float headingDegContinuous, float avgTravelCm) {
   driveActive_ = false;
   startAvgCm_ = avgTravelCm;
   totalDrivenCm_ = 0.0f;
-  lastAvgCm_ = avgTravelCm;
   startApproach_(headingDegContinuous, avgTravelCm, kTarget30Cm);
   setState_(State::Approach30_1);
 }
 
-bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, float lidarAvgCm) {
+bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm) {
   if (state_ == State::Idle) return true;
   if (state_ == State::Succeeded || state_ == State::Failed || state_ == State::Cancelled) return true;
 
-  const bool inApproach =
-      state_ == State::Approach30_1 || state_ == State::Approach15_2 ||
-      state_ == State::Approach30_3 || state_ == State::Approach15_4;
-
-  if (inApproach && avgTravelCm >= lastAvgCm_) {
-    totalDrivenCm_ += (avgTravelCm - lastAvgCm_);
-  }
-  lastAvgCm_ = avgTravelCm;
+  totalDrivenCm_ = totalAbsCm;
 
   switch (state_) {
     case State::Approach30_1:

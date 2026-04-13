@@ -41,7 +41,6 @@ SequenceExecutorTask::SequenceExecutorTask()
   moveByCm_(0.0f),
   stepStartMs_(0),
   totalDrivenCm_(0.0f),
-  lastAvgCm_(0.0f),
   alignEnabled_(false),
   aligning_(false),
   alignHeadingDeg_(0.0f),
@@ -83,7 +82,6 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   moveGuardClearStreak_ = 0;
   stepIndex_ = 0;
   totalDrivenCm_ = 0.0f;
-  lastAvgCm_ = avgTravelCm;
   setState_(State::Running);
   if (alignEnabled_) {
     const float delta = wrapDegDiff180_(alignHeadingDeg_, headingDegContinuous);
@@ -95,7 +93,7 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   }
 }
 
-bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm, float lidarAvgCm) {
+bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm) {
   if (state_ == State::Idle) return true;
   if (state_ != State::Running) return true;
 
@@ -124,6 +122,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   const SequenceStep& step = steps_[stepIndex_];
+  totalDrivenCm_ = totalAbsCm;
   if (step.type == SequenceStepType::End) {
     ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::End);
@@ -139,10 +138,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
 
   const bool inMove = (step.type == SequenceStepType::MoveToDistance ||
                        step.type == SequenceStepType::MoveByDistance);
-  if (inMove && avgTravelCm >= lastAvgCm_) {
-    totalDrivenCm_ += (avgTravelCm - lastAvgCm_);
-  }
-  lastAvgCm_ = avgTravelCm;
+  if (inMove) totalDrivenCm_ = totalAbsCm;
   if (inMove) {
     if (handleMoveGuard_(headingDegContinuous, avgTravelCm, lidarAvgCm)) {
       return state_ != State::Running;

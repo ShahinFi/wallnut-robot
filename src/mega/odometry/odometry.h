@@ -8,6 +8,7 @@ struct OdometryData {
   float leftCm;
   float rightCm;
   float avgCm;
+  float totalAbsCm;
 };
 
 class Odometry {
@@ -27,3 +28,7 @@ public:
 private:
   float pulsesPerMeter_;
 };
+
+// Provide intended wheel directions when using single-channel encoders.
+// Pass -1, 0, or +1 for each wheel (0 keeps last direction in motor layer).
+void odometrySetWheelDirection(int leftSign, int rightSign);

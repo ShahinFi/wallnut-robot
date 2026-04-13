@@ -370,13 +370,13 @@ void loop() {
   // ---- Run tasks/actions ----
   if (seqExecTask.active()) {
     OdometryData od = odom.read();
-    seqExecTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+    seqExecTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);
   } else if (encCalTask.active()) {
     OdometryData od = odom.read();
     encCalTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
   } else if (wallSeqTask.active()) {
     OdometryData od = odom.read();
-    wallSeqTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+    wallSeqTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);
   } else if (wallAlignTask.active()) {
     OdometryData od = odom.read();
     wallAlignTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);

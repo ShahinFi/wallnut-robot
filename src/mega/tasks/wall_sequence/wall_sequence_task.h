@@ -27,7 +27,7 @@ public:
   WallSequenceTask();
 
   void begin(float headingDegContinuous, float avgTravelCm);
-  bool update(float headingDegContinuous, float avgTravelCm, float lidarAvgCm);
+  bool update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm);
 
   void cancel();
   void reset();
@@ -50,5 +50,4 @@ private:
   float targetCm_;
   float startAvgCm_;
   float totalDrivenCm_;
-  float lastAvgCm_;
 };
