@@ -34,12 +34,12 @@ void telemetryTestUpdate(float lidarCm) {
 
   if (now - gLastSendMs >= intervalMs) {
     gLastSendMs = now;
-    Serial3.print("LIDAR:");
-    Serial3.print(lidarCm, 1);
-    Serial3.print(",SEQ:");
-    Serial3.print(gSeq++);
-    Serial3.print(",T:");
-    Serial3.println(now);
+    Serial2.print("LIDAR:");
+    Serial2.print(lidarCm, 1);
+    Serial2.print(",SEQ:");
+    Serial2.print(gSeq++);
+    Serial2.print(",T:");
+    Serial2.println(now);
     gSentInWindow++;
   }
 

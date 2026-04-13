@@ -5,10 +5,10 @@
 
 // --- MOTORS ---
 // H-bridge control: direction pins + PWM pins per wheel
-static const int kMotorLeftDirPin  = 7;
-static const int kMotorRightDirPin = 8;
-static const int kMotorLeftPwmPin  = 9;
-static const int kMotorRightPwmPin = 10;
+static const int kMotorLeftDirPin  = 15;
+static const int kMotorRightDirPin = 7;
+static const int kMotorLeftPwmPin  = 5;
+static const int kMotorRightPwmPin = 6;
 
 // Per-wheel calibration scale factors (defaults: no scaling)
 static float gLeftScale  = 1.3f;

@@ -21,12 +21,12 @@ static bool shouldSendNow() {
 
 void telemetryUpdate(float lidarCm, int headingDeg, const char* headingLabel) {
   if (!shouldSendNow()) return;
-  Serial3.print("LIDAR:");
-  Serial3.println(lidarCm, 1);
-  Serial3.print("COMPASS:");
-  Serial3.print(headingDeg);
-  Serial3.print(",");
-  Serial3.println(headingLabel ? headingLabel : "");
+  Serial2.print("LIDAR:");
+  Serial2.println(lidarCm, 1);
+  Serial2.print("COMPASS:");
+  Serial2.print(headingDeg);
+  Serial2.print(",");
+  Serial2.println(headingLabel ? headingLabel : "");
 }
 
 static bool shouldSendRgbNow() {
@@ -38,10 +38,10 @@ static bool shouldSendRgbNow() {
 
 void telemetryRgbUpdate(uint8_t r, uint8_t g, uint8_t b) {
   if (!shouldSendRgbNow()) return;
-  Serial3.print("RGB:");
-  Serial3.print(r);
-  Serial3.print(",");
-  Serial3.print(g);
-  Serial3.print(",");
-  Serial3.println(b);
+  Serial2.print("RGB:");
+  Serial2.print(r);
+  Serial2.print(",");
+  Serial2.print(g);
+  Serial2.print(",");
+  Serial2.println(b);
 }

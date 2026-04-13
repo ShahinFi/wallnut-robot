@@ -5,12 +5,12 @@
 #include <string.h>
 
 // ---- LCD PINS / SIZE ----
-static const int LCD_RS = 32;
-static const int LCD_EN = 33;
-static const int LCD_D4 = 34;
-static const int LCD_D5 = 35;
-static const int LCD_D6 = 36;
-static const int LCD_D7 = 37;
+static const int LCD_RS = 22;
+static const int LCD_EN = 24;
+static const int LCD_D4 = 26;
+static const int LCD_D5 = 28;
+static const int LCD_D6 = 30;
+static const int LCD_D7 = 32;
 
 static const uint8_t LCD_COLS = 20;
 static const uint8_t LCD_ROWS = 4;

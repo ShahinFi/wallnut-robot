@@ -3,7 +3,7 @@
 static String espInput;
 
 void espSetup() {
-  Serial3.begin(115200);
+  Serial2.begin(115200);
 }
 
 static bool parseLine(const String& line, EspCommand& out) {
@@ -38,8 +38,8 @@ bool espPoll(EspCommand& out) {
   out.type = EspCommand::Type::None;
   out.value = 0;
 
-  while (Serial3.available()) {
-    char c = Serial3.read();
+  while (Serial2.available()) {
+    char c = Serial2.read();
     Serial.write(c);
     if (c == '\n' || c == '\r') {
       if (espInput.length()) {
