@@ -45,6 +45,13 @@ static bool            headingValid = false;
 static CompassData     lastHeading = {};
 static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
+
+// ===== Option 1 security (UART passcode arming) =====
+static const char kEspPasscode[] = "1234";
+static bool gEspArmed = false;
+static uint8_t gEspFailCount = 0;
+static bool gEspLocked = false;
+static const uint8_t kEspMaxFails = 3;
 static SequenceStep espSteps[] = {
   {SequenceStepType::End, 0.0f},
   {SequenceStepType::End, 0.0f}
@@ -103,6 +110,13 @@ void setup() {
   encoderInit();
   espSetup();
   telemetryInit(200);
+  Serial2.println("AUTH:OFF");
+  // Send last saved encoder calibration (if any) so the web UI can show it.
+  const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
+  if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
+    Serial2.print("ENC_CAL:");
+    Serial2.println(mmPerPulse, 2);
+  }
 
   // --- Odometry (set your pulses/meter) ---
   odom.setPulsesPerMeter(787.0f);
@@ -216,6 +230,54 @@ void loop() {
     encoderReset();
     OdometryData od = odom.read();
 
+    if (espCmd.type == EspCommand::Type::Passcode) {
+      if (gEspLocked) {
+        Serial2.println("AUTH:LOCKED");
+      } else if (espCmd.text.equals(kEspPasscode)) {
+        gEspArmed = true;
+        gEspFailCount = 0;
+        Serial2.println("AUTH:OK");
+      } else {
+        gEspArmed = false;
+        if (gEspFailCount < 255) gEspFailCount++;
+        const uint8_t triesLeft =
+            (gEspFailCount >= kEspMaxFails) ? 0 : (uint8_t)(kEspMaxFails - gEspFailCount);
+        if (gEspFailCount >= kEspMaxFails) {
+          gEspLocked = true;
+          Serial2.println("AUTH:LOCKED");
+        } else {
+          Serial2.print("AUTH:FAIL:");
+          Serial2.println(triesLeft);
+        }
+      }
+      motorDrive(0.0f, 0.0f);
+      return;
+    }
+
+    if (espCmd.type == EspCommand::Type::Disarm) {
+      // IMPORTANT: once locked, do not allow disarm/unlock until reset.
+      if (gEspLocked) {
+        Serial2.println("AUTH:LOCKED");
+      } else {
+        gEspArmed = false;
+        Serial2.println("AUTH:OFF");
+      }
+      motorDrive(0.0f, 0.0f);
+      return;
+    }
+
+    if (gEspLocked) {
+      Serial2.println("AUTH:LOCKED");
+      motorDrive(0.0f, 0.0f);
+      return;
+    }
+
+    if (!gEspArmed) {
+      Serial2.println("AUTH:REQUIRED");
+      motorDrive(0.0f, 0.0f);
+      return;
+    }
+
     if (espCmd.type == EspCommand::Type::Move) {
       espSteps[0] = {SequenceStepType::MoveByDistance, (float)espCmd.value};
       espSteps[1] = {SequenceStepType::End, 0.0f};
@@ -262,6 +324,8 @@ void loop() {
         colorMazeTask.setCalibration(nullptr, false);
         colorMazeTask.begin(heading.headingDegContinuous, od.avgCm);
       }
+    } else if (espCmd.type == EspCommand::Type::EncCal) {
+      encCalTask.begin(heading.headingDegContinuous, od.avgCm);
     }
   }
 
@@ -378,7 +442,16 @@ void loop() {
     seqExecTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);
   } else if (encCalTask.active()) {
     OdometryData od = odom.read();
+    const EncoderCalibrationTask::State prev = encCalTask.state();
     encCalTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+    if (prev != EncoderCalibrationTask::State::Succeeded &&
+        encCalTask.state() == EncoderCalibrationTask::State::Succeeded) {
+      const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
+      if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
+        Serial2.print("ENC_CAL:");
+        Serial2.println(mmPerPulse, 2);
+      }
+    }
   } else if (wallSeqTask.active()) {
     OdometryData od = odom.read();
     wallSeqTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);

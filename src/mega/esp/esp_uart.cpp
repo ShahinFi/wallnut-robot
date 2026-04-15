@@ -11,29 +11,54 @@ static bool parseLine(const String& line, EspCommand& out) {
   s.trim();
   if (s.length() == 0) return false;
 
+  if (s.startsWith("Passcode:")) {
+    out.type = EspCommand::Type::Passcode;
+    out.value = 0;
+    out.text = s.substring(9);
+    out.text.trim();
+    return true;
+  }
+  if (s.equalsIgnoreCase("Disarm")) {
+    out.type = EspCommand::Type::Disarm;
+    out.value = 0;
+    out.text = "";
+    return true;
+  }
+
   if (s.startsWith("Move:")) {
     out.type = EspCommand::Type::Move;
     out.value = s.substring(5).toInt();
+    out.text = "";
     return true;
   }
   if (s.startsWith("Turn:")) {
     out.type = EspCommand::Type::Turn;
     out.value = s.substring(5).toInt();
+    out.text = "";
     return true;
   }
   if (s.equalsIgnoreCase("North")) {
     out.type = EspCommand::Type::North;
     out.value = 0;
+    out.text = "";
     return true;
   }
   if (s.equalsIgnoreCase("SetNorth")) {
     out.type = EspCommand::Type::SetNorth;
     out.value = 0;
+    out.text = "";
     return true;
   }
   if (s.equalsIgnoreCase("Maze")) {
     out.type = EspCommand::Type::Maze;
     out.value = 0;
+    out.text = "";
+    return true;
+  }
+  if (s.equalsIgnoreCase("EncCal")) {
+    out.type = EspCommand::Type::EncCal;
+    out.value = 0;
+    out.text = "";
     return true;
   }
   return false;
@@ -42,6 +67,7 @@ static bool parseLine(const String& line, EspCommand& out) {
 bool espPoll(EspCommand& out) {
   out.type = EspCommand::Type::None;
   out.value = 0;
+  out.text = "";
 
   while (Serial2.available()) {
     char c = Serial2.read();

@@ -25,15 +25,31 @@
       <main class="grid">
         <section class="panel drive">
           <h2>Movement</h2>
+          <div class="auth-panel">
+            <div class="mini-label">PASSCODE</div>
+            <div class="auth-row">
+              <input
+                id="passcodeInput"
+                class="auth-input"
+                type="password"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="Enter passcode"
+              />
+              <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
+              <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+            </div>
+            <div id="authStatus" class="auth-status">DISARMED</div>
+          </div>
           <div class="container">
-            <button class="button fwd" onclick="forwards5()">FORWARD<br />5cm</button>
-            <button class="button fwd" onclick="forwards20()">FORWARD<br />20cm</button>
-            <button class="button back" onclick="backwards5()">BACKWARD<br />5cm</button>
-            <button class="button back" onclick="backwards20()">BACKWARD<br />20cm</button>
+            <button class="button fwd" data-requires-arm="1" onclick="forwards5()">FORWARD<br />5cm</button>
+            <button class="button fwd" data-requires-arm="1" onclick="forwards20()">FORWARD<br />20cm</button>
+            <button class="button back" data-requires-arm="1" onclick="backwards5()">BACKWARD<br />5cm</button>
+            <button class="button back" data-requires-arm="1" onclick="backwards20()">BACKWARD<br />20cm</button>
           </div>
           <div class="utility-actions">
-            <button class="button button-secondary" onclick="solveMaze()">SOLVE MAZE</button>
-            <button class="button button-danger" onclick="logout()">LOG OUT</button>
+            <button class="button button-secondary" onclick="openMazeSolver()">MAZE SOLVER</button>
+            <button class="button button-secondary" data-requires-arm="1" onclick="solveMaze()">START COLOR MAZE</button>
           </div>
         </section>
 
@@ -53,8 +69,8 @@
           <div id="compassValue">0°</div>
 
           <div class="north-container">
-            <button class="button button-outline" onclick="setNorth()">SET NORTH</button>
-            <button class="button button-primary" onclick="faceNorth()">FACE NORTH</button>
+            <button class="button button-outline" data-requires-arm="1" onclick="setNorth()">SET NORTH</button>
+            <button class="button button-primary" data-requires-arm="1" onclick="faceNorth()">FACE NORTH</button>
           </div>
         </section>
 

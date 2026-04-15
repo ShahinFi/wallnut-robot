@@ -3,8 +3,9 @@
 #include <Arduino.h>
 
 struct EspCommand {
-  enum class Type : uint8_t { None, Move, Turn, North, SetNorth, Maze } type;
+  enum class Type : uint8_t { None, Move, Turn, North, SetNorth, Maze, EncCal, Passcode, Disarm } type;
   int value;
+  String text;
 };
 
 void espSetup();

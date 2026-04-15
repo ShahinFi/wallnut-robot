@@ -129,9 +129,10 @@ h1 {
 
 .drive { grid-area: drive; }
 .turn { grid-area: turn; }
-.grid > .panel:nth-child(3) { grid-area: lidar; }
-.grid > .panel:nth-child(4) { grid-area: compass; }
-.grid > .panel:nth-child(5) { grid-area: color; }
+/* Main dashboard uses fixed panel ordering. Maze page assigns areas via explicit classes. */
+.grid:not(.maze-grid) > .panel:nth-child(3) { grid-area: lidar; }
+.grid:not(.maze-grid) > .panel:nth-child(4) { grid-area: compass; }
+.grid:not(.maze-grid) > .panel:nth-child(5) { grid-area: color; }
 
 .panel {
   padding: var(--pad);
@@ -178,6 +179,60 @@ h2 {
 
 .button:active {
   transform: scale(.98);
+}
+
+.button-small {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 800;
+}
+
+button:disabled,
+.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.auth-panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  margin-bottom: 12px;
+}
+
+.auth-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.auth-input {
+  width: 100%;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(0,0,0,.20);
+  color: var(--text);
+  padding: 0 12px;
+  outline: none;
+}
+
+.auth-input:focus {
+  border-color: rgba(88,243,255,.55);
+  box-shadow: 0 0 0 3px rgba(88,243,255,.14);
+}
+
+.auth-status {
+  margin-top: 10px;
+  font-weight: 800;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .fwd {
@@ -301,6 +356,12 @@ h2 {
   padding: 14px;
 }
 
+.readout-compact {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 12px;
+}
+
 #lidarValue {
   font-size: clamp(32px, 4vw, 44px);
   color: var(--yellow);
@@ -327,6 +388,12 @@ h2 {
   box-shadow: 0 0 18px rgba(88,243,255,.16);
 }
 
+.color-swatch.is-empty {
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.75;
+}
+
 .warning {
   padding: 7px 12px;
   border-radius: 999px;
@@ -347,6 +414,15 @@ h2 {
       "drive turn"
       "lidar compass"
       "color color";
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+  }
+
+  .maze-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "control lidar"
+      "control compass"
+      "control color";
     grid-template-rows: repeat(3, minmax(0, 1fr));
   }
 }
@@ -388,6 +464,20 @@ h2 {
 
   .utility-actions {
     grid-template-columns: 1fr;
+  }
+
+  .auth-row {
+    grid-template-columns: 1fr;
+  }
+
+  .maze-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "control"
+      "lidar"
+      "compass"
+      "color";
+    grid-template-rows: none;
   }
 }
 
@@ -442,6 +532,10 @@ h2 {
   padding: 12px 14px;
 }
 
+.utility-full {
+  grid-column: 1 / -1;
+}
+
 .button-secondary {
   background: linear-gradient(135deg, rgba(155,107,255,.22), rgba(88,243,255,.14));
   border: 1px solid rgba(88, 243, 255, 0.45);
@@ -462,4 +556,37 @@ h2 {
 
 .button-danger:hover {
   box-shadow: 0 0 16px rgba(255,95,135,.16);
+}
+
+/* Maze page layout */
+.maze-grid {
+  grid-template-columns: 1.2fr 1fr;
+  grid-template-areas:
+    "control lidar"
+    "control compass"
+    "control color";
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.maze-control { grid-area: control; }
+.maze-lidar { grid-area: lidar; }
+.maze-compass { grid-area: compass; }
+.maze-color { grid-area: color; }
+
+.maze-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.maze-control .maze-actions + h2 {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.maze-actions .button {
+  width: 100%;
+  min-height: 56px;
 }
