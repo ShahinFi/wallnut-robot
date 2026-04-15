@@ -2,11 +2,11 @@
 
 #include <Arduino.h>
 
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
 #include "tasks/follow_distance/ui/follow_distance_ui.h"
 
 // FollowDistanceTask: maintains a fixed distance to an object/wall.
-// Responsibility: glue logic only (uses DriveStraight for motion).
+// Responsibility: glue logic only (uses DriveByDistance for motion).
 class FollowDistanceTask {
 public:
   enum class State : uint8_t { Idle, Running, TimedOut, Cancelled };
@@ -30,7 +30,7 @@ private:
   float targetDistanceCm_;
   State state_;
 
-  DriveStraight     drive_;
+  DriveByDistance    drive_;
   FollowDistanceUI  ui_;
 
   float lastErrorCm_;

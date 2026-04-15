@@ -7,7 +7,7 @@
 #include "display/lcd.h"
 #include "encoder/encoder.h"
 #include "odometry/odometry.h"
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
 #include "tasks/wall_align_90/wall_align_90_task.h"
 #include "tasks/wall_sequence/wall_sequence_task.h"
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
@@ -29,7 +29,7 @@ static RoomMeasureTask roomTask;
 static FollowDistanceTask followTask;
 static uint32_t        lastCompassUiMs = 0;
 static Odometry        odom(0.0f);
-static DriveStraight   driveStraight;
+static DriveByDistance driveByDistance;
 static WallAlign90Task wallAlignTask;
 static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
@@ -107,12 +107,12 @@ void setup() {
   // --- Odometry (set your pulses/meter) ---
   odom.setPulsesPerMeter(787.0f);
 
-  // --- DriveStraight test config ---
-  DriveStraight::Config dcfg = driveStraight.config();
+  // --- DriveByDistance test config ---
+  DriveByDistance::Config dcfg = driveByDistance.config();
   dcfg.maxSpeed = 0.6f;
   dcfg.minSpeed = 0.2f;
   dcfg.timeoutMs = 8000;
-  driveStraight.setConfig(dcfg);
+  driveByDistance.setConfig(dcfg);
 
   // --- Room measurement physical config ONLY ---
   RoomMeasureTask::Config cfg;
@@ -177,7 +177,7 @@ void loop() {
         if (!colorCalTask.active()) {
           if (roomTask.active()) roomTask.cancel();
           if (followTask.active()) followTask.cancel();
-          if (driveStraight.active()) driveStraight.cancel();
+          if (driveByDistance.active()) driveByDistance.cancel();
           if (wallAlignTask.active()) wallAlignTask.cancel();
           if (wallSeqTask.active()) wallSeqTask.cancel();
           if (encCalTask.active()) encCalTask.cancel();
@@ -206,7 +206,7 @@ void loop() {
   if (espPoll(espCmd)) {
     if (roomTask.active()) roomTask.cancel();
     if (followTask.active()) followTask.cancel();
-    if (driveStraight.active()) driveStraight.cancel();
+    if (driveByDistance.active()) driveByDistance.cancel();
     if (wallAlignTask.active()) wallAlignTask.cancel();
     if (wallSeqTask.active()) wallSeqTask.cancel();
     if (encCalTask.active()) encCalTask.cancel();
@@ -264,7 +264,7 @@ void loop() {
     const char c = Serial.read();
     if ((c == 'm' || c == 'M') && !roomTask.active()) {
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
@@ -274,7 +274,7 @@ void loop() {
     }
     if (c == 'f' || c == 'F') {
       if (roomTask.active()) roomTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
@@ -292,12 +292,12 @@ void loop() {
       if (colorMazeTask.active()) colorMazeTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      driveStraight.begin(heading.headingDegContinuous, od.avgCm, 20.0f, 0.5f);
+      driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCm, 20.0f, 0.5f);
     }
     if (c == 'w' || c == 'W') {
       if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -309,7 +309,7 @@ void loop() {
     if (c == 's' || c == 'S') {
       if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -321,7 +321,7 @@ void loop() {
     if (c == 'k' || c == 'K') {
       if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -339,7 +339,7 @@ void loop() {
     if (c == 'q' || c == 'Q') {
       if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
@@ -355,7 +355,7 @@ void loop() {
     }
     if (c == 'c' || c == 'C') {
       if (followTask.active()) followTask.cancel();
-      if (driveStraight.active()) driveStraight.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
@@ -380,9 +380,9 @@ void loop() {
   } else if (wallAlignTask.active()) {
     OdometryData od = odom.read();
     wallAlignTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
-  } else if (driveStraight.active()) {
+  } else if (driveByDistance.active()) {
     OdometryData od = odom.read();
-    driveStraight.update(heading.headingDegContinuous, od.avgCm);
+    driveByDistance.update(heading.headingDegContinuous, od.avgCm);
   } else if (followTask.active()) {
     followTask.update(heading.headingDegContinuous, 0.0f, lidarFilteredCm);
   } else {

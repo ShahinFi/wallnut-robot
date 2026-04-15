@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
 #include "tasks/encoder_calibration/ui/encoder_calibration_ui.h"
 
 // EncoderCalibrationTask: calibrate distance per encoder pulse using LiDAR.
@@ -30,7 +30,7 @@ private:
   bool loadFromEeprom_(float& cmPerPulseOut) const;
 
   State state_;
-  DriveStraight drive_;
+  DriveByDistance drive_;
   EncoderCalibrationUI ui_;
 
   float startDistanceCm_;

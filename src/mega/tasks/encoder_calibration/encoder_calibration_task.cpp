@@ -23,7 +23,7 @@ EncoderCalibrationTask::EncoderCalibrationTask()
   targetDistanceCm_(0.0f),
   startAvgTravelCm_(0.0f),
   lastCmPerPulse_(0.0f) {
-  DriveStraight::Config dcfg = drive_.config();
+  DriveByDistance::Config dcfg = drive_.config();
   dcfg.slowDownCm          = 0.0f;
   dcfg.minSpeed            = kDriveSpeed;
   dcfg.maxSpeed            = kDriveSpeed;
@@ -67,7 +67,7 @@ bool EncoderCalibrationTask::update(float headingDegContinuous, float avgTravelC
         setState_(State::Failed);
         return true;
       }
-      drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, kDriveSpeed);
+      drive_.beginContinuous(headingDegContinuous, avgTravelCm, kDriveSpeed);
       drive_.setHeadingHoldDeg(headingDegContinuous);
       setState_(State::Driving);
       return false;

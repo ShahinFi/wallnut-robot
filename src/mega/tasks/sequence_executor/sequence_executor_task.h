@@ -2,7 +2,8 @@
 
 #include <Arduino.h>
 
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
+#include "actions/drive_to_distance.h"
 #include "actions/turn_to_angle.h"
 #include "tasks/sequence_executor/ui/sequence_executor_ui.h"
 
@@ -46,7 +47,8 @@ private:
   uint16_t totalSteps_;
 
   State state_;
-  DriveStraight drive_;
+  DriveByDistance driveBy_;
+  DriveToDistance driveTo_;
   TurnToAngle   turn_;
   SequenceExecutorUI ui_;
 

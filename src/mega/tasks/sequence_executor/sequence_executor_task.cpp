@@ -33,7 +33,8 @@ SequenceExecutorTask::SequenceExecutorTask()
   stepIndex_(0),
   totalSteps_(0),
   state_(State::Idle),
-  drive_(),
+  driveBy_(),
+  driveTo_(),
   turn_(),
   ui_(),
   driveActive_(false),
@@ -47,12 +48,20 @@ SequenceExecutorTask::SequenceExecutorTask()
   moveGuardState_(MoveGuardState::None),
   moveGuardTurnsDone_(0),
   moveGuardClearStreak_(0) {
-  DriveStraight::Config dcfg = drive_.config();
+  DriveByDistance::Config dcfg = driveBy_.config();
   dcfg.slowDownCm = 0.0f;
   // Allow obstacle-based scaling (30%/70%) instead of clamping to full speed.
   dcfg.minSpeed   = kMoveSpeed * kSlowSpeedScale;
   dcfg.maxSpeed   = kMoveSpeed;
-  drive_.setConfig(dcfg);
+  driveBy_.setConfig(dcfg);
+  driveTo_.setDriveConfig(dcfg);
+
+  DriveToDistance::Config tcfg = driveTo_.config();
+  tcfg.toleranceCm = kToleranceCm;
+  tcfg.minValidCm  = kMinValidCm;
+  tcfg.maxValidCm  = kMaxValidCm;
+  tcfg.timeoutMs   = kStepTimeoutMs;
+  driveTo_.setConfig(tcfg);
 }
 
 void SequenceExecutorTask::setSequence(const SequenceStep* steps) {
@@ -74,7 +83,8 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   if (!steps_) return;
   ui_.begin();
   ui_.showIdle();
-  drive_.reset();
+  driveBy_.reset();
+  driveTo_.reset();
   turn_.reset();
   driveActive_ = false;
   moveGuardState_ = MoveGuardState::None;
@@ -148,25 +158,31 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   if (step.type == SequenceStepType::MoveToDistance) {
     ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Move);
-    const bool valid = isfinite(lidarAvgCm) && lidarAvgCm >= kMinValidCm && lidarAvgCm <= kMaxValidCm;
-    if (!valid) {
-      drive_.cancel();
-      ui_.showFailed("Invalid LiDAR");
-      setState_(State::Failed);
-      return true;
-    }
+    // Forward motion uses the obstacle-aware scaling; backing up does not.
     const float error = lidarAvgCm - targetCm_;
-    if (fabsf(error) <= kToleranceCm) {
-      drive_.cancel();
-      driveActive_ = false;
+    const float speedAbs =
+        (error >= 0.0f) ? (kMoveSpeed * computeMoveSpeedScale(lidarAvgCm))
+                        : (kMoveSpeed * kFastSpeedScale);
+    if (!driveTo_.active()) {
+      driveTo_.begin(headingDegContinuous, avgTravelCm, targetCm_, speedAbs);
+    } else {
+      driveTo_.setSpeedAbs(speedAbs);
+    }
+    const bool done = driveTo_.update(headingDegContinuous, avgTravelCm, lidarAvgCm);
+    if (done) {
+      if (driveTo_.timedOut()) {
+        ui_.showFailed("Drive timeout");
+        setState_(State::Failed);
+        return true;
+      }
+      if (!driveTo_.succeeded()) {
+        ui_.showFailed("Invalid LiDAR");
+        setState_(State::Failed);
+        return true;
+      }
       ++stepIndex_;
       startStep_(headingDegContinuous, avgTravelCm);
-      return false;
     }
-    const float signedSpeed = (error >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
-    const float scaled = signedSpeed * computeMoveSpeedScale(lidarAvgCm);
-    drive_.setRequestedSpeed(scaled);
-    drive_.update(headingDegContinuous, avgTravelCm);
     return false;
   }
 
@@ -178,10 +194,10 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     }
     const float scale = computeMoveSpeedScale(lidarAvgCm);
     const float baseSpeed = (moveByCm_ >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
-    drive_.setRequestedSpeed(baseSpeed * scale);
-    const bool done = drive_.update(headingDegContinuous, avgTravelCm);
+    driveBy_.setRequestedSpeed(baseSpeed * scale);
+    const bool done = driveBy_.update(headingDegContinuous, avgTravelCm);
     if (done) {
-      if (drive_.timedOut()) {
+      if (driveBy_.timedOut()) {
         ui_.showFailed("Drive timeout");
         setState_(State::Failed);
         return true;
@@ -212,7 +228,8 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
 }
 
 void SequenceExecutorTask::cancel() {
-  drive_.cancel();
+  driveBy_.cancel();
+  driveTo_.cancel();
   turn_.cancel();
   driveActive_ = false;
   ui_.showFailed("Cancelled");
@@ -220,7 +237,8 @@ void SequenceExecutorTask::cancel() {
 }
 
 void SequenceExecutorTask::reset() {
-  drive_.reset();
+  driveBy_.reset();
+  driveTo_.reset();
   turn_.reset();
   driveActive_ = false;
   moveGuardState_ = MoveGuardState::None;
@@ -244,7 +262,11 @@ void SequenceExecutorTask::startStep_(float headingDegContinuous, float avgTrave
   const SequenceStep& step = steps_[stepIndex_];
   if (step.type == SequenceStepType::MoveToDistance) {
     targetCm_ = step.value;
-    startMove_(headingDegContinuous, avgTravelCm);
+    // DriveToDistance is started lazily in the update() loop.
+    // Ensure no leftover "drive by distance" state leaks across steps.
+    driveBy_.cancel();
+    driveActive_ = false;
+    driveTo_.reset();
   } else if (step.type == SequenceStepType::MoveByDistance) {
     moveByCm_ = step.value;
     startMove_(headingDegContinuous, avgTravelCm);
@@ -256,14 +278,12 @@ void SequenceExecutorTask::startStep_(float headingDegContinuous, float avgTrave
 void SequenceExecutorTask::startMove_(float headingDegContinuous, float avgTravelCm) {
   if (!driveActive_) {
     const SequenceStep& step = steps_[stepIndex_];
-    if (step.type == SequenceStepType::MoveByDistance) {
-      const float dist = fabsf(moveByCm_);
-      const float dir = (moveByCm_ >= 0.0f) ? 1.0f : -1.0f;
-      drive_.begin(headingDegContinuous, avgTravelCm, dist, dir * kMoveSpeed);
-    } else {
-      drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
-    }
-    drive_.setHeadingHoldDeg(headingDegContinuous);
+    if (step.type != SequenceStepType::MoveByDistance) return;
+
+    const float dist = fabsf(moveByCm_);
+    const float dir = (moveByCm_ >= 0.0f) ? 1.0f : -1.0f;
+    driveBy_.beginByDistance(headingDegContinuous, avgTravelCm, dist, dir * kMoveSpeed);
+    driveBy_.setHeadingHoldDeg(headingDegContinuous);
     driveActive_ = true;
   }
 }
@@ -291,25 +311,18 @@ bool SequenceExecutorTask::handleMoveGuard_(float headingDegContinuous,
       (step.type == SequenceStepType::MoveByDistance) && (moveByCm_ > 0.0f);
 
   // Guard-turn behavior is only for forward MoveByDistance commands.
-  // If too close during other move types, stop movement but do not auto-rotate.
-  if (moveGuardState_ == MoveGuardState::None && !forwardMoveBy) {
-    if (lidarAvgCm < kStopDistanceCm) {
-      drive_.setRequestedSpeed(0.0f);
-      return true;
-    }
-    return false;
-  }
+  if (!forwardMoveBy) return false;
 
   if (moveGuardState_ == MoveGuardState::None) {
     if (lidarAvgCm >= kStopDistanceCm) return false;
 
     // Preserve remaining distance before entering guard turn.
     if (forwardMoveBy && driveActive_) {
-      const float remaining = drive_.remainingCm();
+      const float remaining = driveBy_.remainingCm();
       if (isfinite(remaining) && remaining > 0.0f) moveByCm_ = remaining;
     }
 
-    drive_.cancel();
+    driveBy_.cancel();
     driveActive_ = false;
     moveGuardClearStreak_ = 0;
     turn_.begin(headingDegContinuous, kGuardTurnDeg, kTurnSpeed);

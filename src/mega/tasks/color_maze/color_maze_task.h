@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
 #include "actions/turn_to_angle.h"
 #include "color/color_sensor.h"
 #include "tasks/color_maze/ui/color_maze_ui.h"
@@ -47,7 +47,7 @@ private:
   ColorRgb refs_[3];
   bool refsValid_;
 
-  DriveStraight drive_;
+  DriveByDistance drive_;
   TurnToAngle   turn_;
   ColorMazeUI   ui_;
 

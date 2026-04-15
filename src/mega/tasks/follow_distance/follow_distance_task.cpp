@@ -21,7 +21,7 @@ FollowDistanceTask::FollowDistanceTask()
   drive_(),
   ui_(),
   lastErrorCm_(0.0f) {
-  DriveStraight::Config cfg = drive_.config();
+  DriveByDistance::Config cfg = drive_.config();
   cfg.distanceToleranceCm = kToleranceCm;
   cfg.slowDownCm          = 0.0f;
   cfg.minSpeed            = kFollowSpeed;
@@ -46,7 +46,7 @@ void FollowDistanceTask::begin(float headingDegContinuous, float avgTravelCm) {
                   FollowDistanceUI::FollowStatus::Hold);
 
   drive_.reset();
-  drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
+  drive_.beginContinuous(headingDegContinuous, avgTravelCm, 0.0f);
   drive_.setHeadingHoldDeg(headingDegContinuous);
   headingHoldDeg_ = headingDegContinuous;
 

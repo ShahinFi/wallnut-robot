@@ -2,10 +2,12 @@
 
 #include <Arduino.h>
 
-// Drive forward a set distance while holding heading using continuous heading (unwrapped).
-// Assumes encoders provide unsigned travel (avgTravelCm increases when moving).
-// If targetTravelCm < 0: drive indefinitely until cancel() or timeout.
-class DriveStraight {
+// Drive by encoder/odometry distance while holding heading (continuous/unwrapped degrees).
+//
+// Two start modes:
+// - beginByDistance(): stop when traveled distance meets target
+// - beginContinuous(): drive indefinitely (caller decides when to cancel)
+class DriveByDistance {
 public:
   struct Config {
     float    distanceToleranceCm = 2.0f;   // stop when remaining <= tolerance
@@ -22,18 +24,21 @@ public:
 
   enum class State : uint8_t { Idle, Running, Succeeded, TimedOut, Cancelled };
 
-  DriveStraight();
+  DriveByDistance();
 
   void setConfig(const Config& cfg);
   const Config& config() const;
 
-  // Begin forward drive:
-  // - targetTravelCm >= 0 : drive that distance
-  // - targetTravelCm < 0  : drive indefinitely (no distance stop condition)
-  // headingDegContinuous: current continuous heading (unwrapped degrees).
-  // avgTravelCm: current unsigned travel reading (cm), typically odometry.avgCm.
-  // requestedSpeed: -1..1 (sign = direction)
-  void begin(float headingDegContinuous, float avgTravelCm, float targetTravelCm, float requestedSpeed);
+  // Drive a fixed distance (cm) while holding the initial heading.
+  // - targetTravelCm must be >= 0
+  // - requestedSpeed is -1..1 (sign = direction)
+  void beginByDistance(float headingDegContinuous, float avgTravelCm,
+                       float targetTravelCm, float requestedSpeed);
+
+  // Drive indefinitely while holding the initial heading.
+  // - requestedSpeed is -1..1 (sign = direction)
+  void beginContinuous(float headingDegContinuous, float avgTravelCm,
+                       float requestedSpeed);
 
   // Tick with latest sensors; drives motors. Returns true when finished.
   bool update(float headingDegContinuous, float avgTravelCm);
@@ -51,18 +56,16 @@ public:
   State state() const;
 
   float remainingCm() const;       // remaining forward travel (cm)
-  float headingErrorDeg() const;   // target - current (wrapped to [-180,180])
+  float headingErrorDeg() const;   // target - current (continuous, unwrapped)
 
 private:
   void stopMotors();
   float computeForwardSpeed(float requestedSpeed, float remainingCmAbs) const;
 
-  static float wrapDegDiff180(float targetDeg, float currentDeg);
-
   Config   cfg_;
   State    state_;
 
-  bool     infiniteDistance_;  // NEW: true when targetTravelCm < 0
+  bool     infiniteDistance_;  // true when started via beginContinuous()
 
   float    targetTravelCm_;
   float    startTravelCm_;

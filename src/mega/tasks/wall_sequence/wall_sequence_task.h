@@ -2,12 +2,12 @@
 
 #include <Arduino.h>
 
-#include "actions/drive_straight.h"
+#include "actions/drive_by_distance.h"
 #include "actions/turn_to_angle.h"
 #include "tasks/wall_sequence/ui/wall_sequence_ui.h"
 
 // WallSequenceTask: approach alternating distances with left turns between steps.
-// Responsibility: sequencing only (glue over DriveStraight + TurnToAngle).
+// Responsibility: sequencing only (glue over DriveByDistance + TurnToAngle).
 class WallSequenceTask {
 public:
   enum class State : uint8_t {
@@ -42,7 +42,7 @@ private:
                       float targetCm, State nextAfterTurn);
 
   State state_;
-  DriveStraight drive_;
+  DriveByDistance drive_;
   TurnToAngle   turn_;
   WallSequenceUI ui_;
 

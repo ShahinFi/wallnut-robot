@@ -32,7 +32,7 @@ void ColorMazeTask::begin(float headingDegContinuous, float avgTravelCm) {
     return;
   }
 
-  DriveStraight::Config dcfg = drive_.config();
+  DriveByDistance::Config dcfg = drive_.config();
   dcfg.distanceToleranceCm = 1.0f;
   dcfg.slowDownCm = 0.0f;
   dcfg.minSpeed = cfg_.driveSpeed;
@@ -49,7 +49,7 @@ void ColorMazeTask::begin(float headingDegContinuous, float avgTravelCm) {
   pendingTurn_ = TurnDir::None;
   cooldownUntilMs_ = 0;
 
-  drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, cfg_.driveSpeed);
+  drive_.beginContinuous(headingDegContinuous, avgTravelCm, cfg_.driveSpeed);
   drive_.setHeadingHoldDeg(headingDegContinuous);
   setState_(State::Running);
 }
@@ -87,7 +87,7 @@ bool ColorMazeTask::update(float headingDegContinuous, float avgTravelCm,
     }
     pendingTurn_ = TurnDir::None;
     cooldownUntilMs_ = now + cfg_.cooldownMs;
-    drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, cfg_.driveSpeed);
+    drive_.beginContinuous(headingDegContinuous, avgTravelCm, cfg_.driveSpeed);
     drive_.setHeadingHoldDeg(headingDegContinuous);
     setState_(State::Running);
     return false;
@@ -120,7 +120,7 @@ bool ColorMazeTask::update(float headingDegContinuous, float avgTravelCm,
     if (c == ColorClass::Left) {
       drive_.cancel();
       pendingTurn_ = TurnDir::Right;
-      drive_.begin(headingDegContinuous, avgTravelCm, cfg_.backoffCm, -cfg_.driveSpeed);
+      drive_.beginByDistance(headingDegContinuous, avgTravelCm, cfg_.backoffCm, -cfg_.driveSpeed);
       drive_.setHeadingHoldDeg(headingDegContinuous);
       setState_(State::Backoff);
       return false;
@@ -128,7 +128,7 @@ bool ColorMazeTask::update(float headingDegContinuous, float avgTravelCm,
     if (c == ColorClass::Right) {
       drive_.cancel();
       pendingTurn_ = TurnDir::Left;
-      drive_.begin(headingDegContinuous, avgTravelCm, cfg_.backoffCm, -cfg_.driveSpeed);
+      drive_.beginByDistance(headingDegContinuous, avgTravelCm, cfg_.backoffCm, -cfg_.driveSpeed);
       drive_.setHeadingHoldDeg(headingDegContinuous);
       setState_(State::Backoff);
       return false;

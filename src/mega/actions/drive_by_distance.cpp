@@ -1,5 +1,5 @@
-// actions/drive_straight.cpp
-#include "actions/drive_straight.h"
+// actions/drive_by_distance.cpp
+#include "actions/drive_by_distance.h"
 
 #include <math.h>
 #include "motor/motor.h"
@@ -10,7 +10,7 @@ static inline float clampSigned1(float x) {
   return x;
 }
 
-DriveStraight::DriveStraight()
+DriveByDistance::DriveByDistance()
 : cfg_{},
   state_(State::Idle),
   infiniteDistance_(false),
@@ -22,18 +22,17 @@ DriveStraight::DriveStraight()
   headingErrorDeg_(0.0f),
   startMs_(0) {}
 
-void DriveStraight::setConfig(const Config& cfg) { cfg_ = cfg; }
-const DriveStraight::Config& DriveStraight::config() const { return cfg_; }
+void DriveByDistance::setConfig(const Config& cfg) { cfg_ = cfg; }
+const DriveByDistance::Config& DriveByDistance::config() const { return cfg_; }
 
-void DriveStraight::begin(float headingDegContinuous,
-                          float avgTravelCm,
-                          float targetTravelCm,
-                          float requestedSpeed) {
+void DriveByDistance::beginByDistance(float headingDegContinuous,
+                                      float avgTravelCm,
+                                      float targetTravelCm,
+                                      float requestedSpeed) {
   stopMotors();
 
-  // Allow "no distance" mode when targetTravelCm < 0
-  infiniteDistance_ = (targetTravelCm < 0.0f);
-  if (infiniteDistance_) targetTravelCm = 0.0f; // keep internal values benign
+  if (!(targetTravelCm >= 0.0f)) targetTravelCm = 0.0f;
+  infiniteDistance_ = false;
 
   requestedSpeed_    = clampSigned1(requestedSpeed);
   targetTravelCm_    = targetTravelCm;
@@ -46,7 +45,7 @@ void DriveStraight::begin(float headingDegContinuous,
   startMs_ = millis();
 
   // Only allow immediate success when we actually have a distance target
-  if (!infiniteDistance_ && targetTravelCm_ <= cfg_.distanceToleranceCm) {
+  if (targetTravelCm_ <= cfg_.distanceToleranceCm) {
     state_ = State::Succeeded;
     return;
   }
@@ -54,7 +53,25 @@ void DriveStraight::begin(float headingDegContinuous,
   state_ = State::Running;
 }
 
-bool DriveStraight::update(float headingDegContinuous, float avgTravelCm) {
+void DriveByDistance::beginContinuous(float headingDegContinuous,
+                                      float avgTravelCm,
+                                      float requestedSpeed) {
+  stopMotors();
+
+  infiniteDistance_ = true;
+  requestedSpeed_ = clampSigned1(requestedSpeed);
+  targetTravelCm_ = 0.0f;
+  startTravelCm_ = avgTravelCm;
+  remainingTravelCm_ = 0.0f;
+
+  headingHoldDeg_ = headingDegContinuous;
+  headingErrorDeg_ = 0.0f;
+  startMs_ = millis();
+
+  state_ = State::Running;
+}
+
+bool DriveByDistance::update(float headingDegContinuous, float avgTravelCm) {
   if (state_ != State::Running) return true;
 
   const uint32_t now = millis();
@@ -116,12 +133,12 @@ bool DriveStraight::update(float headingDegContinuous, float avgTravelCm) {
   return false;
 }
 
-void DriveStraight::cancel() {
+void DriveByDistance::cancel() {
   stopMotors();
   state_ = State::Cancelled;
 }
 
-void DriveStraight::reset() {
+void DriveByDistance::reset() {
   stopMotors();
   state_ = State::Idle;
 
@@ -138,27 +155,27 @@ void DriveStraight::reset() {
   startMs_ = 0;
 }
 
-bool DriveStraight::active() const { return state_ == State::Running; }
-bool DriveStraight::succeeded() const { return state_ == State::Succeeded; }
-bool DriveStraight::timedOut() const { return state_ == State::TimedOut; }
-DriveStraight::State DriveStraight::state() const { return state_; }
+bool DriveByDistance::active() const { return state_ == State::Running; }
+bool DriveByDistance::succeeded() const { return state_ == State::Succeeded; }
+bool DriveByDistance::timedOut() const { return state_ == State::TimedOut; }
+DriveByDistance::State DriveByDistance::state() const { return state_; }
 
-float DriveStraight::remainingCm() const { return remainingTravelCm_; }
-float DriveStraight::headingErrorDeg() const { return headingErrorDeg_; }
+float DriveByDistance::remainingCm() const { return remainingTravelCm_; }
+float DriveByDistance::headingErrorDeg() const { return headingErrorDeg_; }
 
-void DriveStraight::setRequestedSpeed(float requestedSpeed) {
+void DriveByDistance::setRequestedSpeed(float requestedSpeed) {
   requestedSpeed_ = clampSigned1(requestedSpeed);
 }
 
-void DriveStraight::setHeadingHoldDeg(float headingDegContinuous) {
+void DriveByDistance::setHeadingHoldDeg(float headingDegContinuous) {
   headingHoldDeg_ = headingDegContinuous;
 }
 
-void DriveStraight::stopMotors() {
+void DriveByDistance::stopMotors() {
   motorDrive(0.0f, 0.0f);
 }
 
-float DriveStraight::computeForwardSpeed(float requestedSpeed, float remainingCmAbs) const {
+float DriveByDistance::computeForwardSpeed(float requestedSpeed, float remainingCmAbs) const {
   float speed = requestedSpeed;
   if (speed > cfg_.maxSpeed) speed = cfg_.maxSpeed;
 

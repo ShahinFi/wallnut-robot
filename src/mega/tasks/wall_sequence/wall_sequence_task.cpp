@@ -24,7 +24,7 @@ WallSequenceTask::WallSequenceTask()
   targetCm_(kTarget30Cm),
   startAvgCm_(0.0f),
   totalDrivenCm_(0.0f) {
-  DriveStraight::Config dcfg = drive_.config();
+  DriveByDistance::Config dcfg = drive_.config();
   dcfg.distanceToleranceCm = kToleranceCm;
   dcfg.slowDownCm          = 0.0f;
   dcfg.minSpeed            = kDriveSpeed;
@@ -161,7 +161,7 @@ void WallSequenceTask::setState_(State s) {
 void WallSequenceTask::startApproach_(float headingDegContinuous, float avgTravelCm, float targetCm) {
   targetCm_ = targetCm;
   if (!driveActive_) {
-    drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
+    drive_.beginContinuous(headingDegContinuous, avgTravelCm, 0.0f);
     drive_.setHeadingHoldDeg(headingDegContinuous);
     driveActive_ = true;
   }

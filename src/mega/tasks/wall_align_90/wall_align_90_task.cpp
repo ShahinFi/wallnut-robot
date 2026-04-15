@@ -21,7 +21,7 @@ WallAlign90Task::WallAlign90Task()
   turn_(),
   ui_(),
   driveActive_(false) {
-  DriveStraight::Config dcfg = drive_.config();
+  DriveByDistance::Config dcfg = drive_.config();
   dcfg.distanceToleranceCm = kToleranceCm;
   dcfg.slowDownCm          = 0.0f;
   dcfg.minSpeed            = kDriveSpeed;
@@ -163,7 +163,7 @@ void WallAlign90Task::setState_(State s) {
 
 void WallAlign90Task::startDrive_(float headingDegContinuous, float avgTravelCm) {
   if (!driveActive_) {
-    drive_.begin(headingDegContinuous, avgTravelCm, -1.0f, 0.0f);
+    drive_.beginContinuous(headingDegContinuous, avgTravelCm, 0.0f);
     drive_.setHeadingHoldDeg(headingDegContinuous);
     driveActive_ = true;
   }
