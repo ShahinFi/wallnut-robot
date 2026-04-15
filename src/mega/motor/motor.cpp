@@ -12,7 +12,7 @@ static const int kMotorLeftPwmPin  = 5;
 static const int kMotorRightPwmPin = 6;
 
 // Per-wheel calibration scale factors (defaults: no scaling)
-static float gLeftScale  = 1.3f;
+static float gLeftScale  = 1.0f;
 static float gRightScale = 1.0f;
 
 static float clampCmd(float x) {
