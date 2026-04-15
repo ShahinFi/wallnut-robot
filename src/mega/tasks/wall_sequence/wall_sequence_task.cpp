@@ -23,7 +23,7 @@ WallSequenceTask::WallSequenceTask()
   driveActive_(false),
   targetCm_(kTarget30Cm),
   startAvgCm_(0.0f),
-  totalDrivenCm_(0.0f) {
+  drivenCmAbs_(0.0f) {
   DriveByDistance::Config dcfg = drive_.config();
   dcfg.distanceToleranceCm = kToleranceCm;
   dcfg.slowDownCm          = 0.0f;
@@ -44,25 +44,25 @@ void WallSequenceTask::begin(float headingDegContinuous, float avgTravelCm) {
   turn_.reset();
   driveActive_ = false;
   startAvgCm_ = avgTravelCm;
-  totalDrivenCm_ = 0.0f;
+  drivenCmAbs_ = 0.0f;
   startApproach_(headingDegContinuous, avgTravelCm, kTarget30Cm);
   setState_(State::Approach30_1);
 }
 
-bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm) {
+bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, float avgTravelCmAbs, float lidarAvgCm) {
   if (state_ == State::Idle) return true;
   if (state_ == State::Succeeded || state_ == State::Failed || state_ == State::Cancelled) return true;
 
-  totalDrivenCm_ = totalAbsCm;
+  drivenCmAbs_ = avgTravelCmAbs;
 
   switch (state_) {
     case State::Approach30_1:
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::Approach30_1);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::Approach30_1);
       return approachUpdate_(headingDegContinuous, avgTravelCm, lidarAvgCm,
                              kTarget30Cm, State::TurnLeft_1);
 
     case State::TurnLeft_1: {
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::TurnLeft_1);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::TurnLeft_1);
       const bool done = turn_.update(headingDegContinuous);
       if (!done) return false;
       if (turn_.timedOut() || !turn_.succeeded()) {
@@ -76,12 +76,12 @@ bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, flo
     }
 
     case State::Approach15_2:
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::Approach15_2);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::Approach15_2);
       return approachUpdate_(headingDegContinuous, avgTravelCm, lidarAvgCm,
                              kTarget15Cm, State::TurnLeft_2);
 
     case State::TurnLeft_2: {
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::TurnLeft_2);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::TurnLeft_2);
       const bool done = turn_.update(headingDegContinuous);
       if (!done) return false;
       if (turn_.timedOut() || !turn_.succeeded()) {
@@ -95,12 +95,12 @@ bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, flo
     }
 
     case State::Approach30_3:
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::Approach30_3);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::Approach30_3);
       return approachUpdate_(headingDegContinuous, avgTravelCm, lidarAvgCm,
                              kTarget30Cm, State::TurnLeft_3);
 
     case State::TurnLeft_3: {
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::TurnLeft_3);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::TurnLeft_3);
       const bool done = turn_.update(headingDegContinuous);
       if (!done) return false;
       if (turn_.timedOut() || !turn_.succeeded()) {
@@ -114,10 +114,10 @@ bool WallSequenceTask::update(float headingDegContinuous, float avgTravelCm, flo
     }
 
     case State::Approach15_4:
-      ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::Approach15_4);
+      ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::Approach15_4);
       if (approachUpdate_(headingDegContinuous, avgTravelCm, lidarAvgCm,
                           kTarget15Cm, State::Succeeded)) {
-        ui_.showRunning(lidarAvgCm, totalDrivenCm_, WallSequenceUI::Phase::Done);
+        ui_.showRunning(lidarAvgCm, drivenCmAbs_, WallSequenceUI::Phase::Done);
         setState_(State::Succeeded);
         return true;
       }

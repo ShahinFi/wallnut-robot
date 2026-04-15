@@ -45,14 +45,14 @@ OdometryData Odometry::read() const {
   OdometryData d;
   const long ls = (long)gLeftSign * l;
   const long rs = (long)gRightSign * r;
-  d.leftPulses  = ls;
-  d.rightPulses = rs;
+  d.leftPulsesSigned  = ls;
+  d.rightPulsesSigned = rs;
 
-  d.leftCm  = pulsesToCm(ls);
-  d.rightCm = pulsesToCm(rs);
-  d.avgCm   = 0.5f * (d.leftCm + d.rightCm);
+  d.leftCmSigned  = pulsesToCm(ls);
+  d.rightCmSigned = pulsesToCm(rs);
+  d.avgCmSigned   = 0.5f * (d.leftCmSigned + d.rightCmSigned);
   const long avgPulsesAbs = (labs(l) + labs(r)) / 2;
-  d.totalAbsCm = pulsesToCm(avgPulsesAbs);
+  d.avgCmAbs = pulsesToCm(avgPulsesAbs);
   return d;
 }
 

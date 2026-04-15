@@ -212,7 +212,7 @@ void loop() {
 
   if (colorMazeTask.active()) {
     OdometryData od = odom.read();
-    colorMazeTask.update(heading.headingDegContinuous, od.avgCm, &lastRgb, lastRgbValid);
+    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
     return;
   }
 
@@ -283,13 +283,13 @@ void loop() {
       espSteps[1] = {SequenceStepType::End, 0.0f};
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     } else if (espCmd.type == EspCommand::Type::Turn) {
       espSteps[0] = {SequenceStepType::TurnDeg, (float)espCmd.value};
       espSteps[1] = {SequenceStepType::End, 0.0f};
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     } else if (espCmd.type == EspCommand::Type::North) {
       if (!seqHeadingSet) {
         Serial.println("Seq heading not set. Press 'h' first.");
@@ -299,7 +299,7 @@ void loop() {
         espSteps[1] = {SequenceStepType::End, 0.0f};
         seqExecTask.setSequence(espSteps);
         seqExecTask.clearAlignHeading();
-        seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+        seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
       }
     } else if (espCmd.type == EspCommand::Type::SetNorth) {
       seqHeadingHoldDeg = heading.headingDegContinuous;
@@ -319,13 +319,13 @@ void loop() {
         cfg.useNormalized = true;
         colorMazeTask.setConfig(cfg);
         colorMazeTask.setCalibration(colorCalTask.refs(), true);
-        colorMazeTask.begin(heading.headingDegContinuous, od.avgCm);
+        colorMazeTask.begin(heading.headingDegContinuous, od.avgCmSigned);
       } else {
         colorMazeTask.setCalibration(nullptr, false);
-        colorMazeTask.begin(heading.headingDegContinuous, od.avgCm);
+        colorMazeTask.begin(heading.headingDegContinuous, od.avgCmSigned);
       }
     } else if (espCmd.type == EspCommand::Type::EncCal) {
-      encCalTask.begin(heading.headingDegContinuous, od.avgCm);
+      encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
   }
 
@@ -361,7 +361,7 @@ void loop() {
       if (colorMazeTask.active()) colorMazeTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCm, 20.0f, 0.5f);
+      driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
     }
     if (c == 'w' || c == 'W') {
       if (roomTask.active()) roomTask.cancel();
@@ -373,7 +373,7 @@ void loop() {
       if (colorMazeTask.active()) colorMazeTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      wallAlignTask.begin(heading.headingDegContinuous, od.avgCm);
+      wallAlignTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 's' || c == 'S') {
       if (roomTask.active()) roomTask.cancel();
@@ -385,7 +385,7 @@ void loop() {
       if (colorMazeTask.active()) colorMazeTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      wallSeqTask.begin(heading.headingDegContinuous, od.avgCm);
+      wallSeqTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 'k' || c == 'K') {
       if (roomTask.active()) roomTask.cancel();
@@ -397,7 +397,7 @@ void loop() {
       if (colorMazeTask.active()) colorMazeTask.cancel();
       encoderReset();
       OdometryData od = odom.read();
-      encCalTask.begin(heading.headingDegContinuous, od.avgCm);
+      encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 'h' || c == 'H') {
       seqHeadingHoldDeg = heading.headingDegContinuous;
@@ -419,7 +419,7 @@ void loop() {
         Serial.println("Seq heading not set. Press 'h' first.");
       } else {
         seqExecTask.setAlignHeading(seqHeadingHoldDeg);
-        seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
+        seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
       }
     }
     if (c == 'c' || c == 'C') {
@@ -439,11 +439,11 @@ void loop() {
   // ---- Run tasks/actions ----
   if (seqExecTask.active()) {
     OdometryData od = odom.read();
-    seqExecTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);
+    seqExecTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
   } else if (encCalTask.active()) {
     OdometryData od = odom.read();
     const EncoderCalibrationTask::State prev = encCalTask.state();
-    encCalTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+    encCalTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
     if (prev != EncoderCalibrationTask::State::Succeeded &&
         encCalTask.state() == EncoderCalibrationTask::State::Succeeded) {
       const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
@@ -454,13 +454,13 @@ void loop() {
     }
   } else if (wallSeqTask.active()) {
     OdometryData od = odom.read();
-    wallSeqTask.update(heading.headingDegContinuous, od.avgCm, od.totalAbsCm, lidarFilteredCm);
+    wallSeqTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
   } else if (wallAlignTask.active()) {
     OdometryData od = odom.read();
-    wallAlignTask.update(heading.headingDegContinuous, od.avgCm, lidarFilteredCm);
+    wallAlignTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
   } else if (driveByDistance.active()) {
     OdometryData od = odom.read();
-    driveByDistance.update(heading.headingDegContinuous, od.avgCm);
+    driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
   } else if (followTask.active()) {
     followTask.update(heading.headingDegContinuous, 0.0f, lidarFilteredCm);
   } else {

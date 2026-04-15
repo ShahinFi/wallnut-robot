@@ -41,7 +41,7 @@ SequenceExecutorTask::SequenceExecutorTask()
   targetCm_(0.0f),
   moveByCm_(0.0f),
   stepStartMs_(0),
-  totalDrivenCm_(0.0f),
+  drivenCmAbs_(0.0f),
   alignEnabled_(false),
   aligning_(false),
   alignHeadingDeg_(0.0f),
@@ -91,7 +91,7 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   moveGuardTurnsDone_ = 0;
   moveGuardClearStreak_ = 0;
   stepIndex_ = 0;
-  totalDrivenCm_ = 0.0f;
+  drivenCmAbs_ = 0.0f;
   setState_(State::Running);
   if (alignEnabled_) {
     const float delta = wrapDegDiff180_(alignHeadingDeg_, headingDegContinuous);
@@ -103,7 +103,7 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   }
 }
 
-bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm) {
+bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm, float avgTravelCmAbs, float lidarAvgCm) {
   if (state_ == State::Idle) return true;
   if (state_ != State::Running) return true;
 
@@ -113,7 +113,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (aligning_) {
-    ui_.showRunning(lidarAvgCm, totalDrivenCm_, 0, totalSteps_, SequenceExecutorUI::StepLabel::Turn);
+    ui_.showRunning(lidarAvgCm, drivenCmAbs_, 0, totalSteps_, SequenceExecutorUI::StepLabel::Turn);
     if (stepTimedOut_()) {
       ui_.showFailed("Align timeout");
       setState_(State::Failed);
@@ -132,9 +132,9 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   const SequenceStep& step = steps_[stepIndex_];
-  totalDrivenCm_ = totalAbsCm;
+  drivenCmAbs_ = avgTravelCmAbs;
   if (step.type == SequenceStepType::End) {
-    ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
+    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::End);
     setState_(State::Succeeded);
     return true;
@@ -148,7 +148,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
 
   const bool inMove = (step.type == SequenceStepType::MoveToDistance ||
                        step.type == SequenceStepType::MoveByDistance);
-  if (inMove) totalDrivenCm_ = totalAbsCm;
+  if (inMove) drivenCmAbs_ = avgTravelCmAbs;
   if (inMove) {
     if (handleMoveGuard_(headingDegContinuous, avgTravelCm, lidarAvgCm)) {
       return state_ != State::Running;
@@ -156,7 +156,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (step.type == SequenceStepType::MoveToDistance) {
-    ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
+    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Move);
     // Forward motion uses the obstacle-aware scaling; backing up does not.
     const float error = lidarAvgCm - targetCm_;
@@ -187,7 +187,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (step.type == SequenceStepType::MoveByDistance) {
-    ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
+    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Move);
     if (!driveActive_) {
       startMove_(headingDegContinuous, avgTravelCm);
@@ -210,7 +210,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (step.type == SequenceStepType::TurnDeg) {
-    ui_.showRunning(lidarAvgCm, totalDrivenCm_, stepIndex_ + 1, totalSteps_,
+    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Turn);
     const bool done = turn_.update(headingDegContinuous);
     if (!done) return false;

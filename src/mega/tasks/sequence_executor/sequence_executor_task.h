@@ -25,7 +25,7 @@ public:
   void setAlignHeading(float headingDegContinuous);
   void clearAlignHeading();
   void begin(float headingDegContinuous, float avgTravelCm);
-  bool update(float headingDegContinuous, float avgTravelCm, float totalAbsCm, float lidarAvgCm);
+  bool update(float headingDegContinuous, float avgTravelCm, float avgTravelCmAbs, float lidarAvgCm);
 
   void cancel();
   void reset();
@@ -57,7 +57,7 @@ private:
   float    moveByCm_;
   uint32_t stepStartMs_;
 
-  float totalDrivenCm_;
+  float drivenCmAbs_;
 
   bool  alignEnabled_; 
   bool  aligning_;

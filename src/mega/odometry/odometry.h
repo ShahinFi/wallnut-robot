@@ -3,12 +3,19 @@
 #include <Arduino.h>
 
 struct OdometryData {
-  long  leftPulses;
-  long  rightPulses;
-  float leftCm;
-  float rightCm;
-  float avgCm;
-  float totalAbsCm;
+  // Signed values depend on wheel direction hints coming from the motor layer
+  // (single-channel encoders cannot infer direction on their own).
+  long  leftPulsesSigned;
+  long  rightPulsesSigned;
+  float leftCmSigned;
+  float rightCmSigned;
+
+  // Signed forward/backward travel (average of left/right).
+  float avgCmSigned;
+
+  // Absolute travel magnitude (average of abs(left), abs(right)), always >= 0.
+  // Note: despite the historic "total" naming, this is an average, not a sum.
+  float avgCmAbs;
 };
 
 class Odometry {
