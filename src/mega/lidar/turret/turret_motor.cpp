@@ -16,7 +16,7 @@ static inline float clampSigned1(float x) {
 }
 }  // namespace
 
-TurretMotor::TurretMotor() : lastCmd_(0.0f) {}
+TurretMotor::TurretMotor() : cmdSign_(1), lastCmd_(0.0f) {}
 
 void TurretMotor::begin() {
   pinMode(kTurretDirPin, OUTPUT);
@@ -29,12 +29,19 @@ void TurretMotor::begin() {
   attachInterrupt(digitalPinToInterrupt(kTurretEncAPin), TurretMotor::isr_, RISING);
 }
 
+void TurretMotor::setCmdSign(int cmdSign) {
+  cmdSign_ = (cmdSign < 0) ? -1 : 1;
+}
+
+int TurretMotor::cmdSign() const { return cmdSign_; }
+
 void TurretMotor::setCmd(float cmd) {
   cmd = clampSigned1(cmd);
   lastCmd_ = cmd;
 
-  const int dir = (cmd >= 0.0f) ? HIGH : LOW;
-  const int pwm = (int)(fabsf(cmd) * 255.0f + 0.5f);
+  const float hwCmd = cmd * (float)cmdSign_;
+  const int dir = (hwCmd >= 0.0f) ? HIGH : LOW;
+  const int pwm = (int)(fabsf(hwCmd) * 255.0f + 0.5f);
 
   digitalWrite(kTurretDirPin, dir);
   analogWrite(kTurretPwmPin, pwm);

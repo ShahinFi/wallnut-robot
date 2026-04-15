@@ -20,6 +20,12 @@ public:
 
   void begin();
 
+  // Invert wiring in software:
+  // - cmdSign = +1 (default): positive cmd drives "forward" direction
+  // - cmdSign = -1: swaps directions without changing higher-level logic
+  void setCmdSign(int cmdSign);
+  int  cmdSign() const;
+
   // Normalized command in [-1..1]. Sign selects direction; magnitude selects PWM.
   void setCmd(float cmd);
   void stop();
@@ -35,6 +41,6 @@ public:
 private:
   static void isr_();
 
+  int cmdSign_;
   float lastCmd_;
 };
-
