@@ -58,6 +58,12 @@ function faceNorth() {
   console.log("face north");
 }
 
+// Set current heading as "north" reference (used by FACE NORTH)
+function setNorth() {
+  sendCommand("/setnorth");
+  console.log("set north");
+}
+
 // Solve maze
 function solveMaze() {
   sendCommand("/maze");

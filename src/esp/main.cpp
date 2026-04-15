@@ -23,6 +23,7 @@ static const size_t kMaxSerialLineLen = 128;
 void handleNotFound();
 void handleMove(int distance);
 void handleNorth();
+void handleSetNorth();
 void handleCompass();
 void handleLidar();
 void handleCompassData();
@@ -79,6 +80,7 @@ void setup() {
   server.on("/backwards20", []() { handleMove(-20); });
   server.on("/compass", handleCompass);
   server.on("/north", []() { handleNorth(); });
+  server.on("/setnorth", []() { handleSetNorth(); });
   server.on("/maze", handleMaze);
   server.on("/lidar", handleLidar);
   server.on("/compassdata", handleCompassData);
@@ -182,6 +184,12 @@ void handleNorth() {
   if (!requireAuth()) return;
   Serial.println("North");
   server.send(200, "text/plain", "North OK");
+}
+
+void handleSetNorth() {
+  if (!requireAuth()) return;
+  Serial.println("SetNorth");
+  server.send(200, "text/plain", "SetNorth OK");
 }
 
 void handleLidar() {

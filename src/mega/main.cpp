@@ -239,6 +239,11 @@ void loop() {
         seqExecTask.clearAlignHeading();
         seqExecTask.begin(heading.headingDegContinuous, od.avgCm);
       }
+    } else if (espCmd.type == EspCommand::Type::SetNorth) {
+      seqHeadingHoldDeg = heading.headingDegContinuous;
+      seqHeadingSet = true;
+      Serial.print("Seq heading set (ESP): ");
+      Serial.println(seqHeadingHoldDeg, 2);
     } else if (espCmd.type == EspCommand::Type::Maze) {
       if (colorCalTask.hasCalibration()) {
         ColorMazeTask::Config cfg;
