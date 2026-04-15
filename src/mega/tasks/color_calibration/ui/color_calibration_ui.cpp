@@ -22,10 +22,10 @@ void ColorCalibrationUI::showIdle() {
   lcdWrite(2, 0, "ESP mode active");
 }
 
-void ColorCalibrationUI::showPrompt(uint8_t index, const ColorRgb* live, bool liveValid) {
+void ColorCalibrationUI::showPrompt(uint8_t index, uint8_t total, const ColorRgb* live, bool liveValid) {
   char line2[21];
   char line3[21];
-  snprintf(line2, sizeof(line2), "Show Color %u", index);
+  snprintf(line2, sizeof(line2), "Show Color %u/%u", index, total);
   formatRgb(line3, sizeof(line3), live, liveValid);
 
   lcdWrite(0, 0, "Color Calib");
@@ -34,10 +34,10 @@ void ColorCalibrationUI::showPrompt(uint8_t index, const ColorRgb* live, bool li
   lcdWrite(3, 0, line3);
 }
 
-void ColorCalibrationUI::showSaved(uint8_t index, const ColorRgb& saved) {
+void ColorCalibrationUI::showSaved(uint8_t index, uint8_t total, const ColorRgb& saved) {
   char line2[21];
   char line3[21];
-  snprintf(line2, sizeof(line2), "Saved Color %u", index);
+  snprintf(line2, sizeof(line2), "Saved Color %u/%u", index, total);
   formatRgb(line3, sizeof(line3), &saved, true);
 
   lcdWrite(0, 0, "Color Calib");
@@ -46,16 +46,18 @@ void ColorCalibrationUI::showSaved(uint8_t index, const ColorRgb& saved) {
   lcdWrite(3, 0, line3);
 }
 
-void ColorCalibrationUI::showDone() {
+void ColorCalibrationUI::showDone(uint8_t total) {
+  char line2[21];
+  snprintf(line2, sizeof(line2), "Saved %u colors", total);
   lcdWrite(0, 0, "Color Calib");
-  lcdWrite(1, 0, "Saved 3 colors");
+  lcdWrite(1, 0, line2);
   lcdWrite(2, 0, "Returning...");
   lcdWrite(3, 0, "ESP mode active");
 }
 
-void ColorCalibrationUI::showSensorInvalid(uint8_t index) {
+void ColorCalibrationUI::showSensorInvalid(uint8_t index, uint8_t total) {
   char line2[21];
-  snprintf(line2, sizeof(line2), "Show Color %u", index);
+  snprintf(line2, sizeof(line2), "Show Color %u/%u", index, total);
   lcdWrite(0, 0, "Color Calib");
   lcdWrite(1, 0, line2);
   lcdWrite(2, 0, "Sensor invalid");

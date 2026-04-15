@@ -5,7 +5,9 @@
 
 namespace {
 const uint32_t kDoneHoldMs = 2000;
-const uint16_t kEepromMagic = 0xC0A1;
+// NOTE: bumping magic because calibration payload size changed (3 -> 4 colors).
+// Old EEPROM data will be ignored and needs recalibration.
+const uint16_t kEepromMagic = 0xC0A2;
 const int kEepromAddr = 16;
 }
 
@@ -18,7 +20,7 @@ ColorCalibrationTask::ColorCalibrationTask()
 
 void ColorCalibrationTask::begin() {
   ui_.begin();
-  ui_.showPrompt(1, nullptr, false);
+  ui_.showPrompt(1, kColorCount, nullptr, false);
   doneStartMs_ = 0;
   setState_(State::Prompt1);
 }
@@ -35,9 +37,10 @@ void ColorCalibrationTask::update(const ColorRgb* live, bool liveValid) {
     return;
   }
 
-  if (state_ == State::Prompt1) ui_.showPrompt(1, live, liveValid);
-  if (state_ == State::Prompt2) ui_.showPrompt(2, live, liveValid);
-  if (state_ == State::Prompt3) ui_.showPrompt(3, live, liveValid);
+  if (state_ == State::Prompt1) ui_.showPrompt(1, kColorCount, live, liveValid);
+  if (state_ == State::Prompt2) ui_.showPrompt(2, kColorCount, live, liveValid);
+  if (state_ == State::Prompt3) ui_.showPrompt(3, kColorCount, live, liveValid);
+  if (state_ == State::Prompt4) ui_.showPrompt(4, kColorCount, live, liveValid);
 }
 
 void ColorCalibrationTask::onButtonPress(const ColorRgb* live, bool liveValid) {
@@ -47,28 +50,36 @@ void ColorCalibrationTask::onButtonPress(const ColorRgb* live, bool liveValid) {
   }
 
   if (!liveValid || live == nullptr) {
-    const uint8_t idx = (state_ == State::Prompt1) ? 1 : (state_ == State::Prompt2) ? 2 : 3;
-    ui_.showSensorInvalid(idx);
+    uint8_t idx = 1;
+    if (state_ == State::Prompt2) idx = 2;
+    else if (state_ == State::Prompt3) idx = 3;
+    else if (state_ == State::Prompt4) idx = 4;
+    ui_.showSensorInvalid(idx, kColorCount);
     return;
   }
 
   if (state_ == State::Prompt1) {
     capture_(1, *live);
-    ui_.showSaved(1, refs_[0]);
+    ui_.showSaved(1, kColorCount, refs_[0]);
     setState_(State::Prompt2);
     return;
   }
   if (state_ == State::Prompt2) {
     capture_(2, *live);
-    ui_.showSaved(2, refs_[1]);
+    ui_.showSaved(2, kColorCount, refs_[1]);
     setState_(State::Prompt3);
     return;
   }
   if (state_ == State::Prompt3) {
     capture_(3, *live);
-    ui_.showSaved(3, refs_[2]);
+    ui_.showSaved(3, kColorCount, refs_[2]);
+    setState_(State::Prompt4);
+    return;
+  }
+  if (state_ == State::Prompt4) {
+    capture_(4, *live);
     saveToEeprom_();
-    ui_.showDone();
+    ui_.showDone(kColorCount);
     doneStartMs_ = millis();
     setState_(State::Done);
     return;
@@ -83,7 +94,7 @@ const ColorRgb* ColorCalibrationTask::refs() const { return refs_; }
 void ColorCalibrationTask::setState_(State s) { state_ = s; }
 
 void ColorCalibrationTask::capture_(uint8_t index, const ColorRgb& rgb) {
-  if (index < 1 || index > 3) return;
+  if (index < 1 || index > kColorCount) return;
   refs_[index - 1] = rgb;
 }
 

@@ -6,7 +6,8 @@
 
 class ColorCalibrationTask {
 public:
-  enum class State : uint8_t { Idle, Prompt1, Prompt2, Prompt3, Done };
+  static constexpr uint8_t kColorCount = 4;
+  enum class State : uint8_t { Idle, Prompt1, Prompt2, Prompt3, Prompt4, Done };
 
   ColorCalibrationTask();
 
@@ -26,7 +27,7 @@ private:
   bool saveToEeprom_();
 
   State state_;
-  ColorRgb refs_[3];
+  ColorRgb refs_[kColorCount];
   bool hasCalibration_;
   uint32_t doneStartMs_;
   ColorCalibrationUI ui_;
