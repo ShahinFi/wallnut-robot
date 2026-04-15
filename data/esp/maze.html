@@ -54,6 +54,17 @@
               <div id="encCalValue">--</div>
             </div>
           </div>
+
+          <h2>Turret Calibration</h2>
+          <div class="maze-actions">
+            <button class="button button-secondary" data-requires-arm="1" onclick="startTurretCalibration()">START (TURN 360)</button>
+            <button class="button button-secondary" data-requires-arm="1" onclick="finishTurretCalibration()">DONE</button>
+            <button class="button button-outline" data-requires-arm="1" onclick="setTurretZero()">SET ZERO</button>
+            <div class="readout readout-compact">
+              <div class="mini-label">TICKS / REV</div>
+              <div id="turretCalValue">--</div>
+            </div>
+          </div>
         </section>
 
         <section class="panel sensor maze-lidar">

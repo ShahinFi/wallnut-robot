@@ -28,11 +28,13 @@ function setSensorPlaceholdersLocked(locked) {
   const colorEl = document.getElementById("colorValue");
   const swatchEl = document.getElementById("colorSwatch");
   const encEl = document.getElementById("encCalValue");
+  const turretEl = document.getElementById("turretCalValue");
   const warnEl = document.getElementById("lidarWarning");
   if (lidarEl) lidarEl.innerText = locked ? "LOCKED" : "-- cm";
   if (compassEl) compassEl.innerText = "--";
   if (colorEl) colorEl.innerText = "--";
   if (encEl) encEl.innerText = "--";
+  if (turretEl) turretEl.innerText = "--";
   if (swatchEl) {
     swatchEl.style.backgroundColor = "transparent";
     swatchEl.classList.add("is-empty");
@@ -151,6 +153,28 @@ function startEncoderCalibration() {
     .catch(() => {});
 }
 
+function startTurretCalibration() {
+  sendCommand("/turret_cal_start", { method: "POST" })
+    .then(() => {
+      const el = document.getElementById("turretCalValue");
+      if (el) el.innerText = "CALIBRATING...";
+    })
+    .catch(() => {});
+}
+
+function finishTurretCalibration() {
+  sendCommand("/turret_cal_done", { method: "POST" })
+    .then(() => {
+      const el = document.getElementById("turretCalValue");
+      if (el) el.innerText = "SAVING...";
+    })
+    .catch(() => {});
+}
+
+function setTurretZero() {
+  sendCommand("/turret_zero", { method: "POST" }).catch(() => {});
+}
+
 // Encoder calibration polling
 const encCalValueEl = document.getElementById("encCalValue");
 async function pollEncCal() {
@@ -175,6 +199,31 @@ async function pollEncCal() {
 
 setInterval(pollEncCal, 700);
 pollEncCal();
+
+// Turret calibration polling
+const turretCalValueEl = document.getElementById("turretCalValue");
+async function pollTurretCal() {
+  if (pollingPaused()) return;
+  if (requiresArmDisabled()) return;
+  try {
+    const res = await fetch("/turret_cal", { cache: "no-store" });
+    if (!res.ok) return;
+    const text = (await res.text()).trim();
+    if (!turretCalValueEl) return;
+    if (text === "--" || text.length === 0) {
+      turretCalValueEl.innerText = "--";
+      return;
+    }
+    if (text.startsWith("TURCAL:")) {
+      turretCalValueEl.innerText = text.substring(7).trim();
+      return;
+    }
+    turretCalValueEl.innerText = text;
+  } catch (e) {}
+}
+
+setInterval(pollTurretCal, 700);
+pollTurretCal();
 
 // Lidar polling
 const lidarValueEl = document.getElementById("lidarValue");

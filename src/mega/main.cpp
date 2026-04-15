@@ -3,6 +3,8 @@
 #include "compass/compass.h"
 #include "lidar/lidar.h"
 #include "lidar/utils/moving_average.h"
+#include "lidar/turret/turret_motor.h"
+#include "lidar/turret/turret_encoder_cal.h"
 #include "motor/motor.h"
 #include "display/lcd.h"
 #include "encoder/encoder.h"
@@ -26,6 +28,8 @@
 static Compass         compass;
 static Lidar           lidar;
 static MovingAverage   lidarAvg;
+static TurretMotor     turretMotor;
+static TurretEncoderCal turretEncCal;
 static RoomMeasureTask roomTask;
 static FollowDistanceTask followTask;
 static uint32_t        lastCompassUiMs = 0;
@@ -97,6 +101,9 @@ void setup() {
     Serial.println("LiDAR failed");
     while (1) {}
   }
+
+  turretMotor.begin();
+  turretEncCal.loadFromEeprom();
   colorSensorOk = colorSensor.begin();
   if (!colorSensorOk) {
     Serial.println("Color sensor failed (continuing without RGB telemetry)");
@@ -117,6 +124,10 @@ void setup() {
   if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
     Serial2.print("ENC_CAL:");
     Serial2.println(mmPerPulse, 2);
+  }
+  if (turretEncCal.hasCalibration()) {
+    Serial2.print("TURCAL:");
+    Serial2.println((unsigned long)turretEncCal.ticksPerRev());
   }
 
   // --- Odometry (set your pulses/meter) ---
@@ -224,18 +235,6 @@ void loop() {
 
   EspCommand espCmd;
   if (espPoll(espCmd)) {
-    if (roomTask.active()) roomTask.cancel();
-    if (followTask.active()) followTask.cancel();
-    if (driveByDistance.active()) driveByDistance.cancel();
-    if (wallAlignTask.active()) wallAlignTask.cancel();
-    if (wallSeqTask.active()) wallSeqTask.cancel();
-    if (encCalTask.active()) encCalTask.cancel();
-    if (seqExecTask.active()) seqExecTask.cancel();
-    if (colorMazeTask.active()) colorMazeTask.cancel();
-
-    odomHardResetKeepWorld(heading.headingDegContinuous);
-    OdometryData od = odomRaw();
-
     if (espCmd.type == EspCommand::Type::Passcode) {
       if (gEspLocked) {
         Serial2.println("AUTH:LOCKED");
@@ -283,6 +282,37 @@ void loop() {
       motorDrive(0.0f, 0.0f);
       return;
     }
+
+    if (espCmd.type == EspCommand::Type::TurretCalStart) {
+      turretEncCal.start(turretMotor.ticksAbs());
+      Serial.println("Turret cal start");
+      return;
+    } else if (espCmd.type == EspCommand::Type::TurretCalDone) {
+      const bool ok = turretEncCal.finish(turretMotor.ticksAbs());
+      Serial.println(ok ? "Turret cal done" : "Turret cal failed");
+      if (ok) {
+        Serial2.print("TURCAL:");
+        Serial2.println((unsigned long)turretEncCal.ticksPerRev());
+      }
+      return;
+    } else if (espCmd.type == EspCommand::Type::TurretZero) {
+      turretEncCal.setZeroTicks(turretMotor.ticksAbs());
+      Serial.println("Turret zero set");
+      return;
+    }
+
+    // Commands below this point are motion/task-affecting.
+    if (roomTask.active()) roomTask.cancel();
+    if (followTask.active()) followTask.cancel();
+    if (driveByDistance.active()) driveByDistance.cancel();
+    if (wallAlignTask.active()) wallAlignTask.cancel();
+    if (wallSeqTask.active()) wallSeqTask.cancel();
+    if (encCalTask.active()) encCalTask.cancel();
+    if (seqExecTask.active()) seqExecTask.cancel();
+    if (colorMazeTask.active()) colorMazeTask.cancel();
+
+    odomHardResetKeepWorld(heading.headingDegContinuous);
+    OdometryData od = odomRaw();
 
     if (espCmd.type == EspCommand::Type::Move) {
       espSteps[0] = {SequenceStepType::MoveByDistance, (float)espCmd.value};

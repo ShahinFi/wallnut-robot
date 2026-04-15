@@ -61,6 +61,24 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
+  if (s.equalsIgnoreCase("TurretCalStart")) {
+    out.type = EspCommand::Type::TurretCalStart;
+    out.value = 0;
+    out.text = "";
+    return true;
+  }
+  if (s.equalsIgnoreCase("TurretCalDone")) {
+    out.type = EspCommand::Type::TurretCalDone;
+    out.value = 0;
+    out.text = "";
+    return true;
+  }
+  if (s.equalsIgnoreCase("TurretZero")) {
+    out.type = EspCommand::Type::TurretZero;
+    out.value = 0;
+    out.text = "";
+    return true;
+  }
   return false;
 }
 

@@ -12,6 +12,7 @@ String lidarPacket = "LIDAR:0,SEQ:0,T:0";
 String compassData = "0,N";
 String rgbPacket = "RGB:0,0,0";
 String encCalPacket = "ENC_CAL:--";
+String turretCalPacket = "TURCAL:--";
 
 ESP8266WebServer server(80);
 static String serialLineBuf;
@@ -39,6 +40,10 @@ void handleArm();
 void handleDisarm();
 void handleAuth();
 void handleEncCal();
+void handleTurretCal();
+void handleTurretCalStart();
+void handleTurretCalDone();
+void handleTurretZero();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
@@ -102,6 +107,10 @@ void setup() {
   server.on("/disarm", HTTP_POST, handleDisarm);
   server.on("/auth", handleAuth);
   server.on("/enc_cal", handleEncCal);
+  server.on("/turret_cal", handleTurretCal);
+  server.on("/turret_cal_start", HTTP_POST, handleTurretCalStart);
+  server.on("/turret_cal_done", HTTP_POST, handleTurretCalDone);
+  server.on("/turret_zero", HTTP_POST, handleTurretZero);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -152,6 +161,8 @@ void processSerialLine(const String& data) {
     rgbPacket = data;
   } else if (data.startsWith("ENC_CAL:")) {
     encCalPacket = data;
+  } else if (data.startsWith("TURCAL:")) {
+    turretCalPacket = data;
   }
 }
 
@@ -273,6 +284,33 @@ void handleEncCal() {
     return;
   }
   server.send(200, "text/plain", encCalPacket);
+}
+
+void handleTurretCal() {
+  // GET: show last calibrated ticks/rev cached from Mega.
+  if (!isArmed()) {
+    server.send(200, "text/plain", "--");
+    return;
+  }
+  server.send(200, "text/plain", turretCalPacket);
+}
+
+void handleTurretCalStart() {
+  if (!isArmed()) return rejectNotArmed();
+  Serial.println("TurretCalStart");
+  server.send(200, "text/plain", "STARTED");
+}
+
+void handleTurretCalDone() {
+  if (!isArmed()) return rejectNotArmed();
+  Serial.println("TurretCalDone");
+  server.send(200, "text/plain", "DONE");
+}
+
+void handleTurretZero() {
+  if (!isArmed()) return rejectNotArmed();
+  Serial.println("TurretZero");
+  server.send(200, "text/plain", "OK");
 }
 
 void handleMaze() {
