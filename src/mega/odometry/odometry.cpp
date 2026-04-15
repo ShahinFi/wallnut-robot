@@ -8,6 +8,14 @@ namespace {
 int gLeftSign = 1;
 int gRightSign = 1;
 
+// Single-channel encoders only count upward. To provide signed distance we
+// integrate signed deltas using the last commanded wheel direction sign.
+bool gHasPrevRaw = false;
+long gPrevLeftRaw = 0;
+long gPrevRightRaw = 0;
+long gLeftSignedAcc = 0;
+long gRightSignedAcc = 0;
+
 int clampSign(int v) {
   if (v > 0) return 1;
   if (v < 0) return -1;
@@ -42,15 +50,33 @@ OdometryData Odometry::read() const {
   const long l = encoderGetLeft();
   const long r = encoderGetRight();
 
+  // Detect encoderReset() (raw counts drop) or first use, then re-base.
+  if (!gHasPrevRaw || l < gPrevLeftRaw || r < gPrevRightRaw) {
+    gHasPrevRaw = true;
+    gPrevLeftRaw = l;
+    gPrevRightRaw = r;
+    gLeftSignedAcc = 0;
+    gRightSignedAcc = 0;
+  } else {
+    const long dl = l - gPrevLeftRaw;
+    const long dr = r - gPrevRightRaw;
+    gPrevLeftRaw = l;
+    gPrevRightRaw = r;
+
+    gLeftSignedAcc += (long)gLeftSign * dl;
+    gRightSignedAcc += (long)gRightSign * dr;
+  }
+
   OdometryData d;
-  const long ls = (long)gLeftSign * l;
-  const long rs = (long)gRightSign * r;
+  const long ls = gLeftSignedAcc;
+  const long rs = gRightSignedAcc;
   d.leftPulsesSigned  = ls;
   d.rightPulsesSigned = rs;
 
   d.leftCmSigned  = pulsesToCm(ls);
   d.rightCmSigned = pulsesToCm(rs);
   d.avgCmSigned   = 0.5f * (d.leftCmSigned + d.rightCmSigned);
+  // Absolute travel since last reset (raw encoders only count up).
   const long avgPulsesAbs = (labs(l) + labs(r)) / 2;
   d.avgCmAbs = pulsesToCm(avgPulsesAbs);
   return d;

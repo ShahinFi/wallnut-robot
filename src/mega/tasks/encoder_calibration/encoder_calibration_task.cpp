@@ -3,6 +3,7 @@
 #include <math.h>
 #include <EEPROM.h>
 #include "encoder/encoder.h"
+#include "odometry/odometry_manager.h"
 
 namespace {
 const float    kTargetDeltaCm     = 20.0f;
@@ -40,7 +41,9 @@ void EncoderCalibrationTask::begin(float headingDegContinuous, float avgTravelCm
   ui_.begin();
   ui_.showIdle();
   drive_.reset();
-  encoderReset();
+  // Hard reset is intentional here because we measure raw pulses over a known delta distance.
+  // Use the odometry manager wrapper to keep world-frame odometry consistent.
+  odomHardResetKeepWorld(headingDegContinuous);
   startAvgTravelCm_ = avgTravelCm;
   (void)headingDegContinuous;
   setState_(State::CheckStart);

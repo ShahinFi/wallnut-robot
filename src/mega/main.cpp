@@ -7,6 +7,7 @@
 #include "display/lcd.h"
 #include "encoder/encoder.h"
 #include "odometry/odometry.h"
+#include "odometry/odometry_manager.h"
 #include "actions/drive_by_distance.h"
 #include "tasks/wall_align_90/wall_align_90_task.h"
 #include "tasks/wall_sequence/wall_sequence_task.h"
@@ -120,6 +121,7 @@ void setup() {
 
   // --- Odometry (set your pulses/meter) ---
   odom.setPulsesPerMeter(787.0f);
+  odomManagerInit(&odom);
 
   // --- DriveByDistance test config ---
   DriveByDistance::Config dcfg = driveByDistance.config();
@@ -170,6 +172,10 @@ void loop() {
   telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel);
   telemetryTestUpdate(lidarFilteredCm);
 
+  // ---- Odometry manager (local + world-frame) ----
+  // Integrates world-frame East/North continuously.
+  odomManagerUpdate(heading.headingDegContinuous);
+
   const uint32_t nowMs = millis();
   if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
     lastRgbMs = nowMs;
@@ -211,7 +217,7 @@ void loop() {
   }
 
   if (colorMazeTask.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
     return;
   }
@@ -227,8 +233,8 @@ void loop() {
     if (seqExecTask.active()) seqExecTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
 
-    encoderReset();
-    OdometryData od = odom.read();
+    odomHardResetKeepWorld(heading.headingDegContinuous);
+    OdometryData od = odomRaw();
 
     if (espCmd.type == EspCommand::Type::Passcode) {
       if (gEspLocked) {
@@ -359,8 +365,8 @@ void loop() {
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
-      encoderReset();
-      OdometryData od = odom.read();
+      odomHardResetKeepWorld(heading.headingDegContinuous);
+      OdometryData od = odomRaw();
       driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
     }
     if (c == 'w' || c == 'W') {
@@ -371,8 +377,8 @@ void loop() {
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
-      encoderReset();
-      OdometryData od = odom.read();
+      odomHardResetKeepWorld(heading.headingDegContinuous);
+      OdometryData od = odomRaw();
       wallAlignTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 's' || c == 'S') {
@@ -383,8 +389,8 @@ void loop() {
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
-      encoderReset();
-      OdometryData od = odom.read();
+      odomHardResetKeepWorld(heading.headingDegContinuous);
+      OdometryData od = odomRaw();
       wallSeqTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 'k' || c == 'K') {
@@ -395,8 +401,8 @@ void loop() {
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
-      encoderReset();
-      OdometryData od = odom.read();
+      odomHardResetKeepWorld(heading.headingDegContinuous);
+      OdometryData od = odomRaw();
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 'h' || c == 'H') {
@@ -413,8 +419,8 @@ void loop() {
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
-      encoderReset();
-      OdometryData od = odom.read();
+      odomHardResetKeepWorld(heading.headingDegContinuous);
+      OdometryData od = odomRaw();
       if (!seqHeadingSet) {
         Serial.println("Seq heading not set. Press 'h' first.");
       } else {
@@ -438,10 +444,10 @@ void loop() {
 
   // ---- Run tasks/actions ----
   if (seqExecTask.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     seqExecTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
   } else if (encCalTask.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     const EncoderCalibrationTask::State prev = encCalTask.state();
     encCalTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
     if (prev != EncoderCalibrationTask::State::Succeeded &&
@@ -453,13 +459,13 @@ void loop() {
       }
     }
   } else if (wallSeqTask.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     wallSeqTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
   } else if (wallAlignTask.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     wallAlignTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
   } else if (driveByDistance.active()) {
-    OdometryData od = odom.read();
+    OdometryData od = odomRaw();
     driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
   } else if (followTask.active()) {
     followTask.update(heading.headingDegContinuous, 0.0f, lidarFilteredCm);
