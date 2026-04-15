@@ -20,13 +20,11 @@ public:
   bool begin(TwoWire& wire = Wire);
   bool read(CompassData& out);
 
-  // Offset controls (pass-through to Compass)
-  void  setHeadingOffsetDeg(float headingOffsetDeg);
-  float headingOffsetDeg() const;
-  bool  zeroHeadingAtCurrent();
-  void  resetHeadingContinuous();
+  // Full access to the underlying Compass implementation (0x61).
+  // Prefer using this instead of duplicating pass-through methods.
+  Compass& raw();
+  const Compass& raw() const;
 
 private:
   Compass compass_;
 };
-

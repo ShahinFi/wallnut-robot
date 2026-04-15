@@ -14,18 +14,6 @@ bool TurretCompass::read(CompassData& out) {
   return compass_.read(out);
 }
 
-void TurretCompass::setHeadingOffsetDeg(float headingOffsetDeg) {
-  compass_.setHeadingOffsetDeg(headingOffsetDeg);
-}
+Compass& TurretCompass::raw() { return compass_; }
 
-float TurretCompass::headingOffsetDeg() const {
-  return compass_.headingOffsetDeg();
-}
-
-bool TurretCompass::zeroHeadingAtCurrent() {
-  return compass_.zeroHeadingAtCurrent();
-}
-
-void TurretCompass::resetHeadingContinuous() {
-  compass_.resetHeadingContinuous();
-}
+const Compass& TurretCompass::raw() const { return compass_; }
