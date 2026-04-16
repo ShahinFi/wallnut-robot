@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -40,6 +40,7 @@
               <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
             </div>
             <div id="authStatus" class="auth-status">DISARMED</div>
+            <div id="linkStatus" class="auth-status">LINK: --</div>
           </div>
           <div class="maze-actions">
             <button class="button button-primary" data-requires-arm="1" onclick="startMazeSolver()">START MAZE SOLVER</button>
@@ -56,10 +57,12 @@
           </div>
 
           <h2>Turret Calibration</h2>
-          <div class="maze-actions">
-            <button class="button button-secondary" data-requires-arm="1" onclick="startTurretCalibration()">START (TURN 360)</button>
-            <button class="button button-secondary" data-requires-arm="1" onclick="finishTurretCalibration()">DONE</button>
-            <button class="button button-outline" data-requires-arm="1" onclick="setTurretZero()">SET ZERO</button>
+          <div class="maze-actions turret-actions">
+            <div class="turret-btn-grid">
+              <button class="button button-secondary" data-requires-arm="1" onclick="startTurretCalibration()">START (TURN 360)</button>
+              <button class="button button-secondary" data-requires-arm="1" onclick="finishTurretCalibration()">DONE</button>
+              <button class="button button-outline turret-zero" data-requires-arm="1" onclick="setTurretZero()">SET ZERO</button>
+            </div>
             <div class="readout readout-compact">
               <div class="mini-label">TICKS / REV</div>
               <div id="turretCalValue">--</div>

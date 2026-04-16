@@ -1,10 +1,17 @@
-// Maze page JS: reuses existing telemetry endpoints and the existing /maze command.
+﻿// Maze page JS: reuses existing telemetry endpoints and the existing /maze command.
 // Note: encoder mm/pulse needs firmware support to populate; stays "--" for now.
 
 let pendingCommands = 0;
+const kFetchTimeoutMs = 1200;
+
+function fetchWithTimeout(path, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), kFetchTimeoutMs);
+  return fetch(path, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
+}
 function sendCommand(path, options = {}) {
   pendingCommands++;
-  return fetch(path, { cache: "no-store", ...options })
+  return fetchWithTimeout(path, { cache: "no-store", ...options })
     .catch(() => {})
     .finally(() => {
       pendingCommands = Math.max(0, pendingCommands - 1);
@@ -13,6 +20,21 @@ function sendCommand(path, options = {}) {
 function pollingPaused() {
   return pendingCommands > 0;
 }
+
+const DEG = "\u00B0";
+
+const CalUiState = Object.freeze({
+  Idle: "idle",
+  Running: "running",
+  Saving: "saving",
+  Done: "done",
+  Error: "error",
+});
+
+let encCalUiState = CalUiState.Idle;
+let turretCalUiState = CalUiState.Idle;
+let turretDoneWaitStartMs = 0;
+const kTurretDoneWaitTimeoutMs = 8000;
 
 function setControlsEnabled(enabled) {
   document.querySelectorAll("[data-requires-arm='1']").forEach((el) => {
@@ -35,6 +57,11 @@ function setSensorPlaceholdersLocked(locked) {
   if (colorEl) colorEl.innerText = "--";
   if (encEl) encEl.innerText = "--";
   if (turretEl) turretEl.innerText = "--";
+  if (locked) {
+    encCalUiState = CalUiState.Idle;
+    turretCalUiState = CalUiState.Idle;
+    turretDoneWaitStartMs = 0;
+  }
   if (swatchEl) {
     swatchEl.style.backgroundColor = "transparent";
     swatchEl.classList.add("is-empty");
@@ -54,9 +81,15 @@ function requiresArmDisabled() {
 
 async function refreshAuth() {
   try {
-    const res = await fetch("/auth", { cache: "no-store" });
+    const res = await fetchWithTimeout("/auth", { cache: "no-store" });
     if (!res.ok) return;
     const text = (await res.text()).trim();
+    if (text === "PENDING") {
+      setAuthStatus("PENDING...");
+      setControlsEnabled(false);
+      setSensorPlaceholdersLocked(false);
+      return;
+    }
     if (text === "ARMED") {
       setAuthStatus("ARMED");
       setControlsEnabled(true);
@@ -79,6 +112,29 @@ async function refreshAuth() {
   } catch (e) {}
 }
 
+const linkStatusEl = document.getElementById("linkStatus");
+function setLinkStatus(text) {
+  if (linkStatusEl) linkStatusEl.innerText = text;
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetchWithTimeout("/status", { cache: "no-store" });
+    if (!res.ok) return;
+    const s = await res.json();
+    const age = Number(s.mega_age_ms);
+    if (!Number.isFinite(age) || age === 0xffffffff) {
+      setLinkStatus("LINK: NO DATA");
+      return;
+    }
+    if (age > 2000) {
+      setLinkStatus(`LINK: OFFLINE (${age}ms)`);
+      return;
+    }
+    setLinkStatus(`LINK: OK (${age}ms)`);
+  } catch (e) {}
+}
+
 async function armRobot() {
   const input = document.getElementById("passcodeInput");
   const code = input ? String(input.value || "").trim() : "";
@@ -89,13 +145,20 @@ async function armRobot() {
   setAuthStatus("ARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetch("/arm", {
+    const res = await fetchWithTimeout("/arm", {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `code=${encodeURIComponent(code)}`,
     });
     const text = (await res.text()).trim();
+    if (res.status === 202 || text === "PENDING") {
+      setAuthStatus("ARMING...");
+      setControlsEnabled(false);
+      setSensorPlaceholdersLocked(false);
+      setTimeout(refreshAuth, 200);
+      return;
+    }
     if (text === "OK") {
       setAuthStatus("ARMED");
       setControlsEnabled(true);
@@ -127,8 +190,14 @@ async function disarmRobot() {
   setAuthStatus("DISARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetch("/disarm", { method: "POST", cache: "no-store" });
+    const res = await fetchWithTimeout("/disarm", { method: "POST", cache: "no-store" });
     const text = (await res.text()).trim();
+    if (res.status === 202 || text === "PENDING") {
+      setAuthStatus("DISARMING...");
+      setControlsEnabled(false);
+      setTimeout(refreshAuth, 200);
+      return;
+    }
     if (text === "LOCKED") {
       setAuthStatus("LOCKED (RESET REQUIRED)");
       setSensorPlaceholdersLocked(true);
@@ -148,6 +217,7 @@ function startEncoderCalibration() {
   sendCommand("/enc_cal", { method: "POST" })
     .then(() => {
       const el = document.getElementById("encCalValue");
+      encCalUiState = CalUiState.Running;
       if (el) el.innerText = "RUNNING...";
     })
     .catch(() => {});
@@ -157,6 +227,8 @@ function startTurretCalibration() {
   sendCommand("/turret_cal_start", { method: "POST" })
     .then(() => {
       const el = document.getElementById("turretCalValue");
+      turretCalUiState = CalUiState.Running;
+      turretDoneWaitStartMs = 0;
       if (el) el.innerText = "CALIBRATING...";
     })
     .catch(() => {});
@@ -166,6 +238,8 @@ function finishTurretCalibration() {
   sendCommand("/turret_cal_done", { method: "POST" })
     .then(() => {
       const el = document.getElementById("turretCalValue");
+      turretCalUiState = CalUiState.Saving;
+      turretDoneWaitStartMs = Date.now();
       if (el) el.innerText = "SAVING...";
     })
     .catch(() => {});
@@ -181,16 +255,24 @@ async function pollEncCal() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/enc_cal", { cache: "no-store" });
+    const res = await fetchWithTimeout("/enc_cal", { cache: "no-store" });
     if (!res.ok) return;
     const text = (await res.text()).trim();
     if (!encCalValueEl) return;
-    if (text === "--" || text.length === 0) {
-      encCalValueEl.innerText = "--";
+    if (text.startsWith("ENC_CAL:")) {
+      const payload = text.substring(8).trim();
+      if (payload === "--" || payload.length === 0) {
+        // Firmware hasn't produced a value yet; don't clobber "RUNNING...".
+        if (encCalUiState !== CalUiState.Running) encCalValueEl.innerText = "--";
+        return;
+      }
+      encCalUiState = CalUiState.Done;
+      encCalValueEl.innerText = payload;
       return;
     }
-    if (text.startsWith("ENC_CAL:")) {
-      encCalValueEl.innerText = text.substring(8).trim();
+    if (text === "--" || text.length === 0) {
+      // Don't clobber the optimistic "RUNNING..." label while a run is in progress.
+      if (encCalUiState !== CalUiState.Running) encCalValueEl.innerText = "--";
       return;
     }
     encCalValueEl.innerText = text;
@@ -206,16 +288,57 @@ async function pollTurretCal() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/turret_cal", { cache: "no-store" });
+    const res = await fetchWithTimeout("/turret_cal", { cache: "no-store" });
     if (!res.ok) return;
     const text = (await res.text()).trim();
     if (!turretCalValueEl) return;
-    if (text === "--" || text.length === 0) {
-      turretCalValueEl.innerText = "--";
+    if (text.startsWith("TURCAL:")) {
+      const payload = text.substring(7).trim();
+      if (payload === "--" || payload.length === 0) {
+        // Not ready yet.
+        if (turretCalUiState !== CalUiState.Running && turretCalUiState !== CalUiState.Saving) {
+          turretCalValueEl.innerText = "--";
+        }
+        return;
+      }
+      if (payload === "CALIBRATING") {
+        // Keep "SAVING..." if user already pressed DONE.
+        if (turretCalUiState !== CalUiState.Saving) {
+          turretCalUiState = CalUiState.Running;
+          turretCalValueEl.innerText = "CALIBRATING...";
+        }
+        return;
+      }
+      if (payload === "FAIL") {
+        turretCalUiState = CalUiState.Error;
+        turretDoneWaitStartMs = 0;
+        turretCalValueEl.innerText = "FAILED (TRY AGAIN)";
+        return;
+      }
+      if (payload === "ZEROED") {
+        turretCalUiState = CalUiState.Done;
+        turretDoneWaitStartMs = 0;
+        turretCalValueEl.innerText = "ZERO SET";
+        return;
+      }
+
+      turretCalUiState = CalUiState.Done;
+      turretDoneWaitStartMs = 0;
+      turretCalValueEl.innerText = payload;
       return;
     }
-    if (text.startsWith("TURCAL:")) {
-      turretCalValueEl.innerText = text.substring(7).trim();
+    if (text === "--" || text.length === 0) {
+      // While calibrating/saving, "--" just means "no TURCAL packet yet".
+      if (turretCalUiState === CalUiState.Saving && turretDoneWaitStartMs) {
+        const elapsed = Date.now() - turretDoneWaitStartMs;
+        if (elapsed >= kTurretDoneWaitTimeoutMs) {
+          turretCalUiState = CalUiState.Error;
+          turretDoneWaitStartMs = 0;
+          turretCalValueEl.innerText = "NO RESULT (CHECK ROBOT)";
+        }
+      } else if (turretCalUiState !== CalUiState.Running && turretCalUiState !== CalUiState.Saving) {
+        turretCalValueEl.innerText = "--";
+      }
       return;
     }
     turretCalValueEl.innerText = text;
@@ -233,7 +356,7 @@ async function pollLidar() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/lidar", { cache: "no-store" });
+    const res = await fetchWithTimeout("/lidar", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     const trimmed = text.trim();
@@ -265,14 +388,14 @@ async function pollCompass() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/compassdata", { cache: "no-store" });
+    const res = await fetchWithTimeout("/compassdata", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     if (compassWebValueEl) {
       const parts = text.trim().split(",");
       const deg = parts[0] || "--";
       const label = parts[1] || "";
-      compassWebValueEl.innerText = `${deg}° ${label}`;
+      compassWebValueEl.innerText = `${deg}${DEG} ${label}`;
     }
   } catch (e) {}
 }
@@ -287,7 +410,7 @@ async function pollRgb() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/rgb", { cache: "no-store" });
+    const res = await fetchWithTimeout("/rgb", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     const trimmed = text.trim();
@@ -315,3 +438,5 @@ setControlsEnabled(false);
 setSensorPlaceholdersLocked(false);
 refreshAuth();
 setInterval(refreshAuth, 1500);
+refreshStatus();
+setInterval(refreshStatus, 1500);

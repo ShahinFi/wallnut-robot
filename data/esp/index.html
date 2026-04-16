@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -40,6 +40,7 @@
               <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
             </div>
             <div id="authStatus" class="auth-status">DISARMED</div>
+            <div id="linkStatus" class="auth-status">LINK: --</div>
           </div>
           <div class="container">
             <button class="button fwd" data-requires-arm="1" onclick="forwards5()">FORWARD<br />5cm</button>
@@ -66,7 +67,7 @@
             onchange="sendCompassValue(this.value)"
             value="0"
           />
-          <div id="compassValue">0°</div>
+          <div id="compassValue">0Â°</div>
 
           <div class="north-container">
             <button class="button button-outline" data-requires-arm="1" onclick="setNorth()">SET NORTH</button>

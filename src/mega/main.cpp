@@ -222,17 +222,6 @@ void loop() {
     }
   }
 
-  if (colorCalTask.active()) {
-    colorCalTask.update(&lastRgb, lastRgbValid);
-    return;
-  }
-
-  if (colorMazeTask.active()) {
-    OdometryData od = odomRaw();
-    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
-    return;
-  }
-
   EspCommand espCmd;
   if (espPoll(espCmd)) {
     if (espCmd.type == EspCommand::Type::Passcode) {
@@ -267,18 +256,42 @@ void loop() {
         gEspArmed = false;
         Serial2.println("AUTH:OFF");
       }
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
+      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
 
     if (gEspLocked) {
       Serial2.println("AUTH:LOCKED");
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
+      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
 
     if (!gEspArmed) {
       Serial2.println("AUTH:REQUIRED");
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
+      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
@@ -286,6 +299,7 @@ void loop() {
     if (espCmd.type == EspCommand::Type::TurretCalStart) {
       turretEncCal.start(turretMotor.ticksAbs());
       Serial.println("Turret cal start");
+      Serial2.println("TURCAL:CALIBRATING");
       return;
     } else if (espCmd.type == EspCommand::Type::TurretCalDone) {
       const bool ok = turretEncCal.finish(turretMotor.ticksAbs());
@@ -293,11 +307,14 @@ void loop() {
       if (ok) {
         Serial2.print("TURCAL:");
         Serial2.println((unsigned long)turretEncCal.ticksPerRev());
+      } else {
+        Serial2.println("TURCAL:FAIL");
       }
       return;
     } else if (espCmd.type == EspCommand::Type::TurretZero) {
       turretEncCal.setZeroTicks(turretMotor.ticksAbs());
       Serial.println("Turret zero set");
+      Serial2.println("TURCAL:ZEROED");
       return;
     }
 
@@ -363,6 +380,18 @@ void loop() {
     } else if (espCmd.type == EspCommand::Type::EncCal) {
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
+  }
+
+  // Allow ESP Disarm/Passcode handling above to work even while these are active.
+  if (colorCalTask.active()) {
+    colorCalTask.update(&lastRgb, lastRgbValid);
+    return;
+  }
+
+  if (colorMazeTask.active()) {
+    OdometryData od = odomRaw();
+    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
+    return;
   }
 
   if (Serial.available()) {

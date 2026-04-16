@@ -1,10 +1,18 @@
-const compassSlider = document.getElementById("compassSlider"); // Get the compass slider element from the HTML page
+﻿const compassSlider = document.getElementById("compassSlider"); // Get the compass slider element from the HTML page
 
 // Pause polling while commands are in flight to prioritize control.
 let pendingCommands = 0;
+const DEG = "\u00B0";
+const kFetchTimeoutMs = 1200;
+
+function fetchWithTimeout(path, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), kFetchTimeoutMs);
+  return fetch(path, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout));
+}
 function sendCommand(path, options = {}) {
   pendingCommands++;
-  return fetch(path, { cache: "no-store", ...options })
+  return fetchWithTimeout(path, { cache: "no-store", ...options })
     .catch(() => {})
     .finally(() => {
       pendingCommands = Math.max(0, pendingCommands - 1);
@@ -112,9 +120,15 @@ function requiresArmDisabled() {
 
 async function refreshAuth() {
   try {
-    const res = await fetch("/auth", { cache: "no-store" });
+    const res = await fetchWithTimeout("/auth", { cache: "no-store" });
     if (!res.ok) return;
     const text = (await res.text()).trim();
+    if (text === "PENDING") {
+      setAuthStatus("PENDING...");
+      setControlsEnabled(false);
+      setSensorPlaceholdersLocked(false);
+      return;
+    }
     if (text === "ARMED") {
       setAuthStatus("ARMED");
       setControlsEnabled(true);
@@ -137,6 +151,29 @@ async function refreshAuth() {
   } catch (e) {}
 }
 
+const linkStatusEl = document.getElementById("linkStatus");
+function setLinkStatus(text) {
+  if (linkStatusEl) linkStatusEl.innerText = text;
+}
+
+async function refreshStatus() {
+  try {
+    const res = await fetchWithTimeout("/status", { cache: "no-store" });
+    if (!res.ok) return;
+    const s = await res.json();
+    const age = Number(s.mega_age_ms);
+    if (!Number.isFinite(age) || age === 0xffffffff) {
+      setLinkStatus("LINK: NO DATA");
+      return;
+    }
+    if (age > 2000) {
+      setLinkStatus(`LINK: OFFLINE (${age}ms)`);
+      return;
+    }
+    setLinkStatus(`LINK: OK (${age}ms)`);
+  } catch (e) {}
+}
+
 async function armRobot() {
   const input = document.getElementById("passcodeInput");
   const code = input ? String(input.value || "").trim() : "";
@@ -147,13 +184,20 @@ async function armRobot() {
   setAuthStatus("ARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetch("/arm", {
+    const res = await fetchWithTimeout("/arm", {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `code=${encodeURIComponent(code)}`,
     });
     const text = (await res.text()).trim();
+    if (res.status === 202 || text === "PENDING") {
+      setAuthStatus("ARMING...");
+      setControlsEnabled(false);
+      setSensorPlaceholdersLocked(false);
+      setTimeout(refreshAuth, 200);
+      return;
+    }
     if (text === "OK") {
       setAuthStatus("ARMED");
       setControlsEnabled(true);
@@ -186,8 +230,14 @@ async function disarmRobot() {
   setAuthStatus("DISARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetch("/disarm", { method: "POST", cache: "no-store" });
+    const res = await fetchWithTimeout("/disarm", { method: "POST", cache: "no-store" });
     const text = (await res.text()).trim();
+    if (res.status === 202 || text === "PENDING") {
+      setAuthStatus("DISARMING...");
+      setControlsEnabled(false);
+      setTimeout(refreshAuth, 200);
+      return;
+    }
     if (text === "LOCKED") {
       setAuthStatus("LOCKED (RESET REQUIRED)");
       setSensorPlaceholdersLocked(true);
@@ -203,6 +253,8 @@ setControlsEnabled(false);
 setSensorPlaceholdersLocked(false);
 refreshAuth();
 setInterval(refreshAuth, 1500);
+refreshStatus();
+setInterval(refreshStatus, 1500);
 
 // Lidar polling
 const lidarValueEl = document.getElementById("lidarValue");
@@ -212,7 +264,7 @@ async function pollLidar() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/lidar", { cache: "no-store" });
+    const res = await fetchWithTimeout("/lidar", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     const trimmed = text.trim();
@@ -286,14 +338,14 @@ async function pollCompass() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/compassdata", { cache: "no-store" });
+    const res = await fetchWithTimeout("/compassdata", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     if (compassWebValueEl) {
       const parts = text.trim().split(",");
       const deg = parts[0] || "--";
       const label = parts[1] || "";
-      compassWebValueEl.innerText = `${deg}° ${label}`;
+      compassWebValueEl.innerText = `${deg}${DEG} ${label}`;
     }
   } catch (e) {
     // ignore transient errors
@@ -308,7 +360,7 @@ async function pollRgb() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
   try {
-    const res = await fetch("/rgb", { cache: "no-store" });
+    const res = await fetchWithTimeout("/rgb", { cache: "no-store" });
     if (!res.ok) return;
     const text = await res.text();
     const trimmed = text.trim();

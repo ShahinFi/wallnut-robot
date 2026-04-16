@@ -3,9 +3,37 @@
 #include <LittleFS.h>
 #include <string.h>
 
-// ====== Wi-Fi credentials ======
-const char* ssid = "Titenet-IoT";
-const char* password = "7kDtaphg";
+// Optional local secrets file (gitignored): src/esp/wifi_secrets.h
+// Use this to avoid command-line quoting issues with spaces/& in passwords.
+#if defined(__has_include)
+#if __has_include("wifi_secrets.h")
+#include "wifi_secrets.h"
+#endif
+#endif
+
+// ====== Wi-Fi credentials (compile-time, override locally) ======
+// Keep secrets out of source control via `platformio_override.ini`:
+// -DWIFI_SSID="Your2p4GHzSSID"
+// -DWIFI_PASSWORD="YourPassword"
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
+
+// Fallback AP when STA credentials are not provided or STA connect fails.
+#ifndef WIFI_AP_SSID
+#define WIFI_AP_SSID "mobile-robot"
+#endif
+#ifndef WIFI_AP_PASSWORD
+#define WIFI_AP_PASSWORD ""
+#endif
+
+static const char* kWifiSsid = WIFI_SSID;
+static const char* kWifiPassword = WIFI_PASSWORD;
+static const char* kWifiApSsid = WIFI_AP_SSID;
+static const char* kWifiApPassword = WIFI_AP_PASSWORD;
 
 String lidarData = "0 cm";
 String lidarPacket = "LIDAR:0,SEQ:0,T:0";
@@ -24,6 +52,8 @@ static AuthState gAuthState = AuthState::Disarmed;
 static uint8_t gTriesLeft = 3;
 static bool gAuthPending = false;
 static const uint8_t kMaxTries = 3;
+static uint32_t gLastMegaRxMs = 0;
+static bool gHasMegaRx = false;
 
 // ====== Function Declarations ======
 void handleNotFound();
@@ -44,6 +74,7 @@ void handleTurretCal();
 void handleTurretCalStart();
 void handleTurretCalDone();
 void handleTurretZero();
+void handleStatus();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
@@ -65,24 +96,45 @@ void setup() {
 
   listAllFiles();
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
+    bool started = false;
+  if (kWifiSsid && kWifiSsid[0] != '\0') {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(kWifiSsid, kWifiPassword);
+    Serial.print("Connecting to WiFi (STA): ");
+    Serial.println(kWifiSsid);
 
-  int attempt = 0;
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-    attempt++;
-    if (attempt > 60) {
-      Serial.println("\n⚠️ WiFi connection failed. Restarting...");
-      ESP.restart();
+    int attempt = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+      attempt++;
+      if (attempt >= 30) break;  // ~15s then fall back to AP
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      started = true;
+      Serial.println("\nWiFi connected (STA).");
+      Serial.print("IP address: ");
+      Serial.println(WiFi.localIP());
+    } else {
+      Serial.println("\nWiFi STA connect failed. Falling back to AP.");
+      WiFi.disconnect();
     }
   }
-  Serial.println("\n✅ WiFi connected!");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+
+  if (!started) {
+    WiFi.mode(WIFI_AP);
+    if (kWifiApPassword && kWifiApPassword[0] != '\0') {
+      WiFi.softAP(kWifiApSsid, kWifiApPassword);
+    } else {
+      WiFi.softAP(kWifiApSsid);
+    }
+    Serial.println("WiFi started (AP).");
+    Serial.print("AP SSID: ");
+    Serial.println(kWifiApSsid);
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
+  }
 
   server.on("/", []() { serveFile("/esp/index.html", "text/html"); });
   server.on("/index.html", []() { serveFile("/esp/index.html", "text/html"); });
@@ -111,6 +163,7 @@ void setup() {
   server.on("/turret_cal_start", HTTP_POST, handleTurretCalStart);
   server.on("/turret_cal_done", HTTP_POST, handleTurretCalDone);
   server.on("/turret_zero", HTTP_POST, handleTurretZero);
+  server.on("/status", handleStatus);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -123,6 +176,10 @@ void loop() {
 }
 
 void processSerialLine(const String& data) {
+  // Any valid line from the Mega means the UART link is alive.
+  gLastMegaRxMs = millis();
+  gHasMegaRx = true;
+
   if (data.startsWith("AUTH:")) {
     // Expected formats:
     // - AUTH:OK
@@ -343,58 +400,23 @@ void handleArm() {
   Serial.print("Passcode:");
   Serial.println(code);
 
-  const uint32_t start = millis();
-  while (millis() - start < 700) {
-    pollSerialNonBlocking();
-    if (!gAuthPending) break;
-    delay(5);
-  }
-
-  if (gAuthPending) {
-    // No reply from Mega yet.
-    server.send(504, "text/plain", "NO_REPLY");
-    return;
-  }
-
-  if (gAuthState == AuthState::Armed) {
-    server.send(200, "text/plain", "OK");
-    return;
-  }
-  if (gAuthState == AuthState::Locked) {
-    server.send(423, "text/plain", "LOCKED");
-    return;
-  }
-
-  server.send(401, "text/plain", String("FAIL:") + String(gTriesLeft));
+  // Non-blocking: UI should poll /auth for the final state.
+  server.send(202, "text/plain", "PENDING");
 }
 
 void handleDisarm() {
-  // Forward disarm to the Mega and wait briefly for an AUTH reply.
-  // This avoids showing "DISARMED:3" when the Mega is actually LOCKED.
   gAuthPending = true;
   Serial.println("Disarm");
 
-  const uint32_t start = millis();
-  while (millis() - start < 700) {
-    pollSerialNonBlocking();
-    if (!gAuthPending) break;
-    delay(5);
-  }
-
-  if (gAuthPending) {
-    server.send(504, "text/plain", "NO_REPLY");
-    return;
-  }
-
-  if (gAuthState == AuthState::Locked) {
-    server.send(423, "text/plain", "LOCKED");
-    return;
-  }
-
-  server.send(200, "text/plain", "OFF");
+  // Non-blocking: UI should poll /auth for the final state.
+  server.send(202, "text/plain", "PENDING");
 }
 
 void handleAuth() {
+  if (gAuthPending) {
+    server.send(200, "text/plain", "PENDING");
+    return;
+  }
   if (gAuthState == AuthState::Armed) {
     server.send(200, "text/plain", "ARMED");
     return;
@@ -404,6 +426,40 @@ void handleAuth() {
     return;
   }
   server.send(200, "text/plain", String("DISARMED:") + String(gTriesLeft));
+}
+
+void handleStatus() {
+  const uint32_t now = millis();
+  const uint32_t ageMs = gHasMegaRx ? (now - gLastMegaRxMs) : 0xFFFFFFFFUL;
+
+  const char* auth = "DISARMED";
+  if (gAuthPending) auth = "PENDING";
+  else if (gAuthState == AuthState::Armed) auth = "ARMED";
+  else if (gAuthState == AuthState::Locked) auth = "LOCKED";
+
+  const IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+
+  String out;
+  out.reserve(180);
+  out += "{";
+  out += "\"auth\":\"";
+  out += auth;
+  out += "\",";
+  out += "\"tries_left\":";
+  out += String((unsigned)gTriesLeft);
+  out += ",";
+  out += "\"mega_age_ms\":";
+  out += String((unsigned long)ageMs);
+  out += ",";
+  out += "\"ip\":\"";
+  out += ip.toString();
+  out += "\",";
+  out += "\"mode\":\"";
+  out += (WiFi.getMode() & WIFI_AP) ? "ap" : "sta";
+  out += "\"";
+  out += "}";
+
+  server.send(200, "application/json", out);
 }
 
 void serveFile(const char* path, const char* contentType) {

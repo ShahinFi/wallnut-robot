@@ -1,6 +1,7 @@
 #include "esp/esp_uart.h"
 
 static String espInput;
+static const size_t kMaxEspLineLen = 128;
 
 void espSetup() {
   Serial2.begin(115200);
@@ -97,6 +98,11 @@ bool espPoll(EspCommand& out) {
         return parseLine(line, out);
       }
     } else {
+      if (espInput.length() >= kMaxEspLineLen) {
+        // Drop overly long/noisy lines to avoid unbounded heap growth.
+        espInput = "";
+        continue;
+      }
       espInput += c;
     }
   }
