@@ -27,8 +27,11 @@ public:
   void setConfig(const Config& cfg);
   const Config& config() const;
 
-  void setTicksPerRev(uint32_t ticksPerRev);
-  uint32_t ticksPerRev() const;
+  void setTicksPerRev(uint32_t ticksPerRev);               // sets both directions
+  void setTicksPerRevPosNeg(uint32_t ticksPerRevPos, uint32_t ticksPerRevNeg);
+  uint32_t ticksPerRevPos() const;
+  uint32_t ticksPerRevNeg() const;
+  uint32_t ticksPerRevForDirSign(int dirSign) const;
 
   // Resets internal accumulation and sets current angle to 0.
   void reset();
@@ -53,9 +56,9 @@ private:
   bool hasPrev_;
   long prevTicksAbs_;
 
-  long signedTicksAcc_;
-  long zeroSignedTicks_;
+  float angleDegAcc_;      // absolute signed angle accumulator (deg)
+  float zeroAngleDegAcc_;  // zero reference (deg)
 
-  uint32_t ticksPerRev_;
+  uint32_t ticksPerRevPos_;
+  uint32_t ticksPerRevNeg_;
 };
-

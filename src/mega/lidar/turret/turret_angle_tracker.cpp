@@ -6,9 +6,10 @@ TurretAngleTracker::TurretAngleTracker()
 : cfg_{},
   hasPrev_(false),
   prevTicksAbs_(0),
-  signedTicksAcc_(0),
-  zeroSignedTicks_(0),
-  ticksPerRev_(0) {}
+  angleDegAcc_(0.0f),
+  zeroAngleDegAcc_(0.0f),
+  ticksPerRevPos_(0),
+  ticksPerRevNeg_(0) {}
 
 void TurretAngleTracker::setConfig(const Config& cfg) {
   cfg_ = cfg;
@@ -20,20 +21,30 @@ void TurretAngleTracker::setConfig(const Config& cfg) {
 const TurretAngleTracker::Config& TurretAngleTracker::config() const { return cfg_; }
 
 void TurretAngleTracker::setTicksPerRev(uint32_t ticksPerRev) {
-  ticksPerRev_ = ticksPerRev;
+  setTicksPerRevPosNeg(ticksPerRev, ticksPerRev);
 }
 
-uint32_t TurretAngleTracker::ticksPerRev() const { return ticksPerRev_; }
+void TurretAngleTracker::setTicksPerRevPosNeg(uint32_t ticksPerRevPos, uint32_t ticksPerRevNeg) {
+  ticksPerRevPos_ = ticksPerRevPos;
+  ticksPerRevNeg_ = ticksPerRevNeg;
+}
+
+uint32_t TurretAngleTracker::ticksPerRevPos() const { return ticksPerRevPos_; }
+uint32_t TurretAngleTracker::ticksPerRevNeg() const { return ticksPerRevNeg_; }
+
+uint32_t TurretAngleTracker::ticksPerRevForDirSign(int dirSign) const {
+  return (dirSign < 0) ? ticksPerRevNeg_ : ticksPerRevPos_;
+}
 
 void TurretAngleTracker::reset() {
   hasPrev_ = false;
   prevTicksAbs_ = 0;
-  signedTicksAcc_ = 0;
-  zeroSignedTicks_ = 0;
+  angleDegAcc_ = 0.0f;
+  zeroAngleDegAcc_ = 0.0f;
 }
 
 void TurretAngleTracker::setZero() {
-  zeroSignedTicks_ = signedTicksAcc_;
+  zeroAngleDegAcc_ = angleDegAcc_;
 }
 
 void TurretAngleTracker::update(long ticksAbsNow, float motorCmd) {
@@ -49,8 +60,8 @@ void TurretAngleTracker::update(long ticksAbsNow, float motorCmd) {
   // Handle hard reset / wrap (ticks should be monotonic).
   if (dt < 0) {
     hasPrev_ = true;
-    signedTicksAcc_ = 0;
-    zeroSignedTicks_ = 0;
+    angleDegAcc_ = 0.0f;
+    zeroAngleDegAcc_ = 0.0f;
     return;
   }
   if (dt == 0) return;
@@ -60,14 +71,15 @@ void TurretAngleTracker::update(long ticksAbsNow, float motorCmd) {
     return;  // ignore manual/unknown-direction motion
   }
 
-  const long dir = (motorCmd > 0.0f) ? 1L : -1L;
-  signedTicksAcc_ += (long)cfg_.angleSign * dir * dt;
+  const int dirSign = (motorCmd > 0.0f) ? 1 : -1;
+  const uint32_t tpr = ticksPerRevForDirSign(dirSign);
+  if (tpr == 0) return;
+  const float degPerTick = 360.0f / (float)tpr;
+  angleDegAcc_ += (float)cfg_.angleSign * (float)dirSign * (float)dt * degPerTick;
 }
 
 float TurretAngleTracker::angleDegSigned() const {
-  if (ticksPerRev_ == 0) return 0.0f;
-  const long rel = signedTicksAcc_ - zeroSignedTicks_;
-  return (float)rel * (360.0f / (float)ticksPerRev_);
+  return angleDegAcc_ - zeroAngleDegAcc_;
 }
 
 float TurretAngleTracker::wrapDeg360_(float deg) {
@@ -79,4 +91,3 @@ float TurretAngleTracker::wrapDeg360_(float deg) {
 float TurretAngleTracker::angleDegWrapped360() const {
   return wrapDeg360_(angleDegSigned());
 }
-

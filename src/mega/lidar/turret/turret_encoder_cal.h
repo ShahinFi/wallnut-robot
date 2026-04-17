@@ -20,6 +20,11 @@ public:
   // Persistence
   bool loadFromEeprom();
   bool hasCalibration() const;
+  // Manual override + persist to EEPROM.
+  // - setTicksPerRev(): sets BOTH + and - direction calibrations to the same value.
+  bool setTicksPerRev(uint32_t ticksPerRev);
+  bool setTicksPerRevPos(uint32_t ticksPerRevPos);
+  bool setTicksPerRevNeg(uint32_t ticksPerRevNeg);
 
   // Manual calibration session
   void start(long ticksAbsNow);
@@ -27,8 +32,11 @@ public:
   bool active() const;
 
   // Current calibration value
-  uint32_t ticksPerRev() const;
-  float    degPerTick() const;
+  uint32_t ticksPerRevPos() const;
+  uint32_t ticksPerRevNeg() const;
+  uint32_t ticksPerRevForDirSign(int dirSign) const;  // dirSign: +1 / -1
+  float    degPerTickPos() const;
+  float    degPerTickNeg() const;
 
   // Zeroing + angle (monotonic, wrap360)
   void  setZeroTicks(long ticksAbsNow);
@@ -36,14 +44,14 @@ public:
   float angleDeg(long ticksAbsNow) const;
 
 private:
-  bool saveToEeprom_(uint32_t ticksPerRev);
+  bool saveToEeprom_(uint32_t ticksPerRevPos, uint32_t ticksPerRevNeg);
 
   bool     hasCalibration_;
-  uint32_t ticksPerRev_;
+  uint32_t ticksPerRevPos_;
+  uint32_t ticksPerRevNeg_;
 
   bool     active_;
   long     startTicksAbs_;
 
   long     zeroTicksAbs_;
 };
-
