@@ -343,6 +343,31 @@ void loop() {
     headingValid = true;
   }
 
+  const uint32_t nowMs = millis();
+
+  // ---- Turret angle tracker (single source of truth) ----
+  // Updated continuously while powered. Becomes 0 only via explicit zeroing.
+  const long turretTicksNow = turretMotor.ticksAbs();
+  turretAngle.update(turretTicksNow, turretMotor.lastCmd());
+
+  // ---- Turret sweep debug action (exclusive) ----
+  // Owns the LiDAR timing internally (for latency compensation), so we must return
+  // before running the global LiDAR update/moving-average logic.
+  if (turretSweep.active()) {
+    const bool done = turretSweep.update(turretTicksNow, nowMs);
+    if (done) {
+      Serial.println("TSCAN:DONE");
+    }
+    if (Serial.available()) {
+      const char c = (char)Serial.read();
+      if (c == 'x' || c == 'X') {
+        turretSweep.cancel();
+        Serial.println("TSCAN:CANCEL");
+      }
+    }
+    return;
+  }
+
   // ---- LiDAR (moving averaged) ----
   float lidarCm = 0.0f;
   if (lidar.update(lidarCm)) {
@@ -357,13 +382,6 @@ void loop() {
   // Integrates world-frame East/North continuously.
   odomManagerUpdate(heading.headingDegContinuous);
 
-  const uint32_t nowMs = millis();
-
-  // ---- Turret angle tracker (single source of truth) ----
-  // Updated continuously while powered. Becomes 0 only via explicit zeroing.
-  const long turretTicksNow = turretMotor.ticksAbs();
-  turretAngle.update(turretTicksNow, turretMotor.lastCmd());
-
   if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
     lastRgbMs = nowMs;
     ColorRgb rgb;
@@ -374,22 +392,6 @@ void loop() {
     } else {
       lastRgbValid = false;
     }
-  }
-
-  // ---- Turret sweep debug action (exclusive) ----
-  if (turretSweep.active()) {
-    const bool done = turretSweep.update(turretTicksNow, lidarFilteredCm, nowMs);
-    if (done) {
-      Serial.println("TSCAN:DONE");
-    }
-    if (Serial.available()) {
-      const char c = (char)Serial.read();
-      if (c == 'x' || c == 'X') {
-        turretSweep.cancel();
-        Serial.println("TSCAN:CANCEL");
-      }
-    }
-    return;
   }
 
   if (gButtonEdge) {
@@ -745,7 +747,7 @@ void loop() {
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,+");
-      turretSweep.begin(&turretMotor, &turretAngle, +1, turretMotor.ticksAbs(), millis());
+      turretSweep.begin(&turretMotor, &turretAngle, &lidar, +1, turretMotor.ticksAbs(), millis());
     }
     if (c == 'i' || c == 'I') {
       // Turret 1-rev scan (negative direction).
@@ -760,7 +762,7 @@ void loop() {
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,-");
-      turretSweep.begin(&turretMotor, &turretAngle, -1, turretMotor.ticksAbs(), millis());
+      turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
     }
   }
 

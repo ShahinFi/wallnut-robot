@@ -18,13 +18,16 @@ float Lidar::getDistance() {
   return myLIDAR.getDistance();
 }
 
-bool Lidar::update(float &distanceCm) {
-  if (!measuring) {
-    myLIDAR.takeRange();
-    measuring = true;
-    rangeStartMs = millis();
-    return false;
-  }
+bool Lidar::startRange() {
+  if (measuring) return false;
+  myLIDAR.takeRange();
+  measuring = true;
+  rangeStartMs = millis();
+  return true;
+}
+
+bool Lidar::pollRange(float& distanceCm) {
+  if (!measuring) return false;
 
   if (myLIDAR.getBusyFlag()) {
     if (millis() - rangeStartMs > kRangeTimeoutMs) {
@@ -37,4 +40,17 @@ bool Lidar::update(float &distanceCm) {
   distanceCm = static_cast<float>(myLIDAR.readDistance());
   measuring = false;
   return true;
+}
+
+void Lidar::abortRange() {
+  measuring = false;
+  rangeStartMs = 0;
+}
+
+bool Lidar::update(float &distanceCm) {
+  if (!measuring) {
+    startRange();
+    return false;
+  }
+  return pollRange(distanceCm);
 }

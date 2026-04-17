@@ -4,6 +4,7 @@
 
 class TurretMotor;
 class TurretAngleTracker;
+class Lidar;
 
 // TurretSweepScan360: rotate turret by one revolution (based on calibrated ticks/rev)
 // while emitting (angle, distance) samples.
@@ -42,10 +43,10 @@ public:
   // Start a 1-rev sweep. dirSign selects direction (+1 or -1).
   // ticksPerRev is taken from the provided angle tracker.
   void begin(TurretMotor* motor, TurretAngleTracker* angleTracker,
-             int dirSign, long ticksAbsNow, uint32_t nowMs);
+             Lidar* lidar, int dirSign, long ticksAbsNow, uint32_t nowMs);
 
   // Tick with latest sensor values. Returns true when finished (any terminal state).
-  bool update(long ticksAbsNow, float lidarDistanceCm, uint32_t nowMs);
+  bool update(long ticksAbsNow, uint32_t nowMs);
 
   void cancel();
   void reset();
@@ -62,16 +63,23 @@ private:
 
   TurretMotor* motor_;
   TurretAngleTracker* angle_;
+  Lidar* lidar_;
   int dirSign_;
 
   long startTicksAbs_;
   long lastSampleTicksAbs_;
+  float startAngleDegWrapped_;
   uint32_t ticksPerRev_;
   uint32_t sampleEveryTicks_;
   uint32_t seq_;
   float lastCmd_;
 
   uint32_t startMs_;
+
+  // LiDAR measurement stamping (for latency compensation).
+  bool lidarInFlight_;
+  long lidarTicksStart_;
+  uint32_t finishGraceStartMs_;
 
   SampleCallback cb_;
   void* cbUser_;
