@@ -3,7 +3,7 @@ import { HitGrid } from "./grid.js";
 import { clipEndpointToMap, forEachCellOnSegmentWorld } from "./raycast.js";
 import { parseTscanPayload } from "./tscan.js";
 import { MapRenderer } from "./render.js";
-import { searchWindow, searchWindowRectWalls } from "./matcher.js";
+import { searchWindowRectWalls } from "./matcher.js";
 
 // Browser-side mapping bootstrap for /maze page.
 // Keeps Mega "executor" and browser "brain".
@@ -68,6 +68,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       // Distance-to-wall scoring kernel width (cm). Smaller = stricter.
       wallSigmaCm: Number(elCanvas.dataset.initWallSigmaCm || 1.5),
     },
+    track: {
+      dxCm: Number(elCanvas.dataset.trackDxCm || 10),
+      dyCm: Number(elCanvas.dataset.trackDyCm || 10),
+      dHeadingDeg: Number(elCanvas.dataset.trackDheadingDeg || 20),
+      // Keep tracking fine and bounded.
+      stepCm: 1,
+      stepDeg: 2,
+    },
   };
 
   // Pose model:
@@ -81,6 +89,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     odomAnchorNorth: 0,
     mapPose0: { x: mapW_cm * 0.5, y: mapH_cm * 0.2, headingDeg: 0 },
     poseLocked: false, // becomes true after initial localization
+    poseSentToRobot: false,
 
     scanActive: false,
     scanDoneSeen: false,
@@ -108,9 +117,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     return {
       x: state.mapPose0.x + dx,
       y: state.mapPose0.y + dy,
-      // For initial-only work: once locked, keep the matched heading as truth.
-      // (Tracking updates can later incorporate compass deltas if desired.)
-      headingDeg: state.poseLocked ? wrap360(state.mapPose0.headingDeg) : wrap360(state.compassDeg),
+      // Compass is the heading source of truth (map 0=N, 90=E).
+      headingDeg: wrap360(state.compassDeg),
     };
   }
 
@@ -145,6 +153,20 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     } catch {}
   }
 
+  async function postPoseToRobot(pose, opts = {}) {
+    if (!pose) return;
+    const x = Number(pose.x);
+    const y = Number(pose.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const includeHeading = !!opts.includeHeading;
+    const h = Number(pose.headingDeg);
+    try {
+      let url = `/set_pose?x=${encodeURIComponent(x.toFixed(2))}&y=${encodeURIComponent(y.toFixed(2))}`;
+      if (includeHeading && Number.isFinite(h)) url += `&h=${encodeURIComponent(wrap360(h).toFixed(2))}`;
+      await fetch(url, { method: "POST", cache: "no-store" });
+    } catch {}
+  }
+
   // Buttons are wired later to start a scan and poll until DONE.
 
   function redraw() {
@@ -176,6 +198,28 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     const n = Number(parts[1]);
     if (!Number.isFinite(e) || !Number.isFinite(n)) return null;
     return { e, n };
+  }
+
+  // Live pose polling (low-rate) so the arrow moves continuously while driving.
+  // We pause this during scan polling to avoid competing for bandwidth/CPU.
+  let posePollInFlight = false;
+  async function pollPoseOnce() {
+    if (posePollInFlight) return;
+    if (pollActive || state.scanActive) return;
+    posePollInFlight = true;
+    try {
+      const [od, hdg] = await Promise.all([fetchOdomEN(), fetchCompassDeg()]);
+      if (od) {
+        state.odomEast = od.e;
+        state.odomNorth = od.n;
+      }
+      if (hdg != null) state.compassDeg = hdg;
+      redraw();
+    } catch {
+      // ignore transient errors
+    } finally {
+      posePollInFlight = false;
+    }
   }
 
   function precomputeRot(headingDeg) {
@@ -239,6 +283,60 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   }
 
+  function initRectWallMatchCfg_() {
+    return {
+      ...cfg.match,
+      lidarOffset: cfg.lidarOffset,
+      wallSigmaCm: cfg.init.wallSigmaCm,
+    };
+  }
+
+  function buildInitWindow_(priorH) {
+    return {
+      xMin: 0,
+      xMax: cfg.mapW_cm,
+      yMin: 0,
+      yMax: cfg.init.yMaxFrac * cfg.mapH_cm,
+      hMin: priorH - cfg.init.headingSpanDeg,
+      hMax: priorH + cfg.init.headingSpanDeg,
+      // Global fine search over the full uncertainty range (do not "converge early").
+      stepX: cfg.init.stepCmFine,
+      stepY: cfg.init.stepCmFine,
+      stepH: cfg.init.stepDegFine,
+    };
+  }
+
+  function buildTrackWindow_(priorPose) {
+    const p = priorPose || currentPose();
+    return {
+      xMin: p.x - cfg.track.dxCm,
+      xMax: p.x + cfg.track.dxCm,
+      yMin: p.y - cfg.track.dyCm,
+      yMax: p.y + cfg.track.dyCm,
+      hMin: p.headingDeg - cfg.track.dHeadingDeg,
+      hMax: p.headingDeg + cfg.track.dHeadingDeg,
+      stepX: cfg.track.stepCm,
+      stepY: cfg.track.stepCm,
+      stepH: cfg.track.stepDeg,
+    };
+  }
+
+  function matchRectWalls_(window) {
+    return searchWindowRectWalls(state.scanSamples, cfg.mapW_cm, cfg.mapH_cm, window, initRectWallMatchCfg_());
+  }
+
+  function commitLockedPose_(pose) {
+    state.mapPose0 = { x: pose.x, y: pose.y, headingDeg: pose.headingDeg };
+    state.odomAnchorEast = state.odomEast;
+    state.odomAnchorNorth = state.odomNorth;
+    state.poseLocked = true;
+    if (!state.poseSentToRobot) {
+      state.poseSentToRobot = true;
+      // Initial: send position only (heading is already aligned via your manual north reset).
+      postPoseToRobot(state.mapPose0, { includeHeading: false });
+    }
+  }
+
   function handleLine(line) {
     const s = String(line || "").trim();
     if (!s) return;
@@ -259,36 +357,25 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       state.scanDoneSeen = true;
       dbg.lastEvent = "DONE";
 
-      // Initial localization (wide) against the known outer walls, using scan endpoints only.
-      // Once locked, we keep using odom+compass outside this file (later step).
-      if (!state.poseLocked && state.scanSamples.length) {
-        const priorH = wrap360(state.scanPose?.headingDeg ?? state.compassDeg);
-        const wGlobal = {
-          xMin: 0,
-          xMax: cfg.mapW_cm,
-          yMin: 0,
-          yMax: cfg.init.yMaxFrac * cfg.mapH_cm,
-          hMin: priorH - cfg.init.headingSpanDeg,
-          hMax: priorH + cfg.init.headingSpanDeg,
-          // Global fine search over the full uncertainty range (do not "converge early").
-          stepX: cfg.init.stepCmFine,
-          stepY: cfg.init.stepCmFine,
-          stepH: cfg.init.stepDegFine,
-        };
-        const best = searchWindowRectWalls(state.scanSamples, cfg.mapW_cm, cfg.mapH_cm, wGlobal, {
-          ...cfg.match,
-          lidarOffset: cfg.lidarOffset,
-          wallSigmaCm: cfg.init.wallSigmaCm,
-        });
+      let poseStatus = "";
 
+      // Pose update:
+      // - if not locked yet: global init match against known outer walls
+      // - if already locked: local track match around odom+compass prior
+      if (state.scanSamples.length) {
+        const wasLocked = state.poseLocked;
+        const priorPose = state.scanPose || currentPose();
+        const w = state.poseLocked ? buildTrackWindow_(priorPose) : buildInitWindow_(wrap360(priorPose.headingDeg));
+        const best = matchRectWalls_(w);
         if (best.ok) {
-          state.mapPose0 = { x: best.pose.x, y: best.pose.y, headingDeg: best.pose.headingDeg };
-          state.odomAnchorEast = state.odomEast;
-          state.odomAnchorNorth = state.odomNorth;
-          state.poseLocked = true;
-          setStatus(`pose locked: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score.toFixed(3)}`);
-        } else {
-          setStatus("pose NOT locked (no candidates)");
+          commitLockedPose_(best.pose);
+          if (wasLocked) {
+            // Tracking: send position + matched heading for compass offset correction.
+            postPoseToRobot(state.mapPose0, { includeHeading: true });
+          }
+          poseStatus = `pose: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score.toFixed(3)}`;
+        } else if (!state.poseLocked) {
+          poseStatus = "pose NOT locked (no candidates)";
         }
       }
 
@@ -313,7 +400,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         }
       }
 
-      setStatus(`scan done (${state.scanBodyPts.length} pts)`);
+      setStatus(`${poseStatus || "scan done"} (${state.scanBodyPts.length} pts)`);
       redraw();
       return;
     }
@@ -402,6 +489,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (pollActive) return;
     // Drain any queued events before starting, so BEGIN is seen promptly.
     try { await pollOnce(); } catch {}
+    // Freeze live pose polling during the scan transaction (bandwidth priority).
+    // (pollPoseOnce() also checks pollActive/scanActive, so this is just clarity.)
     // Snapshot pose at click time (does NOT depend on receiving BEGIN from ESP).
     const od = await fetchOdomEN();
     const hdg = await fetchCompassDeg();
@@ -433,4 +522,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   // initial
   clearMap();
   setStatus("idle");
+  // Start low-rate pose polling for live arrow updates (paused automatically during scans).
+  pollPoseOnce();
+  setInterval(pollPoseOnce, 350);
 }

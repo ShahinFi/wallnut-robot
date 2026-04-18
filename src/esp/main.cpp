@@ -82,6 +82,7 @@ void handleTurretScanCancel();
 void handleStatus();
 void handleEvents();
 void handleOdom();
+void handleSetPose();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
@@ -262,6 +263,7 @@ void setup() {
   server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel);
   server.on("/events", HTTP_GET, handleEvents);
   server.on("/odom", HTTP_GET, handleOdom);
+  server.on("/set_pose", HTTP_POST, handleSetPose);
   server.on("/status", handleStatus);
   server.onNotFound(handleNotFound);
 
@@ -706,6 +708,52 @@ void handleOdom() {
     return;
   }
   server.send(200, "text/plain", odomPacket);
+}
+
+void handleSetPose() {
+  // Browser provides initial map pose (x=east_cm, y=north_cm) after first scan match,
+  // so the Mega's world odometry can be aligned to the map frame for later steps.
+  if (!isArmed()) return rejectNotArmed();
+
+  if (!server.hasArg("x") || !server.hasArg("y")) {
+    server.send(400, "text/plain", "MISSING_XY");
+    return;
+  }
+
+  const String xs = server.arg("x");
+  const String ys = server.arg("y");
+  const float x = xs.toFloat();
+  const float y = ys.toFloat();
+  if (!(isfinite(x) && isfinite(y))) {
+    server.send(400, "text/plain", "BAD_XY");
+    return;
+  }
+
+  // Optional matched heading (deg, 0=N, 90=E). If present, Mega can use it to
+  // calibrate compass heading offset over time.
+  bool hasH = false;
+  float h = 0.0f;
+  if (server.hasArg("h")) {
+    const String hs = server.arg("h");
+    h = hs.toFloat();
+    if (isfinite(h)) hasH = true;
+  }
+
+  // Forward to Mega via UART in a simple line-based command.
+  // Mega parser accepts:
+  // - "MapPose:<east_cm>,<north_cm>"
+  // - "MapPose:<east_cm>,<north_cm>,<heading_deg>"
+  Serial.print("MapPose:");
+  Serial.print(x, 2);
+  Serial.print(",");
+  Serial.print(y, 2);
+  if (hasH) {
+    Serial.print(",");
+    Serial.print(h, 2);
+  }
+  Serial.println();
+
+  server.send(200, "text/plain", "OK");
 }
 
 const char* contentTypeForPath(const String& path) {

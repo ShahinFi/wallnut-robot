@@ -36,6 +36,13 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
+  if (s.startsWith("MapPose:")) {
+    out.type = EspCommand::Type::MapPose;
+    out.value = 0;
+    out.text = s.substring(8);
+    out.text.trim();
+    return true;
+  }
   if (s.startsWith("Turn:")) {
     out.type = EspCommand::Type::Turn;
     out.value = s.substring(5).toInt();

@@ -11,6 +11,7 @@ struct EspCommand {
     SetNorth,
     Maze,
     EncCal,
+    MapPose,
     TurretCalStart,
     TurretCalDone,
     TurretZero,

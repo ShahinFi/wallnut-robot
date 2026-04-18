@@ -102,6 +102,53 @@ static float wrapDegDiff180(float targetDeg, float currentDeg) {
   return d;
 }
 
+static bool parseCommaFloats2_(const String& s, float& aOut, float& bOut) {
+  const int comma = s.indexOf(',');
+  if (comma <= 0) return false;
+  const float a = s.substring(0, comma).toFloat();
+  const float b = s.substring(comma + 1).toFloat();
+  if (!(isfinite(a) && isfinite(b))) return false;
+  aOut = a;
+  bOut = b;
+  return true;
+}
+
+static bool parseCommaFloats3Opt_(const String& s, float& aOut, float& bOut, float& cOut, bool& hasCOut) {
+  hasCOut = false;
+  const int c1 = s.indexOf(',');
+  if (c1 <= 0) return false;
+  const int c2 = s.indexOf(',', c1 + 1);
+  if (c2 < 0) {
+    float a = 0.0f, b = 0.0f;
+    if (!parseCommaFloats2_(s, a, b)) return false;
+    aOut = a;
+    bOut = b;
+    return true;
+  }
+
+  const float a = s.substring(0, c1).toFloat();
+  const float b = s.substring(c1 + 1, c2).toFloat();
+  const float c = s.substring(c2 + 1).toFloat();
+  if (!(isfinite(a) && isfinite(b) && isfinite(c))) return false;
+  aOut = a;
+  bOut = b;
+  cOut = c;
+  hasCOut = true;
+  return true;
+}
+
+static float wrapDeg360_(float deg) {
+  while (deg < 0.0f) deg += 360.0f;
+  while (deg >= 360.0f) deg -= 360.0f;
+  return deg;
+}
+
+static float clamp_(float v, float lo, float hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
+
 // Quick hardware sanity test for turret direction/sign.
 // Press:
 // - 'u' => cmd +0.25 for 1s
@@ -595,6 +642,51 @@ void loop() {
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
+      return;
+    }
+
+    if (espCmd.type == EspCommand::Type::MapPose) {
+      float east = 0.0f, north = 0.0f, hdgMatch = 0.0f;
+      bool hasH = false;
+      if (parseCommaFloats3Opt_(espCmd.text, east, north, hdgMatch, hasH)) {
+        // Position alignment: set world odom position in map coordinates.
+        odomWorldSetPos(east, north, heading.headingDegContinuous);
+
+        // Optional compass alignment: adjust heading offset so compass agrees with map-matched heading.
+        // Keep compass as heading source of truth, and slowly steer offset toward the match.
+        if (hasH) {
+          const float matchWrapped = wrapDeg360_(hdgMatch);
+          const float compassWrapped = wrapDeg360_(heading.headingDegWrapped);
+          const float err = wrapDegDiff180(matchWrapped, compassWrapped);
+
+          // Low-pass correction to avoid overreacting to scan noise.
+          const float kAlpha = 0.25f;
+          float off = compass.headingOffsetDeg();
+          off += kAlpha * err;
+          // Keep offset in a reasonable range for readability (functionally any range works).
+          off = clamp_(off, -180.0f, 180.0f);
+          compass.setHeadingOffsetDeg(off);
+          compass.resetHeadingContinuous();
+
+          // Rebase world odometry with the matched heading to avoid a fake "turn jump" in the integrator.
+          odomWorldRebase(matchWrapped);
+
+          Serial.print("Compass offset adjusted by ");
+          Serial.print(kAlpha * err, 2);
+          Serial.print(" deg (err=");
+          Serial.print(err, 2);
+          Serial.print(") newOff=");
+          Serial.println(off, 2);
+        }
+
+        Serial.print("Map pose set (odom world): east=");
+        Serial.print(east, 2);
+        Serial.print(" north=");
+        Serial.println(north, 2);
+      } else {
+        Serial.print("Bad MapPose payload: ");
+        Serial.println(espCmd.text);
+      }
       return;
     }
 

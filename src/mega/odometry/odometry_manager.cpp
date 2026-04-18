@@ -77,6 +77,13 @@ void odomWorldRebase(float headingDeg) {
   worldOdomRebase(gWorld, headingDeg, gLast.avgCmSigned);
 }
 
+void odomWorldSetPos(float eastCm, float northCm, float headingDeg) {
+  refreshLast_();
+  gWorld.pos.eastCm = eastCm;
+  gWorld.pos.northCm = northCm;
+  worldOdomRebase(gWorld, headingDeg, gLast.avgCmSigned);
+}
+
 void odomHardResetKeepWorld(float headingDeg) {
   // WARNING: this resets the underlying encoder counters to 0.
   // Prefer odomLocalReset() for task/action baselining.

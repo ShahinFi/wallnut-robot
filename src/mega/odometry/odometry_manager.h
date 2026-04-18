@@ -52,6 +52,10 @@ WorldOdomData odomWorldRead();
 // Re-bases world integration without changing position. Use after encoder resets.
 void odomWorldRebase(float headingDeg);
 
+// Sets the accumulated world position (East/North, in cm) and re-bases integration.
+// Use this to align world odometry to an external map frame after an initial localization.
+void odomWorldSetPos(float eastCm, float northCm, float headingDeg);
+
 // -------- Hard resets (rare) --------
 
 // Hard-resets encoder counters but keeps world position continuous by rebasing.
