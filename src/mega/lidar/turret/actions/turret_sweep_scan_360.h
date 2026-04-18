@@ -18,7 +18,11 @@ public:
   struct Config {
     float cmdAbs = 0.25f;               // motor command magnitude (0..1)
     uint32_t timeoutMs = 12000;         // safety stop
-    uint16_t targetSamplesPerRev = 360; // auto sampling density
+    // Sampling control (tick domain):
+    // - sampleEveryTicks=1 => emit as often as LiDAR results are ready (no extra downsampling)
+    // - sampleEveryTicks=0 => auto-select based on targetSamplesPerRev
+    uint16_t sampleEveryTicks = 1;
+    uint16_t targetSamplesPerRev = 360; // used only when sampleEveryTicks==0
   };
 
   struct Sample {

@@ -1,4 +1,5 @@
 .pio/
+.piohome/
 .vscode/
 *.code-workspace
 scripts/

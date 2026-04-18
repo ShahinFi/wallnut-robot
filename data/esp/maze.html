@@ -11,8 +11,9 @@
     />
     <link rel="stylesheet" type="text/css" href="style.css" />
     <script src="maze.js" defer></script>
+    <script type="module" src="mapping/mapping_boot.js?v=5" defer></script>
   </head>
-  <body>
+  <body class="page-maze">
     <div class="app">
       <header class="top">
         <div>
@@ -93,6 +94,44 @@
             <div class="mini-label">RGB</div>
             <div id="colorValue">--</div>
             <div id="colorSwatch" class="color-swatch"></div>
+          </div>
+        </section>
+
+        <section class="panel maze-map">
+          <div class="map-head">
+            <div>
+              <h2>Mapping</h2>
+              <div class="sub">live scan + endpoint map (browser-side)</div>
+            </div>
+            <div class="map-actions">
+              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanPlus">SCAN +</button>
+              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanMinus">SCAN -</button>
+              <button class="button button-outline button-small" id="mapClear">CLEAR</button>
+            </div>
+          </div>
+          <div class="map-canvas-wrap">
+            <canvas
+              id="mapCanvas"
+              width="760"
+              height="420"
+              data-map-w-cm="26"
+              data-map-h-cm="46"
+              data-cell-cm="2"
+              data-init-ymax-frac="0.4"
+              data-init-heading-span-deg="90"
+              data-init-min-score="120"
+              data-match-min-dist-cm="2"
+              data-match-max-dist-cm="250"
+              data-match-w-occ-hit="6"
+              data-match-w-free-hit="1"
+              data-match-w-conflict="8"
+              data-update-free-delta="3"
+              data-update-occ-delta="10"
+            ></canvas>
+          </div>
+          <div class="map-foot">
+            <div class="mini-label">STATUS</div>
+            <div id="mapStatus">idle</div>
           </div>
         </section>
       </main>

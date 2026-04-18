@@ -19,7 +19,8 @@ static bool shouldSendNow() {
   return true;
 }
 
-void telemetryUpdate(float lidarCm, int headingDeg, const char* headingLabel) {
+void telemetryUpdate(float lidarCm, int headingDeg, const char* headingLabel,
+                     float odomEastCm, float odomNorthCm) {
   if (!shouldSendNow()) return;
   Serial2.print("LIDAR:");
   Serial2.println(lidarCm, 1);
@@ -27,6 +28,10 @@ void telemetryUpdate(float lidarCm, int headingDeg, const char* headingLabel) {
   Serial2.print(headingDeg);
   Serial2.print(",");
   Serial2.println(headingLabel ? headingLabel : "");
+  Serial2.print("ODOM:");
+  Serial2.print(odomEastCm, 1);
+  Serial2.print(",");
+  Serial2.println(odomNorthCm, 1);
 }
 
 static bool shouldSendRgbNow() {

@@ -14,6 +14,9 @@ struct EspCommand {
     TurretCalStart,
     TurretCalDone,
     TurretZero,
+    TurretScanPlus,
+    TurretScanMinus,
+    TurretScanCancel,
     Passcode,
     Disarm
   } type;

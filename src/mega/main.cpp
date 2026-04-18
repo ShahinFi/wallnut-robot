@@ -22,10 +22,22 @@
 #include "telemetry/telemetry_test.h"
 #include "color/color_sensor.h"
 #include "tasks/color_calibration/color_calibration_task.h"
+#include "tasks/mapping/mapping_task.h"
 
 #include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
 #include "tasks/color_maze/color_maze_task.h"
+
+// AVR-only free SRAM estimator (helps diagnose "stuck at boot" after adding features).
+#if defined(ARDUINO_ARCH_AVR)
+extern int __heap_start, *__brkval;
+static int freeRamBytes() {
+  int v;
+  return (int)&v - (__brkval ? (int)__brkval : (int)&__heap_start);
+}
+#else
+static int freeRamBytes() { return -1; }
+#endif
 
 static Compass         compass;
 static Lidar           lidar;
@@ -54,6 +66,12 @@ static bool            headingValid = false;
 static CompassData     lastHeading = {};
 static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
+static mapping::MappingTask mappingTask;
+static mapping::Pose2D mappingPose = {};       // last corrected pose (map X east, Y north)
+static mapping::Pose2D mappingPriorPose = {};  // prior pose for the in-flight capture
+static WorldOdomData   mappingOdomAnchor = {0.0f, 0.0f};  // odom world pose at mappingPose time
+static bool            mappingPoseValid = false;          // becomes true once we successfully match at least once
+static bool            mappingPoseInitialized = false;    // set once we have a reasonable initial guess
 
 // ===== Option 1 security (UART passcode arming) =====
 static const char kEspPasscode[] = "1234";
@@ -224,18 +242,25 @@ static void handleAtCommand(const String& cmdRaw) {
 
 static void onTurretSweepSample(const TurretSweepScan360::Sample& s, void* user) {
   (void)user;
-  // CSV-ish for easy parsing.
-  // TSCAN:seq,angleDeg,distanceCm,ticksAbs,ms
+  // Thin scan stream (bandwidth-friendly).
+  // TSCAN:angleDeg,distanceCm
   Serial.print("TSCAN:");
-  Serial.print((unsigned long)s.seq);
-  Serial.print(",");
   Serial.print(s.angleDeg, 2);
   Serial.print(",");
   Serial.print(s.distanceCm, 1);
-  Serial.print(",");
-  Serial.print(s.ticksAbs);
-  Serial.print(",");
-  Serial.println((unsigned long)s.ms);
+  Serial.println();
+
+  // Mirror scan stream to ESP (Serial2) so the browser can do mapping/SLAM.
+  Serial2.print("TSCAN:");
+  Serial2.print(s.angleDeg, 2);
+  Serial2.print(",");
+  Serial2.print(s.distanceCm, 1);
+  Serial2.println();
+
+  // Mapping capture hook (thin): store the raw scan points for later matching/replay.
+  if (mappingTask.capturing()) {
+    mappingTask.onSample(s.angleDeg, s.distanceCm);
+  }
 }
 
 static SequenceStep seqSteps[] = {
@@ -245,18 +270,44 @@ static SequenceStep seqSteps[] = {
   {SequenceStepType::End, 0.0f}
 };
 
+static void mappingInitPoseDefaults_() {
+  const auto gc = mappingTask.config().grid;
+  // Default initial guess inside the map:
+  // - X: centered
+  // - Y: within the [0..0.4*H] placement band (we choose 0.2*H as a neutral midpoint)
+  mappingPose.x_cm = 0.5f * (float)gc.mapW_cm;
+  mappingPose.y_cm = 0.2f * (float)gc.mapH_cm;
+  mappingPose.headingDeg = 0.0f;
+  mappingPriorPose = mappingPose;
+  mappingPoseValid = false;
+  mappingPoseInitialized = true;
+}
+
 void setup() {
   Serial.begin(115200);
   lcdInit();
+  lcdWrite(0, 0, "Booting...", true);
+  lcdWrite(1, 0, "Init sensors...", true);
+  {
+    char buf[21];
+    snprintf(buf, sizeof(buf), "RAM:%d", freeRamBytes());
+    lcdWrite(3, 0, buf, true);
+    Serial.print("Free RAM at boot: ");
+    Serial.println(freeRamBytes());
+  }
 
   // --- Hardware ---
   if (!compass.begin()) {
     Serial.println("Compass failed");
+    lcdWrite(2, 0, "Compass failed", true);
+    lcdWrite(3, 0, "Check I2C/wiring", true);
     while (1) {}
   }
 
   if (!lidar.begin()) {
     Serial.println("LiDAR failed");
+    lcdWrite(2, 0, "LiDAR failed", true);
+    lcdWrite(3, 0, "Check I2C/wiring", true);
     while (1) {}
   }
 
@@ -270,7 +321,24 @@ void setup() {
     // Default to a slow sweep so LiDAR has time to produce enough samples per revolution.
     TurretSweepScan360::Config cfg = turretSweep.config();
     cfg.cmdAbs = 0.20f;
+    // Default: no extra downsampling (emit as often as LiDAR results are ready).
+    cfg.sampleEveryTicks = 1;
     turretSweep.setConfig(cfg);
+  }
+  // Mapping defaults (tunable).
+  {
+    mapping::MappingTask::Config cfg;
+    cfg.grid.mapW_cm = 46;
+    cfg.grid.mapH_cm = 26;
+    cfg.grid.cell_cm = 2;
+    // Map/world coordinates are in absolute cm from the map's bottom-left corner:
+    // X in [0..mapW], Y in [0..mapH].
+    cfg.grid.originX_cm = 0.0f;
+    cfg.grid.originY_cm = 0.0f;
+    cfg.enableMatching = true;
+    cfg.lidarOffset.x_cm = 0.0f;
+    cfg.lidarOffset.y_cm = 0.0f;
+    mappingTask.setConfig(cfg);
   }
   colorSensorOk = colorSensor.begin();
   if (!colorSensorOk) {
@@ -304,6 +372,10 @@ void setup() {
   odom.setPulsesPerMeter(787.0f);
   odomManagerInit(&odom);
 
+  // Initialize mapping pose defaults + anchor now that odom state exists.
+  mappingInitPoseDefaults_();
+  mappingOdomAnchor = odomWorldRead();
+
   // --- DriveByDistance test config ---
   DriveByDistance::Config dcfg = driveByDistance.config();
   dcfg.maxSpeed = 0.6f;
@@ -330,6 +402,8 @@ void setup() {
   seqExecTask.reset();
 
   Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
+  lcdWrite(1, 0, "Ready", true);
+  lcdWrite(2, 0, "Hotkeys: b/n/v/r", true);
 }
 
 void loop() {
@@ -357,12 +431,44 @@ void loop() {
     const bool done = turretSweep.update(turretTicksNow, nowMs);
     if (done) {
       Serial.println("TSCAN:DONE");
+      Serial2.println("TSCAN:DONE");
+      if (mappingTask.capturing()) {
+        // If we don't yet have a validated map pose, use a larger initial search:
+        // - X: full map width
+        // - Y: [0..0.4*mapH] as the initial placement band (user-defined)
+        // - Heading: still local around compass (kept thin)
+        if (!mappingPoseValid && mappingTask.grid().totalHits() > 0) {
+          const auto gc = mappingTask.config().grid;
+          mapping::CorrelativeMatcher::SearchWindow w;
+          w.xMin_cm = 0.0f;
+          w.xMax_cm = (float)gc.mapW_cm;
+          w.yMin_cm = 0.0f;
+          w.yMax_cm = 0.4f * (float)gc.mapH_cm;
+          const auto mc = mappingTask.config().matcher;
+          w.headingMin_deg = mappingPriorPose.headingDeg - mc.searchDHeadingDeg;
+          w.headingMax_deg = mappingPriorPose.headingDeg + mc.searchDHeadingDeg;
+          w.stepX_cm = mc.step_cm;
+          w.stepY_cm = mc.step_cm;
+          w.stepHeading_deg = mc.stepHeadingDeg;
+          mappingTask.finishCaptureAndUpdateInWindow(w, mappingPriorPose, mappingPose);
+        } else {
+          mappingTask.finishCaptureAndUpdate(mappingPriorPose, mappingPose);
+        }
+        mappingTask.printSummary();
+        // Keep "valid" sticky once we have a match; don't drop it on a single failure.
+        if (mappingTask.lastMatchScore() >= 0) mappingPoseValid = true;
+        // Only advance the anchor if we actually applied the update (or seeded the map).
+        if (mappingTask.lastUpdateApplied()) {
+          mappingOdomAnchor = odomWorldRead();
+        }
+      }
     }
     if (Serial.available()) {
       const char c = (char)Serial.read();
       if (c == 'x' || c == 'X') {
         turretSweep.cancel();
         Serial.println("TSCAN:CANCEL");
+        Serial2.println("TSCAN:CANCEL");
       }
     }
     return;
@@ -375,12 +481,14 @@ void loop() {
   }
 
   const float lidarFilteredCm = lidarAvg.average();
-  telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel);
-  telemetryTestUpdate(lidarFilteredCm);
-
   // ---- Odometry manager (local + world-frame) ----
   // Integrates world-frame East/North continuously.
   odomManagerUpdate(heading.headingDegContinuous);
+  const WorldOdomData wOdom = odomWorldRead();
+
+  telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel,
+                  wOdom.eastCm, wOdom.northCm);
+  telemetryTestUpdate(lidarFilteredCm);
 
   if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
     lastRgbMs = nowMs;
@@ -527,6 +635,29 @@ void loop() {
     if (seqExecTask.active()) seqExecTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
 
+    // Turret scan commands (from browser). These must not be blocked by odom resets.
+    if (espCmd.type == EspCommand::Type::TurretScanCancel) {
+      if (turretSweep.active()) {
+        turretSweep.cancel();
+        Serial.println("TSCAN:CANCEL");
+        Serial2.println("TSCAN:CANCEL");
+      }
+      motorDrive(0.0f, 0.0f);
+      return;
+    }
+    if (espCmd.type == EspCommand::Type::TurretScanPlus ||
+        espCmd.type == EspCommand::Type::TurretScanMinus) {
+      if (turretSweep.active()) return;  // ignore if already scanning
+      motorDrive(0.0f, 0.0f);
+      const int dir = (espCmd.type == EspCommand::Type::TurretScanMinus) ? -1 : +1;
+      Serial.print("TSCAN:BEGIN,");
+      Serial.println(dir < 0 ? "-" : "+");
+      Serial2.print("TSCAN:BEGIN,");
+      Serial2.println(dir < 0 ? "-" : "+");
+      turretSweep.begin(&turretMotor, &turretAngle, &lidar, dir, turretMotor.ticksAbs(), millis());
+      return;
+    }
+
     odomHardResetKeepWorld(heading.headingDegContinuous);
     OdometryData od = odomRaw();
 
@@ -581,18 +712,6 @@ void loop() {
     }
   }
 
-  // Allow ESP Disarm/Passcode handling above to work even while these are active.
-  if (colorCalTask.active()) {
-    colorCalTask.update(&lastRgb, lastRgbValid);
-    return;
-  }
-
-  if (colorMazeTask.active()) {
-    OdometryData od = odomRaw();
-    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
-    return;
-  }
-
   if (Serial.available()) {
     const char peek = (char)Serial.peek();
     if (peek == '@') {
@@ -603,6 +722,12 @@ void loop() {
     }
 
     const char c = Serial.read();
+
+    // Serial control should always be able to take over. The color calibration
+    // task is initiated by a physical button, but it must not lock out console
+    // hotkeys (including plot_tscan.py sending mapping commands).
+    if (colorCalTask.active()) colorCalTask.cancel();
+    if (colorMazeTask.active()) colorMazeTask.cancel();
     if ((c == 'm' || c == 'M') && !roomTask.active()) {
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
@@ -747,6 +872,7 @@ void loop() {
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,+");
+      Serial2.println("TSCAN:BEGIN,+");
       turretSweep.begin(&turretMotor, &turretAngle, &lidar, +1, turretMotor.ticksAbs(), millis());
     }
     if (c == 'i' || c == 'I') {
@@ -762,8 +888,94 @@ void loop() {
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,-");
+      Serial2.println("TSCAN:BEGIN,-");
       turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
     }
+    if (c == 'b' || c == 'B') {
+      // Mapping: capture + scan, then match + update map on DONE.
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
+      if (colorMazeTask.active()) colorMazeTask.cancel();
+      motorDrive(0.0f, 0.0f);
+
+      if (!mappingPoseInitialized) {
+        mappingInitPoseDefaults_();
+        mappingOdomAnchor = odomWorldRead();
+      }
+
+      const WorldOdomData w = odomWorldRead();
+      const float dx = w.eastCm - mappingOdomAnchor.eastCm;
+      const float dy = w.northCm - mappingOdomAnchor.northCm;
+      mappingPriorPose.x_cm = mappingPose.x_cm + dx;
+      mappingPriorPose.y_cm = mappingPose.y_cm + dy;
+      mappingPriorPose.headingDeg = heading.headingDegContinuous;
+      mappingPose = mappingPriorPose;
+      mappingTask.beginCapture(mappingPriorPose);
+
+      Serial.println("MAP:CAPTURE_BEGIN");
+      Serial.println("TSCAN:BEGIN,+");
+      Serial2.println("TSCAN:BEGIN,+");
+      turretSweep.begin(&turretMotor, &turretAngle, &lidar, +1, turretMotor.ticksAbs(), millis());
+    }
+    if (c == 'n' || c == 'N') {
+      // Mapping: capture - scan, then match + update map on DONE.
+      if (roomTask.active()) roomTask.cancel();
+      if (followTask.active()) followTask.cancel();
+      if (driveByDistance.active()) driveByDistance.cancel();
+      if (wallAlignTask.active()) wallAlignTask.cancel();
+      if (wallSeqTask.active()) wallSeqTask.cancel();
+      if (encCalTask.active()) encCalTask.cancel();
+      if (seqExecTask.active()) seqExecTask.cancel();
+      if (colorMazeTask.active()) colorMazeTask.cancel();
+      motorDrive(0.0f, 0.0f);
+
+      if (!mappingPoseInitialized) {
+        mappingInitPoseDefaults_();
+        mappingOdomAnchor = odomWorldRead();
+      }
+
+      const WorldOdomData w = odomWorldRead();
+      const float dx = w.eastCm - mappingOdomAnchor.eastCm;
+      const float dy = w.northCm - mappingOdomAnchor.northCm;
+      mappingPriorPose.x_cm = mappingPose.x_cm + dx;
+      mappingPriorPose.y_cm = mappingPose.y_cm + dy;
+      mappingPriorPose.headingDeg = heading.headingDegContinuous;
+      mappingPose = mappingPriorPose;
+      mappingTask.beginCapture(mappingPriorPose);
+
+      Serial.println("MAP:CAPTURE_BEGIN");
+      Serial.println("TSCAN:BEGIN,-");
+      Serial2.println("TSCAN:BEGIN,-");
+      turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
+    }
+    if (c == 'v' || c == 'V') {
+      mappingTask.printMap(1);
+    }
+    if (c == 'r' || c == 'R') {
+      mappingTask.resetMap();
+      mappingInitPoseDefaults_();
+      odomWorldReset(heading.headingDegContinuous);
+      odomLocalReset();
+      mappingOdomAnchor = odomWorldRead();
+      Serial.println("MAP:RESET");
+    }
+  }
+
+  // Allow ESP Disarm/Passcode handling above to work even while these are active.
+  if (colorCalTask.active()) {
+    colorCalTask.update(&lastRgb, lastRgbValid);
+    return;
+  }
+
+  if (colorMazeTask.active()) {
+    OdometryData od = odomRaw();
+    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
+    return;
   }
 
   // ---- Run tasks/actions ----

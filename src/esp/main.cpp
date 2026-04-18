@@ -41,6 +41,7 @@ String compassData = "0,N";
 String rgbPacket = "RGB:0,0,0";
 String encCalPacket = "ENC_CAL:--";
 String turretCalPacket = "TURCAL:--";
+String odomPacket = "ODOM:0.0,0.0";
 
 ESP8266WebServer server(80);
 static String serialLineBuf;
@@ -74,11 +75,43 @@ void handleTurretCal();
 void handleTurretCalStart();
 void handleTurretCalDone();
 void handleTurretZero();
+void handleTurretScanPlus();
+void handleTurretScanMinus();
+void handleTurretScanCancel();
 void handleStatus();
+void handleEvents();
+void handleOdom();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
 void serveFile(const char* path, const char* contentType);
+bool tryServeStaticUri(const String& uri);
+const char* contentTypeForPath(const String& path);
+
+// ====== Event polling fallback (robust) ======
+static const uint16_t kEventRingSize = 256;
+static const uint16_t kEventLineMax = 120;
+static uint32_t gEventNextSeq = 1;
+static uint16_t gEventHead = 0;
+static uint32_t gEventSeq[kEventRingSize];
+static char gEventLine[kEventRingSize][kEventLineMax];
+
+static void resetEventRing_() {
+  gEventNextSeq = 1;
+  gEventHead = 0;
+  for (uint16_t i = 0; i < kEventRingSize; ++i) {
+    gEventSeq[i] = 0;
+    gEventLine[i][0] = '\0';
+  }
+}
+
+static void pushEventLine_(const String& line) {
+  const uint16_t i = gEventHead;
+  gEventSeq[i] = gEventNextSeq++;
+  line.toCharArray(gEventLine[i], kEventLineMax);
+  gEventLine[i][kEventLineMax - 1] = '\0';
+  gEventHead = (uint16_t)((gEventHead + 1) % kEventRingSize);
+}
 
 static bool isArmed() { return gAuthState == AuthState::Armed; }
 static void rejectNotArmed() { server.send(403, "text/plain", "NOT_ARMED"); }
@@ -163,6 +196,11 @@ void setup() {
   server.on("/turret_cal_start", HTTP_POST, handleTurretCalStart);
   server.on("/turret_cal_done", HTTP_POST, handleTurretCalDone);
   server.on("/turret_zero", HTTP_POST, handleTurretZero);
+  server.on("/scan_plus", HTTP_POST, handleTurretScanPlus);
+  server.on("/scan_minus", HTTP_POST, handleTurretScanMinus);
+  server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel);
+  server.on("/events", HTTP_GET, handleEvents);
+  server.on("/odom", HTTP_GET, handleOdom);
   server.on("/status", handleStatus);
   server.onNotFound(handleNotFound);
 
@@ -220,7 +258,13 @@ void processSerialLine(const String& data) {
     encCalPacket = data;
   } else if (data.startsWith("TURCAL:")) {
     turretCalPacket = data;
+  } else if (data.startsWith("ODOM:")) {
+    odomPacket = data;
   }
+
+  // Push only scan lines into the events ring. This keeps /events dedicated to
+  // scan transactions (and avoids ring overflow from background telemetry).
+  if (data.startsWith("TSCAN:")) pushEventLine_(data);
 }
 
 void pollSerialNonBlocking() {
@@ -266,12 +310,15 @@ void listAllFiles() {
 }
 
 void handleNotFound() {
+  const String uri = server.uri();
+  if (tryServeStaticUri(uri)) return;
+
   String message = "404: Not Found\n\n";
   message += "URI: ";
-  message += server.uri();
+  message += uri;
   message += "\n";
   server.send(404, "text/plain", message);
-  Serial.println("404 for: " + server.uri());
+  Serial.println("404 for: " + uri);
 }
 
 void handleMove(int distance) {
@@ -367,6 +414,29 @@ void handleTurretCalDone() {
 void handleTurretZero() {
   if (!isArmed()) return rejectNotArmed();
   Serial.println("TurretZero");
+  server.send(200, "text/plain", "OK");
+}
+
+void handleTurretScanPlus() {
+  if (!isArmed()) return rejectNotArmed();
+  resetEventRing_();
+  pushEventLine_("TSCAN:BEGIN,+");
+  Serial.println("TurretScanPlus");
+  server.send(200, "text/plain", "OK");
+}
+
+void handleTurretScanMinus() {
+  if (!isArmed()) return rejectNotArmed();
+  resetEventRing_();
+  pushEventLine_("TSCAN:BEGIN,-");
+  Serial.println("TurretScanMinus");
+  server.send(200, "text/plain", "OK");
+}
+
+void handleTurretScanCancel() {
+  if (!isArmed()) return rejectNotArmed();
+  pushEventLine_("TSCAN:CANCEL");
+  Serial.println("TurretScanCancel");
   server.send(200, "text/plain", "OK");
 }
 
@@ -474,6 +544,92 @@ void serveFile(const char* path, const char* contentType) {
     server.send(404, "text/plain", "File not found");
     return;
   }
+  // Avoid stale UI code during development; ESP caching behavior varies by client.
+  // (If you want caching later, make it explicit with versioned asset URLs.)
+  server.sendHeader("Cache-Control", "no-store");
   server.streamFile(file, contentType);
   file.close();
+}
+
+void handleEvents() {
+  if (!isArmed()) return rejectNotArmed();
+
+  uint32_t from = 0;
+  if (server.hasArg("from")) from = (uint32_t)server.arg("from").toInt();
+
+  // Return lines in chronological order with "seq|LINE" per row.
+  // Client can call with from=<last_seq_seen>.
+  String out;
+  out.reserve(1800);
+
+  // The ring buffer physical order is not guaranteed to be chronological
+  // unless it has wrapped. To keep the browser logic deterministic, emit
+  // events sorted by seq.
+  uint32_t lastEmitted = from;
+  for (;;) {
+    uint32_t nextSeq = 0xFFFFFFFFu;
+    uint16_t nextIdx = 0;
+    bool found = false;
+
+    for (uint16_t i = 0; i < kEventRingSize; ++i) {
+      const uint32_t seq = gEventSeq[i];
+      if (seq == 0) continue;
+      if (seq <= lastEmitted) continue;
+      if (seq < nextSeq) {
+        nextSeq = seq;
+        nextIdx = i;
+        found = true;
+      }
+    }
+
+    if (!found) break;
+    out += String(nextSeq);
+    out += "|";
+    out += gEventLine[nextIdx];
+    out += "\n";
+    lastEmitted = nextSeq;
+  }
+
+  server.send(200, "text/plain", out);
+}
+
+void handleOdom() {
+  if (!isArmed()) {
+    server.send(200, "text/plain", "ODOM:--");
+    return;
+  }
+  server.send(200, "text/plain", odomPacket);
+}
+
+const char* contentTypeForPath(const String& path) {
+  if (path.endsWith(".html")) return "text/html";
+  if (path.endsWith(".css")) return "text/css";
+  if (path.endsWith(".js")) return "application/javascript";
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".svg")) return "image/svg+xml";
+  if (path.endsWith(".ico")) return "image/x-icon";
+  if (path.endsWith(".json")) return "application/json";
+  return "text/plain";
+}
+
+bool tryServeStaticUri(const String& uri) {
+  if (uri.length() == 0) return false;
+  if (uri == "/") return false;
+  if (uri == "/events") return false;
+  if (uri.indexOf("..") >= 0) return false;
+
+  // If client asks "/foo", treat as "/foo" and also allow "/esp/foo" style.
+  const char* ct = contentTypeForPath(uri);
+  String pathToServe = uri;
+  File f = LittleFS.open(pathToServe, "r");
+  if (!f && uri.startsWith("/")) {
+    // also try legacy /esp prefix
+    pathToServe = String("/esp") + uri;
+    f = LittleFS.open(pathToServe, "r");
+  }
+  if (!f) return false;
+  f.close();
+
+  serveFile(pathToServe.c_str(), ct);
+  return true;
 }

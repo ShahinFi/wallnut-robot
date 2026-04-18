@@ -25,6 +25,13 @@ void ColorCalibrationTask::begin() {
   setState_(State::Prompt1);
 }
 
+void ColorCalibrationTask::cancel() {
+  if (state_ == State::Idle) return;
+  ui_.showIdle();
+  setState_(State::Idle);
+  doneStartMs_ = 0;
+}
+
 void ColorCalibrationTask::update(const ColorRgb* live, bool liveValid) {
   if (state_ == State::Idle) return;
 

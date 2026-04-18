@@ -32,6 +32,8 @@ void TurretSweepScan360::setConfig(const Config& cfg) {
   if (!isfinite(cfg_.cmdAbs) || cfg_.cmdAbs < 0.0f) cfg_.cmdAbs = 0.0f;
   if (cfg_.cmdAbs > 1.0f) cfg_.cmdAbs = 1.0f;
   if (cfg_.timeoutMs < 1000U) cfg_.timeoutMs = 1000U;
+  // 0 means "auto" (computed from targetSamplesPerRev).
+  // Otherwise it's an explicit tick-domain downsampling factor.
   if (cfg_.targetSamplesPerRev == 0) cfg_.targetSamplesPerRev = 1;
 }
 
@@ -61,9 +63,15 @@ void TurretSweepScan360::begin(TurretMotor* motor, TurretAngleTracker* angleTrac
     return;
   }
 
-  // Auto sampling cadence: ~targetSamplesPerRev per revolution.
-  sampleEveryTicks_ = ticksPerRev_ / (uint32_t)cfg_.targetSamplesPerRev;
-  if (sampleEveryTicks_ == 0) sampleEveryTicks_ = 1;
+  // Sampling cadence:
+  // - if explicitly set, use it
+  // - else auto-select ~targetSamplesPerRev per revolution.
+  if (cfg_.sampleEveryTicks > 0) {
+    sampleEveryTicks_ = (uint32_t)cfg_.sampleEveryTicks;
+  } else {
+    sampleEveryTicks_ = ticksPerRev_ / (uint32_t)cfg_.targetSamplesPerRev;
+    if (sampleEveryTicks_ == 0) sampleEveryTicks_ = 1;
+  }
 
   state_ = State::Running;
   startMs_ = nowMs;

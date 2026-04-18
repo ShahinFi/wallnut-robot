@@ -52,6 +52,23 @@ body {
 }
 body::-webkit-scrollbar { width: 0; height: 0; } /* WebKit: hide page scrollbars */
 
+/* Maze page: allow normal page scroll so the mapping panel is always reachable.
+   This avoids nested scroll containers on mobile/trackpads. */
+body.page-maze {
+  height: auto;
+  overflow-y: auto;
+}
+body.page-maze .app {
+  min-height: 0;
+  height: auto;
+}
+body.page-maze .grid {
+  overflow: visible;
+}
+body.page-maze .maze-control {
+  overflow: visible;
+}
+
 .app {
   width: calc(100vw - 16px);
   margin: 0 auto;
@@ -442,8 +459,9 @@ button:disabled,
     grid-template-areas:
       "control lidar"
       "control compass"
-      "control color";
-    grid-template-rows: repeat(3, minmax(0, 1fr));
+      "control color"
+      "map map";
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -496,7 +514,8 @@ button:disabled,
       "control"
       "lidar"
       "compass"
-      "color";
+      "color"
+      "map";
     grid-template-rows: none;
   }
 
@@ -589,9 +608,10 @@ button:disabled,
   grid-template-areas:
     "control lidar"
     "control compass"
-    "control color";
+    "control color"
+    "map map";
   /* Let the control panel grow without spilling outside its border; the outer grid scrolls (scrollbars hidden). */
-  grid-template-rows: repeat(3, auto);
+  grid-template-rows: repeat(4, auto);
   align-content: start;
 }
 
@@ -599,6 +619,54 @@ button:disabled,
 .maze-lidar { grid-area: lidar; }
 .maze-compass { grid-area: compass; }
 .maze-color { grid-area: color; }
+.maze-map { grid-area: map; }
+
+.maze-map {
+  min-width: 0;
+}
+
+.map-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.map-canvas-wrap {
+  margin-top: 12px;
+  border: 1px solid rgba(203,215,255,.14);
+  border-radius: 14px;
+  overflow: hidden;
+  background: radial-gradient(1200px 500px at 20% 0%, rgba(88,243,255,.12), transparent 55%),
+              radial-gradient(900px 600px at 90% 100%, rgba(255,95,135,.10), transparent 55%),
+              rgba(7,3,15,.35);
+  /* Prevent the map from feeling "too large" on laptop screens. */
+  max-height: 520px;
+}
+
+#mapCanvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Keep a compact, readable map panel without forcing huge vertical space. */
+  max-height: 520px;
+}
+
+.map-foot {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
 
 .maze-actions {
   display: grid;

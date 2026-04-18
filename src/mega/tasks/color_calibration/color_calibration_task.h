@@ -12,6 +12,7 @@ public:
   ColorCalibrationTask();
 
   void begin();
+  void cancel();  // immediate exit (for serial control / safety)
   void update(const ColorRgb* live, bool liveValid);
   void onButtonPress(const ColorRgb* live, bool liveValid);
   bool loadFromEeprom();
