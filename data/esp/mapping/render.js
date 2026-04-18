@@ -10,6 +10,15 @@ export class MapRenderer {
     this.showScan = true;
     this.scanPts = [];
     this.pose = { x: 0, y: 0, headingDeg: 0 };
+    // Extra world-space margin (cm) rendered around the map boundary so you can
+    // see out-of-bounds scan endpoints. Visual-only; does not change mapping.
+    this.viewMarginCm = 6;
+  }
+
+  setViewMarginCm(marginCm) {
+    const m = Number(marginCm);
+    if (!Number.isFinite(m)) return;
+    this.viewMarginCm = Math.max(0, Math.min(200, m));
   }
 
   setPose(pose) {
@@ -40,19 +49,23 @@ export class MapRenderer {
 
     // Fit map into canvas with padding.
     const pad = Math.max(18, Math.floor(Math.min(width, height) * 0.045));
-    const sx = (width - 2 * pad) / g.mapW_cm;
-    const sy = (height - 2 * pad) / g.mapH_cm;
+    const mCm = Math.max(0, this.viewMarginCm || 0);
+    const viewW_cm = g.mapW_cm + 2 * mCm;
+    const viewH_cm = g.mapH_cm + 2 * mCm;
+    const sx = (width - 2 * pad) / viewW_cm;
+    const sy = (height - 2 * pad) / viewH_cm;
     // Real scale (uniform): 1 cm maps to s pixels in both axes.
     const s = Math.min(sx, sy);
 
-    const mapWpx = g.mapW_cm * s;
-    const mapHpx = g.mapH_cm * s;
-    const ox = pad + (width - 2 * pad - mapWpx) * 0.5;
-    const oy = pad + (height - 2 * pad - mapHpx) * 0.5;
+    const viewWpx = viewW_cm * s;
+    const viewHpx = viewH_cm * s;
+    const ox = pad + (width - 2 * pad - viewWpx) * 0.5;
+    const oy = pad + (height - 2 * pad - viewHpx) * 0.5;
 
     const toPx = (x_cm, y_cm) => {
-      // map coords: (0,0) bottom-left; canvas: y down
-      return { x: ox + x_cm * s, y: oy + mapHpx - y_cm * s };
+      // world coords: (0,0) at map bottom-left; canvas: y down
+      // Apply margin so we can render beyond the map rectangle.
+      return { x: ox + (x_cm + mCm) * s, y: oy + viewHpx - (y_cm + mCm) * s };
     };
 
     // background
@@ -63,24 +76,25 @@ export class MapRenderer {
     // map border
     ctx.strokeStyle = "rgba(203,215,255,0.30)";
     ctx.lineWidth = 2;
-    ctx.strokeRect(ox, oy, mapWpx, mapHpx);
+    // Border is the true map extents within the view.
+    ctx.strokeRect(ox + mCm * s, oy + mCm * s, g.mapW_cm * s, g.mapH_cm * s);
 
     // subtle major grid (about every 10cm) for orientation (does not affect scale)
     const majorEvery = Math.max(1, Math.floor(10 / g.cell_cm)); // ~10cm
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(203,215,255,0.05)";
     for (let cx = 0; cx <= g.w; cx += majorEvery) {
-      const x = ox + cx * g.cell_cm * s;
+      const x = ox + (mCm + cx * g.cell_cm) * s;
       ctx.beginPath();
-      ctx.moveTo(x, oy);
-      ctx.lineTo(x, oy + mapHpx);
+      ctx.moveTo(x, oy + mCm * s);
+      ctx.lineTo(x, oy + (mCm + g.mapH_cm) * s);
       ctx.stroke();
     }
     for (let cy = 0; cy <= g.h; cy += majorEvery) {
-      const y = oy + mapHpx - cy * g.cell_cm * s;
+      const y = oy + viewHpx - (mCm + cy * g.cell_cm) * s;
       ctx.beginPath();
-      ctx.moveTo(ox, y);
-      ctx.lineTo(ox + mapWpx, y);
+      ctx.moveTo(ox + mCm * s, y);
+      ctx.lineTo(ox + (mCm + g.mapW_cm) * s, y);
       ctx.stroke();
     }
 

@@ -31,6 +31,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   const grid = new HitGrid(mapW_cm, mapH_cm, cell_cm);
   const renderer = new MapRenderer(elCanvas, grid);
+  renderer.setViewMarginCm(Number(elCanvas.dataset.viewMarginCm || 6));
 
   const cfg = {
     mapW_cm,
@@ -395,8 +396,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
           const d = bodyToMap(poseForOverlay.headingDeg, xb, yb);
           const xw = poseForOverlay.x + d.x;
           const yw = poseForOverlay.y + d.y;
-          // Overlay should never mutate the map.
-          if (grid.worldToCell(xw, yw)) state.scanWorldPts.push({ x: xw, y: yw });
+          // Overlay should never mutate the map; keep out-of-bounds points too for debugging.
+          state.scanWorldPts.push({ x: xw, y: yw });
         }
       }
 
