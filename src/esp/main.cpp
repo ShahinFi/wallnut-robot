@@ -83,6 +83,9 @@ void handleStatus();
 void handleEvents();
 void handleOdom();
 void handleSetPose();
+void handleAlerts();
+void handleMoveCm();
+void handleTurnDeg();
 void listAllFiles();
 void processSerialLine(const String& data);
 void pollSerialNonBlocking();
@@ -178,6 +181,32 @@ static void pushScanSample_(float angleDeg, float distCm) {
 static bool isArmed() { return gAuthState == AuthState::Armed; }
 static void rejectNotArmed() { server.send(403, "text/plain", "NOT_ARMED"); }
 
+// ====== Alert events (reflex stops, cmd done, etc.) ======
+// Separate from scan transport to keep scan bandwidth deterministic.
+static const uint16_t kAlertRingSize = 256;
+static const uint16_t kAlertLineMax = 120;
+static uint32_t gAlertNextSeq = 1;
+static uint16_t gAlertHead = 0;
+static uint32_t gAlertSeq[kAlertRingSize];
+static char gAlertLine[kAlertRingSize][kAlertLineMax];
+
+static void resetAlertRing_() {
+  gAlertNextSeq = 1;
+  gAlertHead = 0;
+  for (uint16_t i = 0; i < kAlertRingSize; ++i) {
+    gAlertSeq[i] = 0;
+    gAlertLine[i][0] = '\0';
+  }
+}
+
+static void pushAlertLine_(const String& line) {
+  const uint16_t i = gAlertHead;
+  gAlertSeq[i] = gAlertNextSeq++;
+  line.toCharArray(gAlertLine[i], kAlertLineMax);
+  gAlertLine[i][kAlertLineMax - 1] = '\0';
+  gAlertHead = (uint16_t)((gAlertHead + 1) % kAlertRingSize);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
@@ -190,6 +219,7 @@ void setup() {
   Serial.println("✅ LittleFS mounted successfully");
 
   listAllFiles();
+  resetAlertRing_();
 
     bool started = false;
   if (kWifiSsid && kWifiSsid[0] != '\0') {
@@ -262,8 +292,11 @@ void setup() {
   server.on("/scan_minus", HTTP_POST, handleTurretScanMinus);
   server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel);
   server.on("/events", HTTP_GET, handleEvents);
+  server.on("/alerts", HTTP_GET, handleAlerts);
   server.on("/odom", HTTP_GET, handleOdom);
   server.on("/set_pose", HTTP_POST, handleSetPose);
+  server.on("/move", HTTP_POST, handleMoveCm);
+  server.on("/turn", HTTP_POST, handleTurnDeg);
   server.on("/status", handleStatus);
   server.onNotFound(handleNotFound);
 
@@ -351,6 +384,9 @@ void processSerialLine(const String& data) {
       }
     }
   }
+
+  // Push reflex / command events into the alerts ring.
+  if (data.startsWith("EVT:")) pushAlertLine_(data);
 }
 
 void pollSerialNonBlocking() {
@@ -702,12 +738,75 @@ void handleEvents() {
   server.send(200, "text/plain", out);
 }
 
+void handleAlerts() {
+  if (!isArmed()) return rejectNotArmed();
+
+  uint32_t from = 0;
+  if (server.hasArg("from")) from = (uint32_t)server.arg("from").toInt();
+
+  String out;
+  out.reserve(1400);
+
+  // Emit alerts sorted by seq, like the original events ring did.
+  uint32_t lastEmitted = from;
+  for (;;) {
+    uint32_t nextSeq = 0xFFFFFFFFu;
+    uint16_t nextIdx = 0;
+    bool found = false;
+
+    for (uint16_t i = 0; i < kAlertRingSize; ++i) {
+      const uint32_t seq = gAlertSeq[i];
+      if (seq == 0) continue;
+      if (seq <= lastEmitted) continue;
+      if (seq < nextSeq) {
+        nextSeq = seq;
+        nextIdx = i;
+        found = true;
+      }
+    }
+
+    if (!found) break;
+    out += String(nextSeq);
+    out += "|";
+    out += gAlertLine[nextIdx];
+    out += "\n";
+    lastEmitted = nextSeq;
+    if (out.length() >= 1200) break;
+  }
+
+  server.send(200, "text/plain", out);
+}
+
 void handleOdom() {
   if (!isArmed()) {
     server.send(200, "text/plain", "ODOM:--");
     return;
   }
   server.send(200, "text/plain", odomPacket);
+}
+
+void handleMoveCm() {
+  if (!isArmed()) return rejectNotArmed();
+  if (!server.hasArg("cm")) {
+    server.send(400, "text/plain", "MISSING_CM");
+    return;
+  }
+  const int cm = server.arg("cm").toInt();
+  Serial.print("Move:");
+  Serial.println(cm);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleTurnDeg() {
+  if (!isArmed()) return rejectNotArmed();
+  if (!server.hasArg("deg")) {
+    server.send(400, "text/plain", "MISSING_DEG");
+    return;
+  }
+  const int deg = server.arg("deg").toInt();
+  Serial.print("Turn:");
+  Serial.println(deg);
+  server.send(200, "text/plain", "OK");
 }
 
 void handleSetPose() {

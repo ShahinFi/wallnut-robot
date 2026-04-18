@@ -10,6 +10,10 @@ export class MapRenderer {
     this.showScan = true;
     this.scanPts = [];
     this.pose = { x: 0, y: 0, headingDeg: 0 };
+    // Binary virtual obstacles (e.g., red floor tiles). This is NOT part of the
+    // fuzzy LiDAR occupancy grid; it is a separate hard-block layer for planning.
+    // Expected: Uint8Array(w*h) with 1 => blocked, 0 => free.
+    this.virtualBlocked = null;
     // Extra world-space margin (cm) rendered around the map boundary so you can
     // see out-of-bounds scan endpoints. Visual-only; does not change mapping.
     this.viewMarginCm = 6;
@@ -27,6 +31,10 @@ export class MapRenderer {
 
   setScanPoints(pointsWorld) {
     this.scanPts = Array.isArray(pointsWorld) ? pointsWorld : [];
+  }
+
+  setVirtualBlocked(blocked01) {
+    this.virtualBlocked = blocked01 || null;
   }
 
   draw() {
@@ -124,6 +132,23 @@ export class MapRenderer {
         // Slight inset so dense regions look cleaner.
         const inset = Math.min(1.2, sz * 0.08);
         ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
+      }
+    }
+
+    // virtual obstacles overlay (binary, always drawn strongly)
+    if (this.virtualBlocked && this.virtualBlocked.length === g.w * g.h) {
+      ctx.fillStyle = "rgba(255, 206, 62, 0.92)"; // warm amber, distinct from occ/free
+      const sz = g.cell_cm * s;
+      const inset = Math.min(1.4, sz * 0.10);
+      for (let cy = 0; cy < g.h; cy++) {
+        for (let cx = 0; cx < g.w; cx++) {
+          const i = cy * g.w + cx;
+          if (!this.virtualBlocked[i]) continue;
+          const x_cm = cx * g.cell_cm;
+          const y_cm = cy * g.cell_cm;
+          const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
+          ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
+        }
       }
     }
 

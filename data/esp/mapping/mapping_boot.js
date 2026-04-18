@@ -99,6 +99,11 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     scanSamples: [],  // {angleDeg, distCm}
     scanBodyPts: [],  // {xb,yb} for matching
     scanWorldPts: [], // for overlay
+
+    // Scan direction alternation (wiring safety):
+    // - first scan must be '+'
+    // - subsequent scans alternate on DONE
+    nextScanDir: "+",
   };
 
   const dbg = {
@@ -175,6 +180,11 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     renderer.setPose(pose);
     renderer.setScanPoints(state.scanWorldPts);
     renderer.draw();
+  }
+
+  function setVirtualBlocked(blocked01) {
+    renderer.setVirtualBlocked(blocked01 || null);
+    redraw();
   }
 
   async function fetchCompassDeg() {
@@ -403,6 +413,15 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
       setStatus(`${poseStatus || "scan done"} (${state.scanBodyPts.length} pts)`);
       redraw();
+
+      // Enforce alternating scan direction (flip only on successful DONE).
+      state.nextScanDir = (state.scanDir === "+") ? "-" : "+";
+
+      if (scanResolve) {
+        scanResolve({ ok: true, kind: "done", dir: state.scanDir });
+        scanResolve = null;
+        scanPromise = null;
+      }
       return;
     }
     if (msg.kind === "cancel") {
@@ -411,6 +430,12 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       dbg.lastEvent = "CANCEL";
       setStatus("scan cancelled");
       redraw();
+      // Do not flip direction on cancel.
+      if (scanResolve) {
+        scanResolve({ ok: false, kind: "cancel", dir: state.scanDir });
+        scanResolve = null;
+        scanPromise = null;
+      }
       return;
     }
     if (msg.kind !== "sample") return;
@@ -427,6 +452,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   let pollActive = false;
   let pollDeadlineMs = 0;
+  let scanResolve = null;
+  let scanPromise = null;
 
   async function pollOnce() {
     const res = await fetch(`/events?from=${lastSeq}`, { cache: "no-store" });
@@ -470,6 +497,13 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       if (Date.now() > pollDeadlineMs) {
         stopPolling();
         setStatus("scan timeout");
+        state.scanActive = false;
+        state.scanDoneSeen = true;
+        if (scanResolve) {
+          scanResolve({ ok: false, kind: "timeout" });
+          scanResolve = null;
+          scanPromise = null;
+        }
         return;
       }
       try {
@@ -506,18 +540,31 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.scanWorldPts = [];
     state.scanActive = true;
     state.scanDoneSeen = false;
+    // Deterministic scan direction even if BEGIN is delayed/dropped.
+    state.scanDir = String(path).includes("minus") ? "-" : "+";
     dbg.lastEvent = "START";
     dbg.pollErrors = 0;
     dbg.lastHttp = "-";
     dbg.lastSeq = 0;
     setStatus(`starting ${label}...`);
     lastSeq = 0; // ring is reset on scan start by the ESP
+
+    // Create a completion promise for callers (autonomy).
+    scanPromise = new Promise((resolve) => { scanResolve = resolve; });
+
     await post(path);
     startPollingUntilDone();
+    return scanPromise;
   }
 
-  btnPlus.addEventListener("click", () => startScan("/scan_plus", "scan +"));
-  btnMinus.addEventListener("click", () => startScan("/scan_minus", "scan -"));
+  function requestScanAuto() {
+    // Enforce alternation (wiring safety): ignore manual direction preference.
+    const dir = state.nextScanDir === "-" ? "-" : "+";
+    return startScan(dir === "+" ? "/scan_plus" : "/scan_minus", `scan ${dir}`);
+  }
+
+  btnPlus.addEventListener("click", () => requestScanAuto());
+  btnMinus.addEventListener("click", () => requestScanAuto());
   btnClear.addEventListener("click", () => { lastSeq = 0; clearMap(); });
 
   // initial
@@ -526,4 +573,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   // Start low-rate pose polling for live arrow updates (paused automatically during scans).
   pollPoseOnce();
   setInterval(pollPoseOnce, 350);
+
+  // Expose a tiny API for autonomy orchestration (does not change mapping behavior).
+  window.MappingApi = {
+    grid,
+    cfg,
+    state,
+    getPose: () => currentPose(),
+    requestScanAuto,
+    setVirtualBlocked,
+  };
 }

@@ -12,6 +12,7 @@
     <link rel="stylesheet" type="text/css" href="style.css" />
     <script src="maze.js" defer></script>
     <script type="module" src="mapping/mapping_boot.js?v=5" defer></script>
+    <script type="module" src="autonomy/autonomy.js?v=1" defer></script>
   </head>
   <body class="page-maze">
     <div class="app">
@@ -46,6 +47,16 @@
           <div class="maze-actions">
             <button class="button button-primary" data-requires-arm="1" onclick="startMazeSolver()">START MAZE SOLVER</button>
             <button class="button button-secondary" onclick="window.location.href='/'">BACK TO DASHBOARD</button>
+          </div>
+
+          <h2>Autonomy</h2>
+          <div class="maze-actions">
+            <button class="button button-primary" data-requires-arm="1" id="autoStart">AUTO START</button>
+            <button class="button button-outline" id="autoStop">STOP</button>
+            <div class="readout readout-compact">
+              <div class="mini-label">AUTO</div>
+              <div id="autoStatus">idle</div>
+            </div>
           </div>
 
           <h2>Encoder Calibration</h2>
@@ -124,6 +135,9 @@
               data-track-dy-cm="10"
               data-track-dheading-deg="20"
               data-view-margin-cm="6"
+              data-goal-x-cm="10"
+              data-goal-y-cm="36"
+              data-goal-tol-cells="0"
               data-match-min-dist-cm="2"
               data-match-max-dist-cm="250"
               data-match-w-occ-hit="6"

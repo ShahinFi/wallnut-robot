@@ -91,6 +91,11 @@ static const uint32_t kButtonDebounceMs = 250;
 static volatile bool gButtonEdge = false;
 static uint32_t gLastButtonMs = 0;
 
+// ===== Browser-autonomy reflex events (UART -> ESP -> browser polls) =====
+static bool gReflexLatchedRed = false;
+static bool gReflexLatchedFront = false;
+static bool gSeqWasActive = false;
+
 static void onButtonIsr() {
   gButtonEdge = true;
 }
@@ -147,6 +152,48 @@ static float clamp_(float v, float lo, float hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
   return v;
+}
+
+static float colorDistSqNormalized_(const ColorRgb& a, const ColorRgb& b) {
+  float ar = (float)a.r, ag = (float)a.g, ab = (float)a.b;
+  float br = (float)b.r, bg = (float)b.g, bb = (float)b.b;
+  const float sa = ar + ag + ab;
+  const float sb = br + bg + bb;
+  if (sa > 0.0f) { ar /= sa; ag /= sa; ab /= sa; }
+  if (sb > 0.0f) { br /= sb; bg /= sb; bb /= sb; }
+  const float dr = ar - br;
+  const float dg = ag - bg;
+  const float db = ab - bb;
+  return dr * dr + dg * dg + db * db;
+}
+
+static bool isVirtualRed_(const ColorRgb& live) {
+  // Project convention: first saved calibration color is the virtual obstacle (red).
+  if (!colorCalTask.hasCalibration()) return false;
+  const ColorRgb* refs = colorCalTask.refs();
+  if (!refs) return false;
+  const ColorRgb redRef = refs[0];
+  // Tunable threshold (normalized RGB distance).
+  const float kThresh = 0.18f;
+  const float d2 = colorDistSqNormalized_(live, redRef);
+  return isfinite(d2) && d2 <= (kThresh * kThresh);
+}
+
+static void sendEvtPose_(const char* tag, float extra) {
+  const WorldOdomData w = odomWorldRead();
+  Serial2.print("EVT:");
+  Serial2.print(tag);
+  Serial2.print(",");
+  Serial2.print(w.eastCm, 2);
+  Serial2.print(",");
+  Serial2.print(w.northCm, 2);
+  Serial2.print(",");
+  Serial2.print(lastHeading.headingDegWrapped, 1);
+  if (isfinite(extra)) {
+    Serial2.print(",");
+    Serial2.print(extra, 1);
+  }
+  Serial2.println();
 }
 
 // Quick hardware sanity test for turret direction/sign.
@@ -549,6 +596,25 @@ void loop() {
     }
   }
 
+  // Reflex safety during browser-driven motion (low latency, no Wi-Fi dependency).
+  // Latch once per commanded motion so we don't spam events.
+  if (seqExecTask.active()) {
+    const float kFrontStopCm = 9.0f;
+    if (!gReflexLatchedFront && isfinite(lidarFilteredCm) && lidarFilteredCm > 0.0f && lidarFilteredCm < kFrontStopCm) {
+      gReflexLatchedFront = true;
+      seqExecTask.cancel();
+      motorDrive(0.0f, 0.0f);
+      sendEvtPose_("FRONTSTOP", lidarFilteredCm);
+    }
+
+    if (!gReflexLatchedRed && lastRgbValid && isVirtualRed_(lastRgb)) {
+      gReflexLatchedRed = true;
+      seqExecTask.cancel();
+      motorDrive(0.0f, 0.0f);
+      sendEvtPose_("RED", NAN);
+    }
+  }
+
   if (gButtonEdge) {
     if (nowMs - gLastButtonMs >= kButtonDebounceMs) {
       gButtonEdge = false;
@@ -759,12 +825,16 @@ void loop() {
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      gReflexLatchedRed = false;
+      gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::Turn) {
       espSteps[0] = {SequenceStepType::TurnDeg, (float)espCmd.value};
       espSteps[1] = {SequenceStepType::End, 0.0f};
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      gReflexLatchedRed = false;
+      gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::North) {
       if (!seqHeadingSet) {
         Serial.println("Seq heading not set. Press 'h' first.");
@@ -775,6 +845,8 @@ void loop() {
         seqExecTask.setSequence(espSteps);
         seqExecTask.clearAlignHeading();
         seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+        gReflexLatchedRed = false;
+        gReflexLatchedFront = false;
       }
     } else if (espCmd.type == EspCommand::Type::SetNorth) {
       seqHeadingHoldDeg = heading.headingDegContinuous;
@@ -1100,4 +1172,14 @@ void loop() {
   } else {
     roomTask.update(heading.headingDegContinuous, lidarFilteredCm);
   }
+
+  // Command completion event (lets browser know a step finished).
+  const bool seqActiveNow = seqExecTask.active();
+  if (gSeqWasActive && !seqActiveNow) {
+    const SequenceExecutorTask::State st = seqExecTask.state();
+    if (st == SequenceExecutorTask::State::Succeeded) sendEvtPose_("CMDOK", NAN);
+    else if (st == SequenceExecutorTask::State::Failed) sendEvtPose_("CMDFAIL", NAN);
+    else if (st == SequenceExecutorTask::State::Cancelled) sendEvtPose_("CMDCANCEL", NAN);
+  }
+  gSeqWasActive = seqActiveNow;
 }
