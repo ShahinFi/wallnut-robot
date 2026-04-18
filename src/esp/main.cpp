@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
+#include <math.h>
 #include <string.h>
 
 // Optional local secrets file (gitignored): src/esp/wifi_secrets.h
@@ -89,28 +90,88 @@ bool tryServeStaticUri(const String& uri);
 const char* contentTypeForPath(const String& path);
 
 // ====== Event polling fallback (robust) ======
-static const uint16_t kEventRingSize = 256;
-static const uint16_t kEventLineMax = 120;
-static uint32_t gEventNextSeq = 1;
-static uint16_t gEventHead = 0;
-static uint32_t gEventSeq[kEventRingSize];
-static char gEventLine[kEventRingSize][kEventLineMax];
+// NOTE:
+// We need to preserve *all* turret scan points for browser-side matching.
+// A small ring buffer can overwrite points during a sweep, producing unstable
+// localization. Instead, we keep a dedicated per-scan event buffer that holds
+// the full scan transaction (BEGIN + samples + DONE/CANCEL).
+//
+// This is still served via /events?from=<seq> with the same "seq|LINE" format,
+// so the browser polling logic doesn't change.
+static const uint16_t kScanMaxEvents = 4096;
+enum class ScanEvtKind : uint8_t { None = 0, Begin = 1, Sample = 2, Done = 3, Cancel = 4, Overflow = 5 };
+static uint32_t gScanNextSeq = 1;
+static uint16_t gScanCount = 0;         // number of recorded events
+static bool gScanHasData = false;       // true after first BEGIN is stored
+static bool gScanOverflow = false;      // set if we exceed kScanMaxEvents (should never happen in normal configs)
+static ScanEvtKind gScanKind[kScanMaxEvents];
+static int8_t gScanDir[kScanMaxEvents];        // +1 / -1 for BEGIN, else 0
+static uint16_t gScanAngleCdeg[kScanMaxEvents]; // centi-degrees [0..36000]
+static uint16_t gScanDistMm[kScanMaxEvents];    // millimeters
 
-static void resetEventRing_() {
-  gEventNextSeq = 1;
-  gEventHead = 0;
-  for (uint16_t i = 0; i < kEventRingSize; ++i) {
-    gEventSeq[i] = 0;
-    gEventLine[i][0] = '\0';
-  }
+static void resetScanBuffer_() {
+  gScanNextSeq = 1;
+  gScanCount = 0;
+  gScanHasData = false;
+  gScanOverflow = false;
+  // No need to clear arrays; gScanCount gates reads.
 }
 
-static void pushEventLine_(const String& line) {
-  const uint16_t i = gEventHead;
-  gEventSeq[i] = gEventNextSeq++;
-  line.toCharArray(gEventLine[i], kEventLineMax);
-  gEventLine[i][kEventLineMax - 1] = '\0';
-  gEventHead = (uint16_t)((gEventHead + 1) % kEventRingSize);
+static void pushScanBegin_(int dirSign) {
+  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  gScanKind[gScanCount] = ScanEvtKind::Begin;
+  gScanDir[gScanCount] = (dirSign < 0) ? -1 : 1;
+  gScanAngleCdeg[gScanCount] = 0;
+  gScanDistMm[gScanCount] = 0;
+  gScanCount++;
+  gScanNextSeq++;
+  gScanHasData = true;
+}
+
+static void pushScanDone_() {
+  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  gScanKind[gScanCount] = ScanEvtKind::Done;
+  gScanDir[gScanCount] = 0;
+  gScanAngleCdeg[gScanCount] = 0;
+  gScanDistMm[gScanCount] = 0;
+  gScanCount++;
+  gScanNextSeq++;
+  gScanHasData = true;
+}
+
+static void pushScanCancel_() {
+  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  gScanKind[gScanCount] = ScanEvtKind::Cancel;
+  gScanDir[gScanCount] = 0;
+  gScanAngleCdeg[gScanCount] = 0;
+  gScanDistMm[gScanCount] = 0;
+  gScanCount++;
+  gScanNextSeq++;
+  gScanHasData = true;
+}
+
+static void pushScanSample_(float angleDeg, float distCm) {
+  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  if (!(isfinite(angleDeg) && isfinite(distCm))) return;
+  // Normalize/quantize to keep memory small and deterministic.
+  // Angle: centi-deg in [0..36000].
+  while (angleDeg < 0.0f) angleDeg += 360.0f;
+  while (angleDeg >= 360.0f) angleDeg -= 360.0f;
+  int a = (int)lroundf(angleDeg * 100.0f);
+  if (a < 0) a = 0;
+  if (a > 36000) a = 36000;
+  // Dist: mm (supports up to ~65m, plenty).
+  int dmm = (int)lroundf(distCm * 10.0f);
+  if (dmm < 0) dmm = 0;
+  if (dmm > 65535) dmm = 65535;
+
+  gScanKind[gScanCount] = ScanEvtKind::Sample;
+  gScanDir[gScanCount] = 0;
+  gScanAngleCdeg[gScanCount] = (uint16_t)a;
+  gScanDistMm[gScanCount] = (uint16_t)dmm;
+  gScanCount++;
+  gScanNextSeq++;
+  gScanHasData = true;
 }
 
 static bool isArmed() { return gAuthState == AuthState::Armed; }
@@ -264,7 +325,30 @@ void processSerialLine(const String& data) {
 
   // Push only scan lines into the events ring. This keeps /events dedicated to
   // scan transactions (and avoids ring overflow from background telemetry).
-  if (data.startsWith("TSCAN:")) pushEventLine_(data);
+  if (data.startsWith("TSCAN:")) {
+    // Expected formats (from Mega):
+    // - TSCAN:BEGIN,+
+    // - TSCAN:BEGIN,-
+    // - TSCAN:DONE
+    // - TSCAN:CANCEL
+    // - TSCAN:<angleDeg>,<distCm>
+    const String payload = data.substring(6); // after "TSCAN:"
+    if (payload.startsWith("BEGIN,")) {
+      const int dir = payload.indexOf('-') >= 0 ? -1 : 1;
+      pushScanBegin_(dir);
+    } else if (payload.startsWith("DONE")) {
+      pushScanDone_();
+    } else if (payload.startsWith("CANCEL")) {
+      pushScanCancel_();
+    } else {
+      const int comma = payload.indexOf(',');
+      if (comma > 0) {
+        const float a = payload.substring(0, comma).toFloat();
+        const float d = payload.substring(comma + 1).toFloat();
+        pushScanSample_(a, d);
+      }
+    }
+  }
 }
 
 void pollSerialNonBlocking() {
@@ -419,23 +503,23 @@ void handleTurretZero() {
 
 void handleTurretScanPlus() {
   if (!isArmed()) return rejectNotArmed();
-  resetEventRing_();
-  pushEventLine_("TSCAN:BEGIN,+");
+  resetScanBuffer_();
+  pushScanBegin_(+1);  // synthetic BEGIN so browser sees it immediately
   Serial.println("TurretScanPlus");
   server.send(200, "text/plain", "OK");
 }
 
 void handleTurretScanMinus() {
   if (!isArmed()) return rejectNotArmed();
-  resetEventRing_();
-  pushEventLine_("TSCAN:BEGIN,-");
+  resetScanBuffer_();
+  pushScanBegin_(-1);  // synthetic BEGIN so browser sees it immediately
   Serial.println("TurretScanMinus");
   server.send(200, "text/plain", "OK");
 }
 
 void handleTurretScanCancel() {
   if (!isArmed()) return rejectNotArmed();
-  pushEventLine_("TSCAN:CANCEL");
+  pushScanCancel_(); // synthetic
   Serial.println("TurretScanCancel");
   server.send(200, "text/plain", "OK");
 }
@@ -558,36 +642,59 @@ void handleEvents() {
   if (server.hasArg("from")) from = (uint32_t)server.arg("from").toInt();
 
   // Return lines in chronological order with "seq|LINE" per row.
-  // Client can call with from=<last_seq_seen>.
+  // seq numbering is 1-based and monotonic within the current scan buffer.
+  //
+  // This buffer is per-scan and large enough to hold all samples, ensuring
+  // the browser gets the full sweep even if it polls slowly.
   String out;
-  out.reserve(1800);
+  out.reserve(2400);
 
-  // The ring buffer physical order is not guaranteed to be chronological
-  // unless it has wrapped. To keep the browser logic deterministic, emit
-  // events sorted by seq.
-  uint32_t lastEmitted = from;
-  for (;;) {
-    uint32_t nextSeq = 0xFFFFFFFFu;
-    uint16_t nextIdx = 0;
-    bool found = false;
+  if (gScanOverflow) {
+    // Warn the client that data is incomplete.
+    // Keep format consistent (seq|LINE).
+    out += String(from + 1);
+    out += "|TSCAN:OVERFLOW\n";
+    server.send(200, "text/plain", out);
+    return;
+  }
 
-    for (uint16_t i = 0; i < kEventRingSize; ++i) {
-      const uint32_t seq = gEventSeq[i];
-      if (seq == 0) continue;
-      if (seq <= lastEmitted) continue;
-      if (seq < nextSeq) {
-        nextSeq = seq;
-        nextIdx = i;
-        found = true;
-      }
+  if (!gScanHasData || gScanCount == 0) {
+    server.send(200, "text/plain", "");
+    return;
+  }
+
+  // seq == index+1
+  for (uint16_t i = 0; i < gScanCount; ++i) {
+    const uint32_t seq = (uint32_t)i + 1u;
+    if (seq <= from) continue;
+
+    out += String(seq);
+    out += "|";
+
+    const ScanEvtKind k = gScanKind[i];
+    if (k == ScanEvtKind::Begin) {
+      out += "TSCAN:BEGIN,";
+      out += (gScanDir[i] < 0) ? "-" : "+";
+      out += "\n";
+    } else if (k == ScanEvtKind::Done) {
+      out += "TSCAN:DONE\n";
+    } else if (k == ScanEvtKind::Cancel) {
+      out += "TSCAN:CANCEL\n";
+    } else if (k == ScanEvtKind::Sample) {
+      const float a = ((float)gScanAngleCdeg[i]) / 100.0f;
+      const float d = ((float)gScanDistMm[i]) / 10.0f;
+      out += "TSCAN:";
+      out += String(a, 2);
+      out += ",";
+      out += String(d, 1);
+      out += "\n";
+    } else {
+      // ignore None/Overflow markers
+      out += "\n";
     }
 
-    if (!found) break;
-    out += String(nextSeq);
-    out += "|";
-    out += gEventLine[nextIdx];
-    out += "\n";
-    lastEmitted = nextSeq;
+    // Avoid huge responses; client will keep polling with updated "from".
+    if (out.length() >= 1800) break;
   }
 
   server.send(200, "text/plain", out);

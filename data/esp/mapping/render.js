@@ -88,12 +88,21 @@ export class MapRenderer {
     const maxV = 35;
     for (let cy = 0; cy < g.h; cy++) {
       for (let cx = 0; cx < g.w; cx++) {
-        const v = g.hit(cx, cy);
-        if (!v) continue;
-        const t = clamp(v / maxV, 0, 1);
-        const alpha = 0.10 + 0.55 * t;
-        // Modern, readable cyan with controlled alpha.
-        ctx.fillStyle = `rgba(88,243,255,${alpha.toFixed(3)})`;
+        const v = g.cellLogOdds(cx, cy);
+        const st = g.cellState(cx, cy);
+        if (st === "unk") continue;
+
+        // Map confidence to alpha based on magnitude of log-odds.
+        const mag = Math.min(maxV, Math.abs(v));
+        const t = clamp(mag / maxV, 0, 1);
+        const alpha = 0.08 + 0.55 * t;
+
+        // Opposite colors:
+        // - OCC: cyan
+        // - FREE: red (complement of cyan)
+        if (st === "occ") ctx.fillStyle = `rgba(88,243,255,${alpha.toFixed(3)})`;
+        else ctx.fillStyle = `rgba(255,92,92,${alpha.toFixed(3)})`;
+
         const x_cm = cx * g.cell_cm;
         const y_cm = cy * g.cell_cm;
         const p = toPx(x_cm, y_cm + g.cell_cm); // top-left

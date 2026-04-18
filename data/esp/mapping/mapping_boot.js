@@ -3,7 +3,7 @@ import { HitGrid } from "./grid.js";
 import { clipEndpointToMap, forEachCellOnSegmentWorld } from "./raycast.js";
 import { parseTscanPayload } from "./tscan.js";
 import { MapRenderer } from "./render.js";
-import { searchWindow } from "./matcher.js";
+import { searchWindow, searchWindowRectWalls } from "./matcher.js";
 
 // Browser-side mapping bootstrap for /maze page.
 // Keeps Mega "executor" and browser "brain".
@@ -58,16 +58,15 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     // - Heading: around compass +/- span
     init: {
       yMaxFrac: Number(elCanvas.dataset.initYmaxFrac || 0.4),
-      headingSpanDeg: Number(elCanvas.dataset.initHeadingSpanDeg || 90),
+      headingSpanDeg: Number(elCanvas.dataset.initHeadingSpanDeg || 20),
       stepCmCoarse: 2,
       stepDegCoarse: 6,
       stepCmFine: 1,
       stepDegFine: 2,
       refineSpanCm: 3,
       refineSpanDeg: 10,
-      // With 3-state scoring, absolute scores are larger than the old hit-count method.
-      // Keep it tunable; default is conservative.
-      minScoreToAccept: Number(elCanvas.dataset.initMinScore || 120),
+      // Distance-to-wall scoring kernel width (cm). Smaller = stricter.
+      wallSigmaCm: Number(elCanvas.dataset.initWallSigmaCm || 1.5),
     },
   };
 
@@ -109,7 +108,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     return {
       x: state.mapPose0.x + dx,
       y: state.mapPose0.y + dy,
-      headingDeg: wrap360(state.compassDeg),
+      // For initial-only work: once locked, keep the matched heading as truth.
+      // (Tracking updates can later incorporate compass deltas if desired.)
+      headingDeg: state.poseLocked ? wrap360(state.mapPose0.headingDeg) : wrap360(state.compassDeg),
     };
   }
 
@@ -262,62 +263,51 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       // Once locked, we keep using odom+compass outside this file (later step).
       if (!state.poseLocked && state.scanSamples.length) {
         const priorH = wrap360(state.scanPose?.headingDeg ?? state.compassDeg);
-        const wCoarse = {
+        const wGlobal = {
           xMin: 0,
           xMax: cfg.mapW_cm,
           yMin: 0,
           yMax: cfg.init.yMaxFrac * cfg.mapH_cm,
           hMin: priorH - cfg.init.headingSpanDeg,
           hMax: priorH + cfg.init.headingSpanDeg,
-          stepX: cfg.init.stepCmCoarse,
-          stepY: cfg.init.stepCmCoarse,
-          stepH: cfg.init.stepDegCoarse,
+          // Global fine search over the full uncertainty range (do not "converge early").
+          stepX: cfg.init.stepCmFine,
+          stepY: cfg.init.stepCmFine,
+          stepH: cfg.init.stepDegFine,
         };
-        const coarse = searchWindow(state.scanSamples, grid, wCoarse, { ...cfg.match, lidarOffset: cfg.lidarOffset });
+        const best = searchWindowRectWalls(state.scanSamples, cfg.mapW_cm, cfg.mapH_cm, wGlobal, {
+          ...cfg.match,
+          lidarOffset: cfg.lidarOffset,
+          wallSigmaCm: cfg.init.wallSigmaCm,
+        });
 
-        let best = coarse;
-        if (coarse.ok) {
-          const wFine = {
-            xMin: coarse.pose.x - cfg.init.refineSpanCm,
-            xMax: coarse.pose.x + cfg.init.refineSpanCm,
-            yMin: coarse.pose.y - cfg.init.refineSpanCm,
-            yMax: coarse.pose.y + cfg.init.refineSpanCm,
-            hMin: coarse.pose.headingDeg - cfg.init.refineSpanDeg,
-            hMax: coarse.pose.headingDeg + cfg.init.refineSpanDeg,
-            stepX: cfg.init.stepCmFine,
-            stepY: cfg.init.stepCmFine,
-            stepH: cfg.init.stepDegFine,
-          };
-          const fine = searchWindow(state.scanSamples, grid, wFine, { ...cfg.match, lidarOffset: cfg.lidarOffset });
-          if (fine.ok && fine.score >= best.score) best = fine;
-        }
-
-        if (best.ok && best.score >= cfg.init.minScoreToAccept) {
+        if (best.ok) {
           state.mapPose0 = { x: best.pose.x, y: best.pose.y, headingDeg: best.pose.headingDeg };
           state.odomAnchorEast = state.odomEast;
           state.odomAnchorNorth = state.odomNorth;
           state.poseLocked = true;
-          setStatus(`pose locked: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score}`);
+          setStatus(`pose locked: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score.toFixed(3)}`);
         } else {
-          setStatus(`pose NOT locked (score=${best.score})`);
+          setStatus("pose NOT locked (no candidates)");
         }
       }
 
-      // Apply scan to the map using the scan-start pose (or locked pose).
-      const poseForStamp = state.poseLocked ? currentPose() : state.scanPose;
+      // Apply scan to the map ONLY when we have a locked pose (avoid polluting map with a wrong initial guess).
+      // For UI overlay we still show endpoints using the best available pose estimate.
+      const poseForOverlay = state.poseLocked ? state.mapPose0 : state.scanPose;
       state.scanWorldPts = [];
-      if (poseForStamp) {
-        // 1) Update the map (FREE along rays + OCC at endpoints).
-        // We do this only once per scan at DONE (not on every sample) to keep it simple and deterministic.
-        applyScanToMap(poseForStamp, state.scanSamples);
+      if (state.poseLocked) {
+        applyScanToMap(state.mapPose0, state.scanSamples);
+      }
 
-        // 2) For UI overlay, stamp endpoints only (as points).
+      if (poseForOverlay) {
+        // UI overlay: stamp endpoints only (as points).
         for (const bp of state.scanBodyPts) {
           const xb = bp.xb + (cfg.lidarOffset.x_cm || 0);
           const yb = bp.yb + (cfg.lidarOffset.y_cm || 0);
-          const d = bodyToMap(poseForStamp.headingDeg, xb, yb);
-          const xw = poseForStamp.x + d.x;
-          const yw = poseForStamp.y + d.y;
+          const d = bodyToMap(poseForOverlay.headingDeg, xb, yb);
+          const xw = poseForOverlay.x + d.x;
+          const yw = poseForOverlay.y + d.y;
           // Overlay should never mutate the map.
           if (grid.worldToCell(xw, yw)) state.scanWorldPts.push({ x: xw, y: yw });
         }
