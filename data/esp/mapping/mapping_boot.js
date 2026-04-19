@@ -302,10 +302,46 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     redraw();
   }
 
+  async function fetchTextWithTimeout_(path, timeoutMs) {
+    const ms = Number(timeoutMs);
+    const t = Number.isFinite(ms) && ms > 0 ? ms : 300;
+
+    // Robust across browsers: prefer AbortController when available, but fall back
+    // to a simple timeout race so pose polling can never deadlock.
+    if (typeof AbortController === "function") {
+      const ac = new AbortController();
+      const to = setTimeout(() => {
+        try { ac.abort(); } catch {}
+      }, t);
+      try {
+        const res = await fetch(path, { cache: "no-store", signal: ac.signal });
+        if (!res.ok) return null;
+        return String(await res.text());
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(to);
+      }
+    }
+
+    // Fallback: race with a timeout; ignore late responses.
+    const fetchP = (async () => {
+      try {
+        const res = await fetch(path, { cache: "no-store" });
+        if (!res.ok) return null;
+        return String(await res.text());
+      } catch {
+        return null;
+      }
+    })();
+    const timeoutP = new Promise((resolve) => setTimeout(() => resolve(null), t));
+    return await Promise.race([fetchP, timeoutP]);
+  }
+
   async function fetchCompassDeg() {
     // /compassdata returns "123,N" (or "--")
-    const res = await fetch("/compassdata", { cache: "no-store" });
-    const text = String(await res.text()).trim();
+    const raw = await fetchTextWithTimeout_("/compassdata", 300);
+    const text = String(raw || "").trim();
     if (!text || text === "--") return null;
     const parts = text.split(",");
     const deg = Number(parts[0]);
@@ -314,8 +350,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   async function fetchOdomEN() {
     // /odom returns "ODOM:e,n" or "ODOM:--"
-    const res = await fetch("/odom", { cache: "no-store" });
-    const text = String(await res.text()).trim();
+    const raw = await fetchTextWithTimeout_("/odom", 300);
+    const text = String(raw || "").trim();
     if (!text.startsWith("ODOM:")) return null;
     const payload = text.substring(5);
     if (payload === "--") return null;
@@ -336,7 +372,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     posePollInFlight = true;
     try {
       await tryPostPoseToRobot_();
-      const [od, hdg] = await Promise.all([fetchOdomEN(), fetchCompassDeg()]);
+      const [odR, hdgR] = await Promise.allSettled([fetchOdomEN(), fetchCompassDeg()]);
+      const od = odR && odR.status === "fulfilled" ? odR.value : null;
+      const hdg = hdgR && hdgR.status === "fulfilled" ? hdgR.value : null;
       if (od) {
         if (state.poseSentToRobot && !state.poseOdomConfirmed) {
           const dx = od.e - state.mapPose0.x;

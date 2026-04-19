@@ -21,7 +21,6 @@ if (!elStart || !elStop || !elStatus) {
 
   const kBackoffAfterReflexCm = -8; // tunable, "middle" value
   const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
-  const kScanAfterEachSegment = false; // scan primarily before turns / after reflex
 
   let running = false;
   let stopRequested = false;
@@ -36,14 +35,12 @@ if (!elStart || !elStop || !elStatus) {
   let reflex = null; // { kind: "red"|"front", x_cm, y_cm }
 
   let virtualBlocked = null; // Uint8Array grid.w*grid.h (1 => blocked)
-  // Autonomy control flow:
-  // Execute exactly one primitive per loop iteration:
-  // - scan (if pending)
-  // - else turn (if needed)
-  // - else move (straight, capped)
-  // This avoids "path chasing" and guarantees replanning after scan/turn/move.
-  let pendingScanReason = null; // "turn"|"segment"|"recover"|"no-path"|...
-  let turnScanJustDone = false;
+  // Autonomy control flow (with stale live pose):
+  // - Always scan BEFORE planning/replanning so pose/heading are fresh.
+  // - Never scan just because we turned or the plan changed.
+  // - Plan once per iteration, then execute (optional turn + one straight move),
+  //   then schedule a scan for the next iteration.
+  let pendingScanReason = null; // "segment"|"recover"|"no-path"|...
 
   function setStatus(text) {
     elStatus.textContent = String(text || "");
@@ -600,13 +597,6 @@ if (!elStart || !elStop || !elStatus) {
     api.setPlannedPath(pts);
   }
 
-  function shouldScanAfterMove_(segs, cellsMoved) {
-    if (!Array.isArray(segs) || !segs.length) return false;
-    const first = segs[0];
-    const needTurnNext = (cellsMoved >= (first.steps | 0)) && segs.length >= 2 && segs[1]?.dir && segs[1].dir !== first.dir;
-    return !!needTurnNext;
-  }
-
   async function pollAlertsOnce() {
     const api = mappingApi();
     if (!api) return;
@@ -708,7 +698,6 @@ if (!elStart || !elStop || !elStatus) {
     reflex = null;
     // Reflex stop already forces a scan; drop any queued scan so we don't scan twice.
     pendingScanReason = null;
-    turnScanJustDone = false;
 
     if (r.kind === "red") {
       // For red floor tiles: scan first to get the best corrected pose, then mark
@@ -787,7 +776,6 @@ if (!elStart || !elStop || !elStatus) {
       if (pendingScanReason) {
         const reason = pendingScanReason;
         pendingScanReason = null;
-        turnScanJustDone = reason === "turn";
         await doScan(api, reason);
         continue;
       }
@@ -801,7 +789,6 @@ if (!elStart || !elStop || !elStatus) {
       const startCell = api.grid.worldToCell(pose.x, pose.y);
       if (!startCell) {
         // If pose drifts out of bounds, force a scan to pull it back.
-        turnScanJustDone = false;
         await doScan(api, "recover");
         continue;
       }
@@ -812,7 +799,6 @@ if (!elStart || !elStop || !elStatus) {
         setStatus("NO PATH");
         setPlannedPathOverlay_(api, null);
         if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: null });
-        turnScanJustDone = false;
         await doScan(api, "no-path");
         continue;
       }
@@ -834,34 +820,21 @@ if (!elStart || !elStop || !elStatus) {
       const curH = Number(pose.headingDeg);
       const dTurn = wrapDiff180(targetH - curH);
       if (Math.abs(dTurn) > 3) {
-        // Ensure we scan before turning. Do not scan twice for the same turn.
-        if (!turnScanJustDone) {
-          pendingScanReason = "turn";
-          continue;
-        }
         setStatus(`turn -> ${run.dir}`);
         if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, turnDeg: dTurn });
         await cmdTurn(dTurn);
-        turnScanJustDone = false;
-        continue; // replan after turn; do not move on the old plan
       }
-      turnScanJustDone = false;
 
       const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
       const maxCells = Math.max(1, Math.floor(kMaxSegmentCm / cmPerCell));
       const cellsToMove = Math.max(1, Math.min(run.steps, maxCells));
-      const hitMaxSegmentCap = run.steps > maxCells;
       const moveCm = cellsToMove * cmPerCell;
       setStatus(`move ${moveCm}cm`);
       if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, segCm: moveCm });
       await cmdMove(moveCm);
 
-      // After a move, schedule the next scan if needed, then replan.
-      if (hitMaxSegmentCap) {
-        pendingScanReason = "segment";
-      } else if (kScanAfterEachSegment || shouldScanAfterMove_(segs, cellsToMove)) {
-        pendingScanReason = "turn";
-      }
+      // Pose is stale between scans: always scan before the next replan iteration.
+      pendingScanReason = "segment";
     }
 
     running = false;
