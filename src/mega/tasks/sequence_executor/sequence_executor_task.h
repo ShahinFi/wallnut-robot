@@ -63,6 +63,11 @@ private:
   bool  aligning_;
   float alignHeadingDeg_;
 
+  // Move acceleration ramp (applied only to straight MoveByDistance steps).
+  // No ramp on decel/stop; turns are unaffected.
+  uint32_t moveRampStartMs_;
+  bool     moveRampActive_;
+
   enum class MoveGuardState : uint8_t { None, Turning };
   MoveGuardState moveGuardState_;
   uint8_t moveGuardTurnsDone_;

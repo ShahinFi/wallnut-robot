@@ -388,6 +388,18 @@ button:disabled,
   width: 100%;
 }
 
+.debug-status {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  color: var(--text);
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
+
 #encCalValue,
 #turretCalValue {
   max-width: 100%;

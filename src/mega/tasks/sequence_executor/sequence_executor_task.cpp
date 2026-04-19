@@ -9,6 +9,7 @@ const float    kMaxValidCm     = 800.0f;
 const float    kMoveSpeed      = 1.0f;
 const float    kTurnSpeed      = 0.6f;
 const uint32_t kStepTimeoutMs  = 300000; // 5 minutes per step
+const uint32_t kMoveRampMs     = 1000;   // 1s accel ramp for straight MoveByDistance
 
 // Obstacle-aware MOVE speed policy (ESP MOVE only, TURN unaffected)
 const float kStopDistanceCm  = 10.0f;
@@ -21,7 +22,12 @@ const uint8_t kGuardMaxTurns = 4;
 const uint8_t kGuardClearStreakNeeded = 3;
 
 static float computeMoveSpeedScale(float lidarAvgCm) {
-  if (!isfinite(lidarAvgCm)) return 0.0f;
+  // LiDAR can be temporarily invalid (startup / sensor glitch / during turret scan
+  // transitions). Invalid readings must never stall an in-flight motion command,
+  // otherwise the browser will wait for CMDOK until timeout.
+  //
+  // Safety is still enforced by the dedicated reflex stop logic in main.cpp.
+  if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return kFastSpeedScale;
   if (lidarAvgCm < kStopDistanceCm) return 0.0f;
   if (lidarAvgCm < kSlowDistanceCm) return kSlowSpeedScale;
   return kFastSpeedScale;
@@ -45,6 +51,8 @@ SequenceExecutorTask::SequenceExecutorTask()
   alignEnabled_(false),
   aligning_(false),
   alignHeadingDeg_(0.0f),
+  moveRampStartMs_(0),
+  moveRampActive_(false),
   moveGuardState_(MoveGuardState::None),
   moveGuardTurnsDone_(0),
   moveGuardClearStreak_(0) {
@@ -87,6 +95,8 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   driveTo_.reset();
   turn_.reset();
   driveActive_ = false;
+  moveRampStartMs_ = 0;
+  moveRampActive_ = false;
   moveGuardState_ = MoveGuardState::None;
   moveGuardTurnsDone_ = 0;
   moveGuardClearStreak_ = 0;
@@ -192,9 +202,18 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     if (!driveActive_) {
       startMove_(headingDegContinuous, avgTravelCm);
     }
-    const float scale = computeMoveSpeedScale(lidarAvgCm);
+    // Obstacle-aware scaling is only meaningful for forward motion. For backing
+    // up (e.g. reflex backoff), do not let a close-forward wall stall the move.
+    const float scale = (moveByCm_ >= 0.0f) ? computeMoveSpeedScale(lidarAvgCm) : kFastSpeedScale;
     const float baseSpeed = (moveByCm_ >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
-    driveBy_.setRequestedSpeed(baseSpeed * scale);
+
+    // Accel ramp for straight moves only (no ramp on stop/decel; turns unaffected).
+    float ramp = 1.0f;
+    if (moveRampActive_) {
+      const uint32_t dt = (uint32_t)(millis() - moveRampStartMs_);
+      if (dt < kMoveRampMs) ramp = (float)dt / (float)kMoveRampMs;
+    }
+    driveBy_.setRequestedSpeed(baseSpeed * scale * ramp);
     const bool done = driveBy_.update(headingDegContinuous, avgTravelCm);
     if (done) {
       if (driveBy_.timedOut()) {
@@ -203,6 +222,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
         return true;
       }
       driveActive_ = false;
+      moveRampActive_ = false;
       ++stepIndex_;
       startStep_(headingDegContinuous, avgTravelCm);
     }
@@ -232,6 +252,8 @@ void SequenceExecutorTask::cancel() {
   driveTo_.cancel();
   turn_.cancel();
   driveActive_ = false;
+  moveRampStartMs_ = 0;
+  moveRampActive_ = false;
   ui_.showFailed("Cancelled");
   setState_(State::Cancelled);
 }
@@ -241,6 +263,8 @@ void SequenceExecutorTask::reset() {
   driveTo_.reset();
   turn_.reset();
   driveActive_ = false;
+  moveRampStartMs_ = 0;
+  moveRampActive_ = false;
   moveGuardState_ = MoveGuardState::None;
   moveGuardTurnsDone_ = 0;
   moveGuardClearStreak_ = 0;
@@ -285,6 +309,8 @@ void SequenceExecutorTask::startMove_(float headingDegContinuous, float avgTrave
     driveBy_.beginByDistance(headingDegContinuous, avgTravelCm, dist, dir * kMoveSpeed);
     driveBy_.setHeadingHoldDeg(headingDegContinuous);
     driveActive_ = true;
+    moveRampStartMs_ = millis();
+    moveRampActive_ = true;
   }
 }
 
@@ -314,6 +340,9 @@ bool SequenceExecutorTask::handleMoveGuard_(float headingDegContinuous,
   if (!forwardMoveBy) return false;
 
   if (moveGuardState_ == MoveGuardState::None) {
+    // Only guard on valid LiDAR. If LiDAR is invalid, do not stall or turn;
+    // rely on reflex stop once readings resume.
+    if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return false;
     if (lidarAvgCm >= kStopDistanceCm) return false;
 
     // Preserve remaining distance before entering guard turn.

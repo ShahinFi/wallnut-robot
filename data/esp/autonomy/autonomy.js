@@ -20,7 +20,7 @@ if (!elStart || !elStop || !elStatus) {
   const kCmdTimeoutMs = 25000;
 
   const kBackoffAfterReflexCm = -6; // tunable, "middle" value
-  const kMaxSegmentCm = 12; // cap single forward command length to reduce drift
+  const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
   const kScanAfterEachSegment = true;
 
   let running = false;
@@ -39,6 +39,7 @@ if (!elStart || !elStop || !elStatus) {
 
   function setStatus(text) {
     elStatus.textContent = String(text || "");
+    if (window.StatusBus) window.StatusBus.set("autonomy", { state: String(text || "") });
   }
 
   function mappingApi() {
@@ -60,7 +61,9 @@ if (!elStart || !elStop || !elStatus) {
   }
 
   async function httpPost(path) {
+    if (window.DebugLog) window.DebugLog.push("http", `POST ${path}`);
     const res = await fetch(path, { method: "POST", cache: "no-store" });
+    if (window.DebugLog) window.DebugLog.push("http", `POST ${path} -> ${res.status}`);
     return res;
   }
 
@@ -79,31 +82,48 @@ if (!elStart || !elStop || !elStatus) {
     if (pendingCmd) return Promise.reject(new Error("CMD_IN_FLIGHT"));
 
     return new Promise(async (resolve, reject) => {
+      if (window.NetGate) window.NetGate.enterCmd();
+      const cmdStartMs = Date.now();
+      if (window.DebugLog) window.DebugLog.push("cmd", `begin ${label}`);
+      if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: label, cmdAgeMs: 0 });
       pendingCmd = { resolve, reject, t0: Date.now(), label };
       try {
         const res = await httpPost(path);
         if (!res.ok) {
+          if (window.DebugLog) window.DebugLog.push("cmd", `http fail ${label} (${res.status})`);
           pendingCmd = null;
+          if (window.NetGate) window.NetGate.exitCmd();
+          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
           resolve({ ok: false, status: `http_${res.status}` });
           return;
         }
       } catch {
+        if (window.DebugLog) window.DebugLog.push("cmd", `http error ${label}`);
         pendingCmd = null;
+        if (window.NetGate) window.NetGate.exitCmd();
+        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
         resolve({ ok: false, status: "http_error" });
         return;
       }
 
       const tick = () => {
         if (!pendingCmd) return;
+        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: label, cmdAgeMs: Date.now() - cmdStartMs });
         if (!running) {
           const pc = pendingCmd;
           pendingCmd = null;
+          if (window.NetGate) window.NetGate.exitCmd();
+          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+          if (window.DebugLog) window.DebugLog.push("cmd", `end ${label} (stopped)`);
           pc.resolve({ ok: false, status: "stopped" });
           return;
         }
         if (Date.now() - pendingCmd.t0 > kCmdTimeoutMs) {
           const pc = pendingCmd;
           pendingCmd = null;
+          if (window.NetGate) window.NetGate.exitCmd();
+          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+          if (window.DebugLog) window.DebugLog.push("cmd", `timeout ${label}`);
           pc.resolve({ ok: false, status: "timeout" });
           return;
         }
@@ -303,6 +323,7 @@ if (!elStart || !elStop || !elStatus) {
     if (!api) return;
     if (!running) return;
     if (api.state.scanActive) return; // preserve scan bandwidth
+    if (window.NetGate && !window.NetGate.allow("alerts")) return;
 
     let res;
     try {
@@ -315,6 +336,7 @@ if (!elStart || !elStop || !elStatus) {
       return;
     }
     const text = await res.text();
+    if (window.DebugLog && text.trim()) window.DebugLog.push("alerts", text.trim().split("\n").length + " lines");
     const rows = String(text || "").split("\n");
     for (const row of rows) {
       if (!row) continue;
@@ -326,6 +348,8 @@ if (!elStart || !elStop || !elStatus) {
 
       const evt = parseEvt(line);
       if (!evt) continue;
+      if (window.DebugLog) window.DebugLog.push("evt", line.trim());
+      if (window.StatusBus) window.StatusBus.set("autonomy", { lastEvt: evt.tag, lastAlertSeq: alertFromSeq });
 
       if (evt.tag === "RED") {
         reflex = { kind: "red", x_cm: evt.x_cm, y_cm: evt.y_cm };
@@ -335,7 +359,10 @@ if (!elStart || !elStop || !elStatus) {
         if (pendingCmd) {
           const pc = pendingCmd;
           pendingCmd = null;
+          if (window.NetGate) window.NetGate.exitCmd();
+          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
           const ok = evt.tag === "CMDOK";
+          if (window.DebugLog) window.DebugLog.push("cmd", `end ${pc.label} (${evt.tag})`);
           pc.resolve({ ok, status: evt.tag, pose: { x_cm: evt.x_cm, y_cm: evt.y_cm, h: evt.headingDeg } });
         }
       }
@@ -410,6 +437,17 @@ if (!elStart || !elStop || !elStatus) {
     }
 
     setStatus(`goal cell=(${goal.cell.cx},${goal.cell.cy})`);
+    if (window.StatusBus) {
+      window.StatusBus.set("autonomy", {
+        running: true,
+        goalCx: goal.cell.cx,
+        goalCy: goal.cell.cy,
+        pathLen: null,
+        segDir: null,
+        segCm: null,
+        turnDeg: null,
+      });
+    }
 
     const okInit = await ensureInitialLocalization(api);
     if (!okInit) {
@@ -436,16 +474,19 @@ if (!elStart || !elStop || !elStatus) {
         await doScan(api, "recover");
         continue;
       }
+      if (window.StatusBus) window.StatusBus.set("autonomy", { startCx: startCell.cx, startCy: startCell.cy });
 
       const path = bfsPlan(api.grid, startCell, goal.cell);
       if (!path) {
         setStatus("NO PATH");
         setPlannedPathOverlay_(api, null);
+        if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: null });
         await doScan(api, "no-path");
         continue;
       }
 
       setPlannedPathOverlay_(api, path);
+      if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: path.length });
 
       const segs = pathToSegments(path);
       if (!segs.length) {
@@ -461,6 +502,7 @@ if (!elStart || !elStop || !elStatus) {
       const dTurn = wrapDiff180(targetH - curH);
       if (Math.abs(dTurn) > 3) {
         setStatus(`turn -> ${seg.dir}`);
+        if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: seg.dir, turnDeg: dTurn });
         await cmdTurn(dTurn);
         await handleReflex(api);
         if (!running || stopRequested) break;
@@ -471,6 +513,7 @@ if (!elStart || !elStop || !elStatus) {
       const cellsToMove = Math.max(1, Math.min(seg.steps, maxCells));
       const moveCm = cellsToMove * cmPerCell;
       setStatus(`move ${moveCm}cm`);
+      if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: seg.dir, segCm: moveCm });
       await cmdMove(moveCm);
 
       await handleReflex(api);
@@ -486,8 +529,11 @@ if (!elStart || !elStop || !elStatus) {
     if (pendingCmd) {
       const pc = pendingCmd;
       pendingCmd = null;
+      if (window.NetGate) window.NetGate.exitCmd();
+      if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
       pc.resolve({ ok: false, status: "stopped" });
     }
+    if (window.StatusBus) window.StatusBus.set("autonomy", { running: false });
     if (elStart) elStart.disabled = false;
     setStatus("idle");
   }

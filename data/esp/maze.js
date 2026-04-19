@@ -21,6 +21,12 @@ function pollingPaused() {
   return pendingCommands > 0;
 }
 
+function netAllowsTelemetry() {
+  const g = window.NetGate;
+  if (!g) return true; // fail-open
+  return g.allow("telemetry");
+}
+
 const DEG = "\u00B0";
 
 const CalUiState = Object.freeze({
@@ -254,6 +260,8 @@ const encCalValueEl = document.getElementById("encCalValue");
 async function pollEncCal() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  if (window.StatusBus) window.StatusBus.set("telemetry", { encCalPollMs: Date.now() });
   try {
     const res = await fetchWithTimeout("/enc_cal", { cache: "no-store" });
     if (!res.ok) return;
@@ -287,6 +295,8 @@ const turretCalValueEl = document.getElementById("turretCalValue");
 async function pollTurretCal() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  if (window.StatusBus) window.StatusBus.set("telemetry", { turretCalPollMs: Date.now() });
   try {
     const res = await fetchWithTimeout("/turret_cal", { cache: "no-store" });
     if (!res.ok) return;
@@ -355,6 +365,8 @@ const lidarWarningEl = document.getElementById("lidarWarning");
 async function pollLidar() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  if (window.StatusBus) window.StatusBus.set("telemetry", { lidarPollMs: Date.now() });
   try {
     const res = await fetchWithTimeout("/lidar", { cache: "no-store" });
     if (!res.ok) return;
@@ -387,6 +399,8 @@ const compassWebValueEl = document.getElementById("compassWebValue");
 async function pollCompass() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  if (window.StatusBus) window.StatusBus.set("telemetry", { compassPollMs: Date.now() });
   try {
     const res = await fetchWithTimeout("/compassdata", { cache: "no-store" });
     if (!res.ok) return;
@@ -409,6 +423,8 @@ const colorSwatchEl = document.getElementById("colorSwatch");
 async function pollRgb() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  if (window.StatusBus) window.StatusBus.set("telemetry", { rgbPollMs: Date.now() });
   try {
     const res = await fetchWithTimeout("/rgb", { cache: "no-store" });
     if (!res.ok) return;

@@ -338,11 +338,8 @@ static void onTurretSweepSample(const TurretSweepScan360::Sample& s, void* user)
   (void)user;
   // Thin scan stream (bandwidth-friendly).
   // TSCAN:angleDeg,distanceCm
-  Serial.print("TSCAN:");
-  Serial.print(s.angleDeg, 2);
-  Serial.print(",");
-  Serial.print(s.distanceCm, 1);
-  Serial.println();
+  // Do not stream per-sample scan points to USB Serial (too noisy for debugging).
+  // Keep streaming to Serial2 for browser-side mapping.
 
   // Mirror scan stream to ESP (Serial2) so the browser can do mapping/SLAM.
   Serial2.print("TSCAN:");
@@ -825,6 +822,11 @@ void loop() {
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      Serial.print("DBG:CMD BEGIN MOVE cm=");
+      Serial.println(espCmd.value);
+      // Ensure CMD completion events are never missed even if the step finishes
+      // within the same loop iteration (edge detector needs "was active" true).
+      gSeqWasActive = true;
       gReflexLatchedRed = false;
       gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::Turn) {
@@ -833,6 +835,9 @@ void loop() {
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      Serial.print("DBG:CMD BEGIN TURN deg=");
+      Serial.println(espCmd.value);
+      gSeqWasActive = true;
       gReflexLatchedRed = false;
       gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::North) {
@@ -845,6 +850,7 @@ void loop() {
         seqExecTask.setSequence(espSteps);
         seqExecTask.clearAlignHeading();
         seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+        gSeqWasActive = true;
         gReflexLatchedRed = false;
         gReflexLatchedFront = false;
       }
@@ -981,6 +987,7 @@ void loop() {
       } else {
         seqExecTask.setAlignHeading(seqHeadingHoldDeg);
         seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+        gSeqWasActive = true;
       }
     }
     if (c == 'c' || c == 'C') {
@@ -1177,9 +1184,18 @@ void loop() {
   const bool seqActiveNow = seqExecTask.active();
   if (gSeqWasActive && !seqActiveNow) {
     const SequenceExecutorTask::State st = seqExecTask.state();
-    if (st == SequenceExecutorTask::State::Succeeded) sendEvtPose_("CMDOK", NAN);
-    else if (st == SequenceExecutorTask::State::Failed) sendEvtPose_("CMDFAIL", NAN);
-    else if (st == SequenceExecutorTask::State::Cancelled) sendEvtPose_("CMDCANCEL", NAN);
+    if (st == SequenceExecutorTask::State::Succeeded) {
+      Serial.println("DBG:CMD DONE -> CMDOK");
+      sendEvtPose_("CMDOK", NAN);
+    } else if (st == SequenceExecutorTask::State::Failed) {
+      Serial.println("DBG:CMD DONE -> CMDFAIL");
+      sendEvtPose_("CMDFAIL", NAN);
+    } else if (st == SequenceExecutorTask::State::Cancelled) {
+      Serial.println("DBG:CMD DONE -> CMDCANCEL");
+      sendEvtPose_("CMDCANCEL", NAN);
+    } else {
+      Serial.println("DBG:CMD DONE -> (unknown state)");
+    }
   }
   gSeqWasActive = seqActiveNow;
 }

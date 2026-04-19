@@ -245,6 +245,22 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     renderer.setPose(pose);
     renderer.setScanPoints(state.scanWorldPts);
     renderer.draw();
+    if (window.StatusBus) {
+      const cell = grid.worldToCell(pose.x, pose.y);
+      window.StatusBus.set("mapping", {
+        poseX: pose.x,
+        poseY: pose.y,
+        poseH: pose.headingDeg,
+        cellCx: cell ? cell.cx : null,
+        cellCy: cell ? cell.cy : null,
+        scanActive: state.scanActive,
+        scanDir: state.scanDir,
+        nextScanDir: state.nextScanDir,
+        scanPollActive: pollActive,
+        scanSeq: lastSeq,
+        scanLastEvt: dbg.lastEvent,
+      });
+    }
   }
 
   function setVirtualBlocked(blocked01) {
@@ -287,6 +303,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   async function pollPoseOnce() {
     if (posePollInFlight) return;
     if (pollActive || state.scanActive) return;
+    if (window.NetGate && !window.NetGate.allow("pose")) return;
     posePollInFlight = true;
     try {
       const [od, hdg] = await Promise.all([fetchOdomEN(), fetchCompassDeg()]);
@@ -440,7 +457,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (msg.kind === "done") {
       state.scanActive = false;
       state.scanDoneSeen = true;
+      if (window.NetGate) window.NetGate.exitScan();
       dbg.lastEvent = "DONE";
+      if (window.DebugLog) window.DebugLog.push("scan", `DONE dir=${state.scanDir}`);
 
       let poseStatus = "";
 
@@ -501,7 +520,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (msg.kind === "cancel") {
       state.scanActive = false;
       state.scanDoneSeen = true;
+      if (window.NetGate) window.NetGate.exitScan();
       dbg.lastEvent = "CANCEL";
+      if (window.DebugLog) window.DebugLog.push("scan", `CANCEL dir=${state.scanDir}`);
       setStatus("scan cancelled");
       redraw();
       // Do not flip direction on cancel.
@@ -537,11 +558,24 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       if (res.status === 403) {
         dbg.lastEvent = "403";
         setStatus("NOT ARMED");
+        // If we were in a scan transaction, terminate it cleanly so we don't
+        // leave the UI/network gate stuck in "scan" mode.
+        if (state.scanActive) {
+          state.scanActive = false;
+          state.scanDoneSeen = true;
+          if (window.NetGate) window.NetGate.exitScan();
+          if (scanResolve) {
+            scanResolve({ ok: false, kind: "not_armed", dir: state.scanDir });
+            scanResolve = null;
+            scanPromise = null;
+          }
+        }
         stopPolling();
       }
       return;
     }
     const text = await res.text();
+    if (window.DebugLog && text.trim()) window.DebugLog.push("events", text.trim().split("\n").length + " lines");
     const rows = text.split("\n");
     for (const row of rows) {
       if (!row) continue;
@@ -573,6 +607,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         setStatus("scan timeout");
         state.scanActive = false;
         state.scanDoneSeen = true;
+        if (window.NetGate) window.NetGate.exitScan();
         if (scanResolve) {
           scanResolve({ ok: false, kind: "timeout" });
           scanResolve = null;
@@ -596,39 +631,56 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   async function startScan(path, label) {
     if (pollActive) return;
-    // Drain any queued events before starting, so BEGIN is seen promptly.
-    try { await pollOnce(); } catch {}
-    // Freeze live pose polling during the scan transaction (bandwidth priority).
-    // (pollPoseOnce() also checks pollActive/scanActive, so this is just clarity.)
-    // Snapshot pose at click time (does NOT depend on receiving BEGIN from ESP).
-    const od = await fetchOdomEN();
-    const hdg = await fetchCompassDeg();
-    if (od) {
-      state.odomEast = od.e;
-      state.odomNorth = od.n;
+    if (window.NetGate) window.NetGate.enterScan();
+    try {
+      if (window.DebugLog) window.DebugLog.push("scan", `begin ${label}`);
+      // Drain any queued events before starting, so BEGIN is seen promptly.
+      try { await pollOnce(); } catch {}
+      // Freeze live pose polling during the scan transaction (bandwidth priority).
+      // Snapshot pose at click time (does NOT depend on receiving BEGIN from ESP).
+      const od = await fetchOdomEN();
+      const hdg = await fetchCompassDeg();
+      if (od) {
+        state.odomEast = od.e;
+        state.odomNorth = od.n;
+      }
+      if (hdg != null) state.compassDeg = hdg;
+      state.scanPose = currentPose(); // snapshot at click time
+      state.scanSamples = [];
+      state.scanBodyPts = [];
+      state.scanWorldPts = [];
+      state.scanActive = true;
+      state.scanDoneSeen = false;
+      // Deterministic scan direction even if BEGIN is delayed/dropped.
+      state.scanDir = String(path).includes("minus") ? "-" : "+";
+      dbg.lastEvent = "START";
+      dbg.pollErrors = 0;
+      dbg.lastHttp = "-";
+      dbg.lastSeq = 0;
+      setStatus(`starting ${label}...`);
+      lastSeq = 0; // ring is reset on scan start by the ESP
+
+      // Create a completion promise for callers (autonomy).
+      scanPromise = new Promise((resolve) => { scanResolve = resolve; });
+
+      await post(path);
+      startPollingUntilDone();
+      return scanPromise;
+    } catch {
+      // Any failure starting the scan must release the scan gate and resolve callers.
+      state.scanActive = false;
+      state.scanDoneSeen = true;
+      if (window.NetGate) window.NetGate.exitScan();
+      setStatus("scan start failed");
+      redraw();
+      if (scanResolve) {
+        scanResolve({ ok: false, kind: "start_failed", dir: state.scanDir });
+        scanResolve = null;
+        scanPromise = null;
+      }
+      if (window.DebugLog) window.DebugLog.push("scan", `fail ${label}`);
+      return scanPromise;
     }
-    if (hdg != null) state.compassDeg = hdg;
-    state.scanPose = currentPose(); // snapshot at click time
-    state.scanSamples = [];
-    state.scanBodyPts = [];
-    state.scanWorldPts = [];
-    state.scanActive = true;
-    state.scanDoneSeen = false;
-    // Deterministic scan direction even if BEGIN is delayed/dropped.
-    state.scanDir = String(path).includes("minus") ? "-" : "+";
-    dbg.lastEvent = "START";
-    dbg.pollErrors = 0;
-    dbg.lastHttp = "-";
-    dbg.lastSeq = 0;
-    setStatus(`starting ${label}...`);
-    lastSeq = 0; // ring is reset on scan start by the ESP
-
-    // Create a completion promise for callers (autonomy).
-    scanPromise = new Promise((resolve) => { scanResolve = resolve; });
-
-    await post(path);
-    startPollingUntilDone();
-    return scanPromise;
   }
 
   function requestScanAuto() {

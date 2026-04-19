@@ -216,51 +216,82 @@ static void rejectNotArmed() { server.send(403, "text/plain", "NOT_ARMED"); }
 
 // ====== Alert events (reflex stops, cmd done, etc.) ======
 // Separate from scan transport to keep scan bandwidth deterministic.
+//
+// IMPORTANT (robustness on ESP8266):
+// Do NOT heap-allocate a large "string ring" here. We already allocate a big
+// per-scan buffer to guarantee "keep all scan points"; adding another large
+// heap allocation can fail/fragment and result in `/alerts` being permanently
+// empty, which makes browser motion commands time out.
+//
+// Instead, store a compact parsed representation in `.bss` and reconstruct the
+// wire format on demand. External behavior stays identical:
+//   `/alerts?from=N` returns lines of `seq|EVT:...`.
 static const uint16_t kAlertRingSize = 256;
-static const uint16_t kAlertLineMax = 120;
 static uint32_t gAlertNextSeq = 1;
 static uint16_t gAlertHead = 0;
-// Heap-backed to avoid ESP8266 `.bss` overflow while preserving exact wire format.
-static uint32_t* gAlertSeq = nullptr;
-static char* gAlertLine = nullptr;  // contiguous block: kAlertRingSize*kAlertLineMax
-static bool gAlertOk = false;
 
-static void freeAlertBuf_() {
-  if (gAlertSeq) { free(gAlertSeq); gAlertSeq = nullptr; }
-  if (gAlertLine) { free(gAlertLine); gAlertLine = nullptr; }
-  gAlertOk = false;
-}
+struct AlertEvt {
+  uint32_t seq;           // monotonic seq
+  char tag[12];           // e.g. "CMDOK", "RED" (NUL terminated)
+  float x_cm;             // east (cm)
+  float y_cm;             // north (cm)
+  float heading_deg;      // wrapped heading (deg)
+  float extra;            // optional (e.g. dist)
+  bool hasExtra;
+};
 
-static bool allocAlertBufOnce_() {
-  if (gAlertOk && gAlertSeq && gAlertLine) return true;
-  freeAlertBuf_();
-  gAlertSeq = (uint32_t*)malloc((size_t)kAlertRingSize * sizeof(uint32_t));
-  gAlertLine = (char*)malloc((size_t)kAlertRingSize * (size_t)kAlertLineMax);
-  if (!gAlertSeq || !gAlertLine) {
-    freeAlertBuf_();
-    return false;
-  }
-  gAlertOk = true;
-  return true;
-}
+static AlertEvt gAlerts[kAlertRingSize];
 
 static void resetAlertRing_() {
   gAlertNextSeq = 1;
   gAlertHead = 0;
-  if (!gAlertOk || !gAlertSeq || !gAlertLine) return;
   for (uint16_t i = 0; i < kAlertRingSize; ++i) {
-    gAlertSeq[i] = 0;
-    gAlertLine[(size_t)i * (size_t)kAlertLineMax] = '\0';
+    gAlerts[i].seq = 0;
+    gAlerts[i].tag[0] = '\0';
+    gAlerts[i].x_cm = NAN;
+    gAlerts[i].y_cm = NAN;
+    gAlerts[i].heading_deg = NAN;
+    gAlerts[i].extra = NAN;
+    gAlerts[i].hasExtra = false;
   }
 }
 
 static void pushAlertLine_(const String& line) {
-  if (!gAlertOk || !gAlertSeq || !gAlertLine) return;
-  const uint16_t i = gAlertHead;
-  gAlertSeq[i] = gAlertNextSeq++;
-  char* dst = &gAlertLine[(size_t)i * (size_t)kAlertLineMax];
-  line.toCharArray(dst, kAlertLineMax);
-  dst[kAlertLineMax - 1] = '\0';
+  // Expected: "EVT:TAG,x,y,h[,extra]"
+  const String s = line;
+  if (!s.startsWith("EVT:")) return;
+
+  const int p0 = 4;  // after "EVT:"
+  const int c1 = s.indexOf(',', p0);
+  if (c1 < 0) return;
+  const int c2 = s.indexOf(',', c1 + 1);
+  const int c3 = (c2 >= 0) ? s.indexOf(',', c2 + 1) : -1;
+  const int c4 = (c3 >= 0) ? s.indexOf(',', c3 + 1) : -1;
+
+  // Must have at least TAG,x,y,h (3 commas after tag)
+  if (c2 < 0 || c3 < 0) return;
+
+  AlertEvt& e = gAlerts[gAlertHead];
+  e.seq = gAlertNextSeq++;
+
+  // Tag
+  const String tag = s.substring(p0, c1);
+  tag.toCharArray(e.tag, sizeof(e.tag));
+  e.tag[sizeof(e.tag) - 1] = '\0';
+
+  // Numbers (best-effort; keep NaNs if malformed)
+  e.x_cm = s.substring(c1 + 1, c2).toFloat();
+  e.y_cm = s.substring(c2 + 1, c3).toFloat();
+  if (c4 < 0) {
+    e.heading_deg = s.substring(c3 + 1).toFloat();
+    e.hasExtra = false;
+    e.extra = NAN;
+  } else {
+    e.heading_deg = s.substring(c3 + 1, c4).toFloat();
+    e.extra = s.substring(c4 + 1).toFloat();
+    e.hasExtra = true;
+  }
+
   gAlertHead = (uint16_t)((gAlertHead + 1) % kAlertRingSize);
 }
 
@@ -279,7 +310,6 @@ void setup() {
 
   // Allocate large scan/alert buffers on heap to avoid ESP8266 `.bss` overflow.
   (void)allocScanBufOnce_();
-  (void)allocAlertBufOnce_();
   resetAlertRing_();
 
     bool started = false;
@@ -803,11 +833,6 @@ void handleEvents() {
 
 void handleAlerts() {
   if (!isArmed()) return rejectNotArmed();
-  if (!gAlertOk || !gAlertSeq || !gAlertLine) {
-    server.send(200, "text/plain", "");
-    return;
-  }
-
   uint32_t from = 0;
   if (server.hasArg("from")) from = (uint32_t)server.arg("from").toInt();
 
@@ -822,7 +847,7 @@ void handleAlerts() {
     bool found = false;
 
     for (uint16_t i = 0; i < kAlertRingSize; ++i) {
-      const uint32_t seq = gAlertSeq[i];
+      const uint32_t seq = gAlerts[i].seq;
       if (seq == 0) continue;
       if (seq <= lastEmitted) continue;
       if (seq < nextSeq) {
@@ -835,7 +860,18 @@ void handleAlerts() {
     if (!found) break;
     out += String(nextSeq);
     out += "|";
-    out += &gAlertLine[(size_t)nextIdx * (size_t)kAlertLineMax];
+    out += "EVT:";
+    out += gAlerts[nextIdx].tag;
+    out += ",";
+    out += String(gAlerts[nextIdx].x_cm, 2);
+    out += ",";
+    out += String(gAlerts[nextIdx].y_cm, 2);
+    out += ",";
+    out += String(gAlerts[nextIdx].heading_deg, 1);
+    if (gAlerts[nextIdx].hasExtra && isfinite(gAlerts[nextIdx].extra)) {
+      out += ",";
+      out += String(gAlerts[nextIdx].extra, 1);
+    }
     out += "\n";
     lastEmitted = nextSeq;
     if (out.length() >= 1200) break;
