@@ -26,7 +26,8 @@ if (!elStart || !elStop || !elStatus) {
   let running = false;
   let stopRequested = false;
 
-  let goal = { x_cm: 10, y_cm: 36, tolCells: 0, cell: null };
+  // Single source of truth: read goal from `#mapCanvas` data-*.
+  let goal = { x_cm: NaN, y_cm: NaN, tolCells: 0, cell: null };
 
   let alertFromSeq = 0;
   let alertTimer = 0;
@@ -258,9 +259,10 @@ if (!elStart || !elStop || !elStatus) {
   function configureGoalFromDom(api) {
     const canvas = document.getElementById("mapCanvas");
     if (!canvas) return false;
-    const gx = Number(canvas.dataset.goalXCm || goal.x_cm);
-    const gy = Number(canvas.dataset.goalYCm || goal.y_cm);
-    const tol = Number(canvas.dataset.goalTolCells || goal.tolCells);
+    const gx = Number(canvas.dataset.goalXCm);
+    const gy = Number(canvas.dataset.goalYCm);
+    const tol = Number(canvas.dataset.goalTolCells);
+    if (!Number.isFinite(gx) || !Number.isFinite(gy) || !Number.isFinite(tol)) return false;
     if (Number.isFinite(gx)) goal.x_cm = gx;
     if (Number.isFinite(gy)) goal.y_cm = gy;
     if (Number.isFinite(tol)) goal.tolCells = Math.max(0, Math.floor(tol));
@@ -277,6 +279,23 @@ if (!elStart || !elStop || !elStatus) {
     const dx = Math.abs(c.cx - goal.cell.cx);
     const dy = Math.abs(c.cy - goal.cell.cy);
     return dx <= goal.tolCells && dy <= goal.tolCells;
+  }
+
+  function setPlannedPathOverlay_(api, pathCells) {
+    if (!api?.setPlannedPath) return;
+    if (!Array.isArray(pathCells) || pathCells.length < 2) {
+      api.setPlannedPath([]);
+      return;
+    }
+    const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
+    const pts = [];
+    for (const c of pathCells) {
+      const cx = Number(c?.cx);
+      const cy = Number(c?.cy);
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      pts.push({ x: (cx + 0.5) * cmPerCell, y: (cy + 0.5) * cmPerCell });
+    }
+    api.setPlannedPath(pts);
   }
 
   async function pollAlertsOnce() {
@@ -377,6 +396,8 @@ if (!elStart || !elStop || !elStatus) {
       return;
     }
 
+    if (api.setPlannedPath) api.setPlannedPath([]);
+
     if (!virtualBlocked || virtualBlocked.length !== api.grid.w * api.grid.h) {
       virtualBlocked = new Uint8Array(api.grid.w * api.grid.h);
     }
@@ -419,13 +440,17 @@ if (!elStart || !elStop || !elStatus) {
       const path = bfsPlan(api.grid, startCell, goal.cell);
       if (!path) {
         setStatus("NO PATH");
+        setPlannedPathOverlay_(api, null);
         await doScan(api, "no-path");
         continue;
       }
 
+      setPlannedPathOverlay_(api, path);
+
       const segs = pathToSegments(path);
       if (!segs.length) {
         setStatus("GOAL CELL");
+        setPlannedPathOverlay_(api, path);
         break;
       }
 
@@ -457,6 +482,7 @@ if (!elStart || !elStop || !elStatus) {
     running = false;
     stopRequested = false;
     stopAlertPolling();
+    if (api?.setPlannedPath) api.setPlannedPath([]);
     if (pendingCmd) {
       const pc = pendingCmd;
       pendingCmd = null;

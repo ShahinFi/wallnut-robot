@@ -14,6 +14,10 @@ export class MapRenderer {
     // fuzzy LiDAR occupancy grid; it is a separate hard-block layer for planning.
     // Expected: Uint8Array(w*h) with 1 => blocked, 0 => free.
     this.virtualBlocked = null;
+    // Goal marker (cell coords): { cx, cy, tolCells }
+    this.goal = null;
+    // Planned path overlay in world coords: [{x,y}, ...]
+    this.plannedPath = [];
     // Extra world-space margin (cm) rendered around the map boundary so you can
     // see out-of-bounds scan endpoints. Visual-only; does not change mapping.
     this.viewMarginCm = 6;
@@ -35,6 +39,21 @@ export class MapRenderer {
 
   setVirtualBlocked(blocked01) {
     this.virtualBlocked = blocked01 || null;
+  }
+
+  setGoalCell(goalCell) {
+    if (!goalCell) { this.goal = null; return; }
+    const cx = Math.floor(Number(goalCell.cx));
+    const cy = Math.floor(Number(goalCell.cy));
+    const tolCells = Math.max(0, Math.floor(Number(goalCell.tolCells || 0)));
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) { this.goal = null; return; }
+    this.goal = { cx, cy, tolCells };
+  }
+
+  setPlannedPath(pointsWorld) {
+    if (!Array.isArray(pointsWorld)) { this.plannedPath = []; return; }
+    // Shallow-validate; renderer will ignore NaNs.
+    this.plannedPath = pointsWorld;
   }
 
   draw() {
@@ -119,11 +138,11 @@ export class MapRenderer {
         const t = clamp(mag / maxV, 0, 1);
         const alpha = 0.08 + 0.55 * t;
 
-        // Opposite colors:
-        // - OCC: cyan
-        // - FREE: red (complement of cyan)
+        // Semantically meaningful colors:
+        // - OCC: cyan/teal (hard obstacle)
+        // - FREE: green (safe space)
         if (st === "occ") ctx.fillStyle = `rgba(88,243,255,${alpha.toFixed(3)})`;
-        else ctx.fillStyle = `rgba(255,92,92,${alpha.toFixed(3)})`;
+        else ctx.fillStyle = `rgba(90,255,140,${alpha.toFixed(3)})`;
 
         const x_cm = cx * g.cell_cm;
         const y_cm = cy * g.cell_cm;
@@ -137,7 +156,8 @@ export class MapRenderer {
 
     // virtual obstacles overlay (binary, always drawn strongly)
     if (this.virtualBlocked && this.virtualBlocked.length === g.w * g.h) {
-      ctx.fillStyle = "rgba(255, 206, 62, 0.92)"; // warm amber, distinct from occ/free
+      // Virtual obstacles (red floor tiles) are hard-blocks for planning; show as strong red.
+      ctx.fillStyle = "rgba(255, 70, 70, 0.90)";
       const sz = g.cell_cm * s;
       const inset = Math.min(1.4, sz * 0.10);
       for (let cy = 0; cy < g.h; cy++) {
@@ -149,6 +169,74 @@ export class MapRenderer {
           const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
           ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
         }
+      }
+    }
+
+    // planned path overlay (polyline through cell centers)
+    if (this.plannedPath && this.plannedPath.length >= 2) {
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let moved = false;
+      for (const pt of this.plannedPath) {
+        const x = Number(pt?.x);
+        const y = Number(pt?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const p = toPx(x, y);
+        if (!moved) { ctx.moveTo(p.x, p.y); moved = true; }
+        else ctx.lineTo(p.x, p.y);
+      }
+      if (moved) ctx.stroke();
+
+      // small dots to help read the path
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      for (const pt of this.plannedPath) {
+        const x = Number(pt?.x);
+        const y = Number(pt?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const p = toPx(x, y);
+        ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+      }
+    }
+
+    // goal overlay (nice visible marker)
+    if (this.goal) {
+      const { cx, cy, tolCells } = this.goal;
+      if (cx >= 0 && cy >= 0 && cx < g.w && cy < g.h) {
+        const x_cm = (cx + 0.5) * g.cell_cm;
+        const y_cm = (cy + 0.5) * g.cell_cm;
+        const p = toPx(x_cm, y_cm);
+        const r1 = Math.max(6, 0.42 * g.cell_cm * s);
+
+        if (tolCells > 0) {
+          const r_cm = (tolCells + 0.55) * g.cell_cm;
+          const r = r_cm * s;
+          ctx.strokeStyle = "rgba(255, 216, 92, 0.55)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.strokeStyle = "rgba(255, 216, 92, 0.95)";
+        ctx.fillStyle = "rgba(255, 216, 92, 0.18)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.moveTo(p.x - r1, p.y);
+        ctx.lineTo(p.x + r1, p.y);
+        ctx.moveTo(p.x, p.y - r1);
+        ctx.lineTo(p.x, p.y + r1);
+        ctx.stroke();
+
+        ctx.font = "12px system-ui, -apple-system, Segoe UI, sans-serif";
+        ctx.fillStyle = "rgba(255, 216, 92, 0.95)";
+        ctx.fillText("GOAL", p.x + r1 + 6, p.y - r1 - 2);
       }
     }
 

@@ -19,19 +19,90 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   // Page doesn't have mapping UI; nothing to do.
   // (We keep this file safe to include on other pages.)
 } else {
-  // Tunables live in the DOM (so you can change them later without touching JS logic).
-  // See `data/esp/maze.html` <canvas id="mapCanvas" data-...>.
-  // Default dimensions follow our agreed convention: width (X/East) is smaller, height (Y/North) is larger.
-  const mapW_cm = Number(elCanvas.dataset.mapWCm || 26);
-  const mapH_cm = Number(elCanvas.dataset.mapHCm || 46);
-  const cell_cm = Number(elCanvas.dataset.cellCm || 2);
+(() => {
+  const dbg = {
+    lastHttp: "-",
+    lastSeq: 0,
+    lastEvent: "none",
+    pollErrors: 0,
+  };
+
+  function setStatus(t) {
+    elStatus.textContent = `${t} | build=${BUILD} http=${dbg.lastHttp} seq=${dbg.lastSeq} evt=${dbg.lastEvent}`;
+  }
+
+  // Single source of truth for all tunables: `data/esp/maze.html` <canvas id="mapCanvas" data-...>.
+  // No JS fallbacks for core config (prevents silent drift between files).
+  function reqNum_(prop, { min = null, max = null } = {}) {
+    const raw = elCanvas.dataset[prop];
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return { ok: false, v: 0, why: `missing/invalid ${prop}` };
+    if (min != null && v < min) return { ok: false, v, why: `${prop} < ${min}` };
+    if (max != null && v > max) return { ok: false, v, why: `${prop} > ${max}` };
+    return { ok: true, v };
+  }
+
+  const rMapW = reqNum_("mapWCm", { min: 1 });
+  const rMapH = reqNum_("mapHCm", { min: 1 });
+  const rCell = reqNum_("cellCm", { min: 0.1 });
+  const rMargin = reqNum_("viewMarginCm", { min: 0, max: 200 });
+
+  const rMinDist = reqNum_("matchMinDistCm", { min: 0 });
+  const rMaxDist = reqNum_("matchMaxDistCm", { min: 0 });
+  const rWOcc = reqNum_("matchWOccHit", { min: 0 });
+  const rWFree = reqNum_("matchWFreeHit", { min: 0 });
+  const rWConf = reqNum_("matchWConflict", { min: 0 });
+  const rMaxCands = reqNum_("matchMaxCandidates", { min: 1 });
+
+  const rUpdFree = reqNum_("updateFreeDelta");
+  const rUpdOcc = reqNum_("updateOccDelta");
+
+  const rInitY = reqNum_("initYmaxFrac", { min: 0, max: 1 });
+  const rInitH = reqNum_("initHeadingSpanDeg", { min: 0, max: 180 });
+  const rSigma = reqNum_("initWallSigmaCm", { min: 0.01, max: 50 });
+
+  const rTDx = reqNum_("trackDxCm", { min: 0 });
+  const rTDy = reqNum_("trackDyCm", { min: 0 });
+  const rTDh = reqNum_("trackDheadingDeg", { min: 0, max: 180 });
+
+  const required = [rMapW, rMapH, rCell, rMargin, rMinDist, rMaxDist, rWOcc, rWFree, rWConf, rMaxCands, rUpdFree, rUpdOcc, rInitY, rInitH, rSigma, rTDx, rTDy, rTDh];
+  const bad = required.find((r) => !r.ok);
+  if (bad) {
+    setStatus(`CONFIG ERROR: ${bad.why}`);
+    btnPlus.disabled = true;
+    btnMinus.disabled = true;
+    btnClear.disabled = true;
+    // Stop here: avoid running with silent defaults.
+    return;
+  }
+
+  btnPlus.disabled = false;
+  btnMinus.disabled = false;
+  btnClear.disabled = false;
+
+  // Dimensions follow our agreed convention: width (X/East) is smaller, height (Y/North) is larger.
+  const mapW_cm = rMapW.v;
+  const mapH_cm = rMapH.v;
+  const cell_cm = rCell.v;
 
   // Keep canvas aspect ratio consistent with the configured map.
   elCanvas.style.aspectRatio = `${mapW_cm} / ${mapH_cm}`;
 
   const grid = new HitGrid(mapW_cm, mapH_cm, cell_cm);
   const renderer = new MapRenderer(elCanvas, grid);
-  renderer.setViewMarginCm(Number(elCanvas.dataset.viewMarginCm || 6));
+  renderer.setViewMarginCm(rMargin.v);
+
+  // Goal marker (optional but expected on /maze): read from the single source of truth (#mapCanvas data-*).
+  // Goal lives in map/world cm coordinates (X=east, Y=north).
+  {
+    const gx = Number(elCanvas.dataset.goalXCm);
+    const gy = Number(elCanvas.dataset.goalYCm);
+    const tolCells = Math.max(0, Math.floor(Number(elCanvas.dataset.goalTolCells || 0)));
+    if (Number.isFinite(gx) && Number.isFinite(gy)) {
+      const c = grid.worldToCell(gx, gy);
+      if (c) renderer.setGoalCell({ cx: c.cx, cy: c.cy, tolCells });
+    }
+  }
 
   const cfg = {
     mapW_cm,
@@ -40,26 +111,26 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     lidarOffset: { x_cm: 0.0, y_cm: 0.0 },
     match: {
       // Scan validity
-      minDistCm: Number(elCanvas.dataset.matchMinDistCm || 2),
-      maxDistCm: Number(elCanvas.dataset.matchMaxDistCm || 250),
+      minDistCm: rMinDist.v,
+      maxDistCm: rMaxDist.v,
       // Scoring weights (3-state: OCC/FREE/UNK)
-      wOccHit: Number(elCanvas.dataset.matchWOccHit || 6),
-      wFreeHit: Number(elCanvas.dataset.matchWFreeHit || 1),
-      wConflict: Number(elCanvas.dataset.matchWConflict || 8),
-      maxCandidates: Number(elCanvas.dataset.matchMaxCandidates || 45000),
+      wOccHit: rWOcc.v,
+      wFreeHit: rWFree.v,
+      wConflict: rWConf.v,
+      maxCandidates: rMaxCands.v,
     },
     update: {
       // Map integration deltas (log-odds). Set to 0 to disable free/occ updates.
-      freeDelta: Number(elCanvas.dataset.updateFreeDelta || 3),
-      occDelta: Number(elCanvas.dataset.updateOccDelta || 10),
+      freeDelta: rUpdFree.v,
+      occDelta: rUpdOcc.v,
     },
     // Initial localization (wide):
     // - X: full map width
     // - Y: [0..0.4*H] band
     // - Heading: around compass +/- span
     init: {
-      yMaxFrac: Number(elCanvas.dataset.initYmaxFrac || 0.4),
-      headingSpanDeg: Number(elCanvas.dataset.initHeadingSpanDeg || 20),
+      yMaxFrac: rInitY.v,
+      headingSpanDeg: rInitH.v,
       stepCmCoarse: 2,
       stepDegCoarse: 6,
       stepCmFine: 1,
@@ -67,12 +138,12 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       refineSpanCm: 3,
       refineSpanDeg: 10,
       // Distance-to-wall scoring kernel width (cm). Smaller = stricter.
-      wallSigmaCm: Number(elCanvas.dataset.initWallSigmaCm || 1.5),
+      wallSigmaCm: rSigma.v,
     },
     track: {
-      dxCm: Number(elCanvas.dataset.trackDxCm || 10),
-      dyCm: Number(elCanvas.dataset.trackDyCm || 10),
-      dHeadingDeg: Number(elCanvas.dataset.trackDheadingDeg || 20),
+      dxCm: rTDx.v,
+      dyCm: rTDy.v,
+      dHeadingDeg: rTDh.v,
       // Keep tracking fine and bounded.
       stepCm: 1,
       stepDeg: 2,
@@ -106,26 +177,19 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     nextScanDir: "+",
   };
 
-  const dbg = {
-    lastHttp: "-",
-    lastSeq: 0,
-    lastEvent: "none",
-    pollErrors: 0,
-  };
-
-  function setStatus(t) {
-    elStatus.textContent = `${t} | build=${BUILD} http=${dbg.lastHttp} seq=${dbg.lastSeq} evt=${dbg.lastEvent}`;
-  }
-
   function currentPose() {
+    // Pose contract:
+    // - Before we align Mega world-odom to the map (no /set_pose yet), we can only
+    //   display a pose relative to our matched anchor.
+    // - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
+    //   so we must use it directly (otherwise we'd apply the correction twice).
+    const headingDeg = wrap360(state.compassDeg);
+    if (state.poseSentToRobot && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
+      return { x: state.odomEast, y: state.odomNorth, headingDeg };
+    }
     const dx = state.odomEast - state.odomAnchorEast;
     const dy = state.odomNorth - state.odomAnchorNorth;
-    return {
-      x: state.mapPose0.x + dx,
-      y: state.mapPose0.y + dy,
-      // Compass is the heading source of truth (map 0=N, 90=E).
-      headingDeg: wrap360(state.compassDeg),
-    };
+    return { x: state.mapPose0.x + dx, y: state.mapPose0.y + dy, headingDeg };
   }
 
   function seedOuterWalls() {
@@ -149,6 +213,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.odomAnchorEast = state.odomEast;
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = false;
+    state.poseSentToRobot = false;
     setStatus("cleared (walls seeded, pose unlocked)");
     redraw();
   }
@@ -184,6 +249,11 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   function setVirtualBlocked(blocked01) {
     renderer.setVirtualBlocked(blocked01 || null);
+    redraw();
+  }
+
+  function setPlannedPath(pointsWorld) {
+    renderer.setPlannedPath(Array.isArray(pointsWorld) ? pointsWorld : []);
     redraw();
   }
 
@@ -345,6 +415,10 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       state.poseSentToRobot = true;
       // Initial: send position only (heading is already aligned via your manual north reset).
       postPoseToRobot(state.mapPose0, { includeHeading: false });
+      // Immediately snap the displayed pose to the matched pose; /odom will follow
+      // once Mega rebases its world frame.
+      state.odomEast = state.mapPose0.x;
+      state.odomNorth = state.mapPose0.y;
     }
   }
 
@@ -582,5 +656,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     getPose: () => currentPose(),
     requestScanAuto,
     setVirtualBlocked,
+    setPlannedPath,
   };
+})();
 }

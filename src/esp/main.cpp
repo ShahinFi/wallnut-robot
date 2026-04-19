@@ -2,6 +2,7 @@
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Optional local secrets file (gitignored): src/esp/wifi_secrets.h
@@ -108,10 +109,38 @@ static uint32_t gScanNextSeq = 1;
 static uint16_t gScanCount = 0;         // number of recorded events
 static bool gScanHasData = false;       // true after first BEGIN is stored
 static bool gScanOverflow = false;      // set if we exceed kScanMaxEvents (should never happen in normal configs)
-static ScanEvtKind gScanKind[kScanMaxEvents];
-static int8_t gScanDir[kScanMaxEvents];        // +1 / -1 for BEGIN, else 0
-static uint16_t gScanAngleCdeg[kScanMaxEvents]; // centi-degrees [0..36000]
-static uint16_t gScanDistMm[kScanMaxEvents];    // millimeters
+
+// Large fixed global arrays can overflow ESP8266 DRAM `.bss` at link time.
+// Keep the same scan buffering behavior, but allocate storage once on heap.
+static ScanEvtKind* gScanKind = nullptr;
+static int8_t* gScanDir = nullptr;            // +1 / -1 for BEGIN, else 0
+static uint16_t* gScanAngleCdeg = nullptr;    // centi-degrees [0..36000]
+static uint16_t* gScanDistMm = nullptr;       // millimeters
+static uint16_t gScanCap = 0;
+
+static void freeScanBuf_() {
+  if (gScanKind) { free(gScanKind); gScanKind = nullptr; }
+  if (gScanDir) { free(gScanDir); gScanDir = nullptr; }
+  if (gScanAngleCdeg) { free(gScanAngleCdeg); gScanAngleCdeg = nullptr; }
+  if (gScanDistMm) { free(gScanDistMm); gScanDistMm = nullptr; }
+  gScanCap = 0;
+}
+
+static bool allocScanBufOnce_() {
+  if (gScanCap > 0 && gScanKind && gScanDir && gScanAngleCdeg && gScanDistMm) return true;
+
+  freeScanBuf_();
+  gScanKind = (ScanEvtKind*)malloc((size_t)kScanMaxEvents * sizeof(ScanEvtKind));
+  gScanDir = (int8_t*)malloc((size_t)kScanMaxEvents * sizeof(int8_t));
+  gScanAngleCdeg = (uint16_t*)malloc((size_t)kScanMaxEvents * sizeof(uint16_t));
+  gScanDistMm = (uint16_t*)malloc((size_t)kScanMaxEvents * sizeof(uint16_t));
+  if (!(gScanKind && gScanDir && gScanAngleCdeg && gScanDistMm)) {
+    freeScanBuf_();
+    return false;
+  }
+  gScanCap = kScanMaxEvents;
+  return true;
+}
 
 static void resetScanBuffer_() {
   gScanNextSeq = 1;
@@ -122,7 +151,8 @@ static void resetScanBuffer_() {
 }
 
 static void pushScanBegin_(int dirSign) {
-  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  if (!gScanCap || !gScanKind || !gScanDir || !gScanAngleCdeg || !gScanDistMm) { gScanOverflow = true; return; }
+  if (gScanCount >= gScanCap) { gScanOverflow = true; return; }
   gScanKind[gScanCount] = ScanEvtKind::Begin;
   gScanDir[gScanCount] = (dirSign < 0) ? -1 : 1;
   gScanAngleCdeg[gScanCount] = 0;
@@ -133,7 +163,8 @@ static void pushScanBegin_(int dirSign) {
 }
 
 static void pushScanDone_() {
-  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  if (!gScanCap || !gScanKind || !gScanDir || !gScanAngleCdeg || !gScanDistMm) { gScanOverflow = true; return; }
+  if (gScanCount >= gScanCap) { gScanOverflow = true; return; }
   gScanKind[gScanCount] = ScanEvtKind::Done;
   gScanDir[gScanCount] = 0;
   gScanAngleCdeg[gScanCount] = 0;
@@ -144,7 +175,8 @@ static void pushScanDone_() {
 }
 
 static void pushScanCancel_() {
-  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  if (!gScanCap || !gScanKind || !gScanDir || !gScanAngleCdeg || !gScanDistMm) { gScanOverflow = true; return; }
+  if (gScanCount >= gScanCap) { gScanOverflow = true; return; }
   gScanKind[gScanCount] = ScanEvtKind::Cancel;
   gScanDir[gScanCount] = 0;
   gScanAngleCdeg[gScanCount] = 0;
@@ -155,7 +187,8 @@ static void pushScanCancel_() {
 }
 
 static void pushScanSample_(float angleDeg, float distCm) {
-  if (gScanCount >= kScanMaxEvents) { gScanOverflow = true; return; }
+  if (!gScanCap || !gScanKind || !gScanDir || !gScanAngleCdeg || !gScanDistMm) { gScanOverflow = true; return; }
+  if (gScanCount >= gScanCap) { gScanOverflow = true; return; }
   if (!(isfinite(angleDeg) && isfinite(distCm))) return;
   // Normalize/quantize to keep memory small and deterministic.
   // Angle: centi-deg in [0..36000].
@@ -187,23 +220,47 @@ static const uint16_t kAlertRingSize = 256;
 static const uint16_t kAlertLineMax = 120;
 static uint32_t gAlertNextSeq = 1;
 static uint16_t gAlertHead = 0;
-static uint32_t gAlertSeq[kAlertRingSize];
-static char gAlertLine[kAlertRingSize][kAlertLineMax];
+// Heap-backed to avoid ESP8266 `.bss` overflow while preserving exact wire format.
+static uint32_t* gAlertSeq = nullptr;
+static char* gAlertLine = nullptr;  // contiguous block: kAlertRingSize*kAlertLineMax
+static bool gAlertOk = false;
+
+static void freeAlertBuf_() {
+  if (gAlertSeq) { free(gAlertSeq); gAlertSeq = nullptr; }
+  if (gAlertLine) { free(gAlertLine); gAlertLine = nullptr; }
+  gAlertOk = false;
+}
+
+static bool allocAlertBufOnce_() {
+  if (gAlertOk && gAlertSeq && gAlertLine) return true;
+  freeAlertBuf_();
+  gAlertSeq = (uint32_t*)malloc((size_t)kAlertRingSize * sizeof(uint32_t));
+  gAlertLine = (char*)malloc((size_t)kAlertRingSize * (size_t)kAlertLineMax);
+  if (!gAlertSeq || !gAlertLine) {
+    freeAlertBuf_();
+    return false;
+  }
+  gAlertOk = true;
+  return true;
+}
 
 static void resetAlertRing_() {
   gAlertNextSeq = 1;
   gAlertHead = 0;
+  if (!gAlertOk || !gAlertSeq || !gAlertLine) return;
   for (uint16_t i = 0; i < kAlertRingSize; ++i) {
     gAlertSeq[i] = 0;
-    gAlertLine[i][0] = '\0';
+    gAlertLine[(size_t)i * (size_t)kAlertLineMax] = '\0';
   }
 }
 
 static void pushAlertLine_(const String& line) {
+  if (!gAlertOk || !gAlertSeq || !gAlertLine) return;
   const uint16_t i = gAlertHead;
   gAlertSeq[i] = gAlertNextSeq++;
-  line.toCharArray(gAlertLine[i], kAlertLineMax);
-  gAlertLine[i][kAlertLineMax - 1] = '\0';
+  char* dst = &gAlertLine[(size_t)i * (size_t)kAlertLineMax];
+  line.toCharArray(dst, kAlertLineMax);
+  dst[kAlertLineMax - 1] = '\0';
   gAlertHead = (uint16_t)((gAlertHead + 1) % kAlertRingSize);
 }
 
@@ -219,6 +276,10 @@ void setup() {
   Serial.println("✅ LittleFS mounted successfully");
 
   listAllFiles();
+
+  // Allocate large scan/alert buffers on heap to avoid ESP8266 `.bss` overflow.
+  (void)allocScanBufOnce_();
+  (void)allocAlertBufOnce_();
   resetAlertRing_();
 
     bool started = false;
@@ -541,6 +602,7 @@ void handleTurretZero() {
 
 void handleTurretScanPlus() {
   if (!isArmed()) return rejectNotArmed();
+  (void)allocScanBufOnce_();
   resetScanBuffer_();
   pushScanBegin_(+1);  // synthetic BEGIN so browser sees it immediately
   Serial.println("TurretScanPlus");
@@ -549,6 +611,7 @@ void handleTurretScanPlus() {
 
 void handleTurretScanMinus() {
   if (!isArmed()) return rejectNotArmed();
+  (void)allocScanBufOnce_();
   resetScanBuffer_();
   pushScanBegin_(-1);  // synthetic BEGIN so browser sees it immediately
   Serial.println("TurretScanMinus");
@@ -740,6 +803,10 @@ void handleEvents() {
 
 void handleAlerts() {
   if (!isArmed()) return rejectNotArmed();
+  if (!gAlertOk || !gAlertSeq || !gAlertLine) {
+    server.send(200, "text/plain", "");
+    return;
+  }
 
   uint32_t from = 0;
   if (server.hasArg("from")) from = (uint32_t)server.arg("from").toInt();
@@ -768,7 +835,7 @@ void handleAlerts() {
     if (!found) break;
     out += String(nextSeq);
     out += "|";
-    out += gAlertLine[nextIdx];
+    out += &gAlertLine[(size_t)nextIdx * (size_t)kAlertLineMax];
     out += "\n";
     lastEmitted = nextSeq;
     if (out.length() >= 1200) break;
