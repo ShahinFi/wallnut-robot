@@ -20,8 +20,8 @@ if (!elStart || !elStop || !elStatus) {
   const kCmdTimeoutMs = 25000;
 
   const kBackoffAfterReflexCm = -6; // tunable, "middle" value
-  const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
-  const kScanAfterEachSegment = true;
+  const kMaxSegmentCm = 50; // cap single forward command length to reduce drift
+  const kScanAfterEachSegment = false; // scan primarily before turns / after reflex
 
   let running = false;
   let stopRequested = false;
@@ -268,6 +268,14 @@ if (!elStart || !elStop || !elStatus) {
     return segs;
   }
 
+  function dirStep(dir) {
+    if (dir === "E") return { dx: 1, dy: 0 };
+    if (dir === "W") return { dx: -1, dy: 0 };
+    if (dir === "N") return { dx: 0, dy: 1 };
+    if (dir === "S") return { dx: 0, dy: -1 };
+    return { dx: 0, dy: 0 };
+  }
+
   function dirToHeadingDeg(dir) {
     if (dir === "N") return 0;
     if (dir === "E") return 90;
@@ -316,6 +324,33 @@ if (!elStart || !elStop || !elStatus) {
       pts.push({ x: (cx + 0.5) * cmPerCell, y: (cy + 0.5) * cmPerCell });
     }
     api.setPlannedPath(pts);
+  }
+
+  function farthestStraightCell_(grid, startCell, dir, maxCells) {
+    const d = dirStep(dir);
+    if (!d.dx && !d.dy) return null;
+
+    let cx = startCell.cx;
+    let cy = startCell.cy;
+    let moved = 0;
+    for (let i = 0; i < maxCells; i++) {
+      const nx = cx + d.dx;
+      const ny = cy + d.dy;
+      if (nx < 0 || ny < 0 || nx >= grid.w || ny >= grid.h) break;
+      if (isCellBlocked(grid, nx, ny)) break;
+      cx = nx;
+      cy = ny;
+      moved++;
+    }
+    if (moved <= 0) return null;
+    return { cx, cy, steps: moved, dir };
+  }
+
+  function shouldScanAfterMove_(segs, cellsMoved) {
+    if (!Array.isArray(segs) || !segs.length) return false;
+    const first = segs[0];
+    const needTurnNext = (cellsMoved >= (first.steps | 0)) && segs.length >= 2 && segs[1]?.dir && segs[1].dir !== first.dir;
+    return !!needTurnNext;
   }
 
   async function pollAlertsOnce() {
@@ -488,38 +523,42 @@ if (!elStart || !elStop || !elStatus) {
       setPlannedPathOverlay_(api, path);
       if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: path.length });
 
+      // Drive along the planned path until the first required turn:
+      // take the first segment direction and move as far as possible in that direction.
       const segs = pathToSegments(path);
       if (!segs.length) {
         setStatus("GOAL CELL");
         setPlannedPathOverlay_(api, path);
         break;
       }
+      const run = { dir: segs[0].dir, steps: Math.max(1, segs[0].steps | 0) };
 
-      // Execute just one short segment per loop iteration, then rescan/replan.
-      const seg = segs[0];
-      const targetH = dirToHeadingDeg(seg.dir);
+      const targetH = dirToHeadingDeg(run.dir);
       const curH = Number(pose.headingDeg);
       const dTurn = wrapDiff180(targetH - curH);
       if (Math.abs(dTurn) > 3) {
-        setStatus(`turn -> ${seg.dir}`);
-        if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: seg.dir, turnDeg: dTurn });
+        setStatus(`turn -> ${run.dir}`);
+        if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, turnDeg: dTurn });
         await cmdTurn(dTurn);
         await handleReflex(api);
         if (!running || stopRequested) break;
       }
 
-      const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 2;
+      const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
       const maxCells = Math.max(1, Math.floor(kMaxSegmentCm / cmPerCell));
-      const cellsToMove = Math.max(1, Math.min(seg.steps, maxCells));
+      const cellsToMove = Math.max(1, Math.min(run.steps, maxCells));
       const moveCm = cellsToMove * cmPerCell;
       setStatus(`move ${moveCm}cm`);
-      if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: seg.dir, segCm: moveCm });
+      if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, segCm: moveCm });
       await cmdMove(moveCm);
 
       await handleReflex(api);
       if (!running || stopRequested) break;
 
-      if (kScanAfterEachSegment) await doScan(api, "step");
+      // Scan when we are about to need a turn (or if forced by config).
+      if (kScanAfterEachSegment || shouldScanAfterMove_(segs, cellsToMove)) {
+        await doScan(api, "turn");
+      }
     }
 
     running = false;
