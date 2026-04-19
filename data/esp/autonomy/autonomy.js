@@ -171,63 +171,337 @@ if (!elStart || !elStop || !elStatus) {
     return false;
   }
 
-  function bfsPlan(grid, start, goalCell) {
+  const DIRS = [
+    { dx: 1, dy: 0, label: "E" },
+    { dx: -1, dy: 0, label: "W" },
+    { dx: 0, dy: 1, label: "N" },
+    { dx: 0, dy: -1, label: "S" },
+  ];
+
+  function computeMinTurnsFromStart_(grid, startCell) {
     const w = grid.w;
     const h = grid.h;
-    const startIdx = start.cy * w + start.cx;
-    const goalIdx = goalCell.cy * w + goalCell.cx;
+    const startIdx = startCell.cy * w + startCell.cx;
 
-    const prev = new Int32Array(w * h);
-    prev.fill(-1);
-    const q = new Int32Array(w * h);
-    let qh = 0;
-    let qt = 0;
+    const INF = 1e9;
+    const dist = new Int32Array(w * h * 4);
+    for (let i = 0; i < dist.length; i++) dist[i] = INF;
 
-    if (isCellBlocked(grid, start.cx, start.cy)) return null;
-    if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return null;
+    // 0-1 BFS deque as ring buffer of packed state ints: state = (cellIdx<<2)|dirIdx
+    // 0-1 BFS can enqueue the same vertex multiple times on relaxations; keep a
+    // comfortable margin to avoid ring overflow.
+    const q = new Int32Array(w * h * 4 * 16 + 8);
+    let head = 0;
+    let tail = 0;
 
-    prev[startIdx] = startIdx;
-    q[qt++] = startIdx;
+    function pushFront(v) {
+      head = (head - 1 + q.length) % q.length;
+      q[head] = v;
+    }
+    function pushBack(v) {
+      q[tail] = v;
+      tail = (tail + 1) % q.length;
+    }
+    function popFront() {
+      const v = q[head];
+      head = (head + 1) % q.length;
+      return v;
+    }
+    function isEmpty() {
+      return head === tail;
+    }
 
-    const dirs = [
-      { dx: 1, dy: 0 },
-      { dx: -1, dy: 0 },
-      { dx: 0, dy: 1 },
-      { dx: 0, dy: -1 },
-    ];
+    if (isCellBlocked(grid, startCell.cx, startCell.cy)) return dist;
 
-    while (qh < qt) {
-      const idx = q[qh++];
-      if (idx === goalIdx) break;
-      const cx = idx % w;
-      const cy = (idx / w) | 0;
+    // Initialize: first step doesn't count as a "turn". Seed neighbors with 0 turns.
+    for (let d = 0; d < 4; d++) {
+      const nx = startCell.cx + DIRS[d].dx;
+      const ny = startCell.cy + DIRS[d].dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      if (isCellBlocked(grid, nx, ny)) continue;
+      const nidx = ny * w + nx;
+      const sid = (nidx << 2) | d;
+      dist[sid] = 0;
+      pushBack(sid);
+    }
 
-      for (const d of dirs) {
-        const nx = cx + d.dx;
-        const ny = cy + d.dy;
+    while (!isEmpty()) {
+      const s = popFront();
+      const cellIdx = s >> 2;
+      const dirPrev = s & 3;
+      const baseTurns = dist[s];
+      const cx = cellIdx % w;
+      const cy = (cellIdx / w) | 0;
+
+      for (let d = 0; d < 4; d++) {
+        const nx = cx + DIRS[d].dx;
+        const ny = cy + DIRS[d].dy;
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         if (isCellBlocked(grid, nx, ny)) continue;
         const nidx = ny * w + nx;
-        if (prev[nidx] !== -1) continue;
-        prev[nidx] = idx;
-        q[qt++] = nidx;
+        const ns = (nidx << 2) | d;
+        const wgt = d === dirPrev ? 0 : 1;
+        const nd = baseTurns + wgt;
+        if (nd < dist[ns]) {
+          dist[ns] = nd;
+          if (wgt === 0) pushFront(ns);
+          else pushBack(ns);
+        }
       }
     }
 
-    if (prev[goalIdx] === -1) return null;
+    // States for "start cell with known prev dir" are not used; dist stays INF there.
+    // If start == goal, caller should handle that separately.
+    return dist;
+  }
 
-    const path = [];
-    let cur = goalIdx;
+  function computeMinTurnsToGoal_(grid, goalCell) {
+    const w = grid.w;
+    const h = grid.h;
+    const goalIdx = goalCell.cy * w + goalCell.cx;
+
+    const INF = 1e9;
+    const dist = new Int32Array(w * h * 4);
+    for (let i = 0; i < dist.length; i++) dist[i] = INF;
+
+    // 0-1 BFS can enqueue the same vertex multiple times on relaxations; keep a
+    // comfortable margin to avoid ring overflow.
+    const q = new Int32Array(w * h * 4 * 16 + 8);
+    let head = 0;
+    let tail = 0;
+
+    function pushFront(v) {
+      head = (head - 1 + q.length) % q.length;
+      q[head] = v;
+    }
+    function pushBack(v) {
+      q[tail] = v;
+      tail = (tail + 1) % q.length;
+    }
+    function popFront() {
+      const v = q[head];
+      head = (head + 1) % q.length;
+      return v;
+    }
+    function isEmpty() {
+      return head === tail;
+    }
+
+    if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return dist;
+
+    // At goal, "already there" costs 0 turns regardless of prev direction.
+    for (let d = 0; d < 4; d++) {
+      const s = (goalIdx << 2) | d;
+      dist[s] = 0;
+      pushBack(s);
+    }
+
+    while (!isEmpty()) {
+      const s = popFront();
+      const cellIdx = s >> 2;
+      const dirArrived = s & 3; // direction of the forward step used to arrive to this cell
+      const baseTurns = dist[s];
+      const cx = cellIdx % w;
+      const cy = (cellIdx / w) | 0;
+
+      const px = cx - DIRS[dirArrived].dx;
+      const py = cy - DIRS[dirArrived].dy;
+      if (px < 0 || py < 0 || px >= w || py >= h) continue;
+      if (isCellBlocked(grid, px, py)) continue;
+      const pidx = py * w + px;
+
+      // In forward space: from (prevDir=p) take step dirArrived to reach (dirArrived).
+      for (let prevDir = 0; prevDir < 4; prevDir++) {
+        const ps = (pidx << 2) | prevDir;
+        const wgt = prevDir === dirArrived ? 0 : 1;
+        const nd = baseTurns + wgt;
+        if (nd < dist[ps]) {
+          dist[ps] = nd;
+          if (wgt === 0) pushFront(ps);
+          else pushBack(ps);
+        }
+      }
+    }
+
+    return dist;
+  }
+
+  function bfsShortestLenWithTurnBudget_(grid, startState, goalCell, turnBudget) {
+    // Returns { pathCells, turnsUsed } for shortest-length path that reaches goal
+    // with exactly `turnBudget` turns. `startState`: { cx, cy, prevDirIdx }.
+    const w = grid.w;
+    const h = grid.h;
+    const goalIdx = goalCell.cy * w + goalCell.cx;
+
+    const strideT = turnBudget + 1;
+    const stateCount = w * h * 4 * strideT;
+    const dist = new Int32Array(stateCount);
+    dist.fill(-1);
+    const prev = new Int32Array(stateCount);
+    prev.fill(-1);
+
+    function enc(cellIdx, dirIdx, t) {
+      return ((cellIdx << 2) | dirIdx) * strideT + t;
+    }
+
+    const startIdx = startState.cy * w + startState.cx;
+    if (isCellBlocked(grid, startState.cx, startState.cy)) return null;
+    if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return null;
+
+    const startId = enc(startIdx, startState.prevDirIdx, 0);
+    dist[startId] = 0;
+
+    const q = new Int32Array(stateCount + 8);
+    let qh = 0;
+    let qt = 0;
+    q[qt++] = startId;
+
+    let endId = -1;
+
+    while (qh < qt) {
+      const curId = q[qh++];
+      const curLen = dist[curId];
+      const t = curId % strideT;
+      const tmp = (curId / strideT) | 0;
+      const dirPrev = tmp & 3;
+      const cellIdx = tmp >> 2;
+      const cx = cellIdx % w;
+      const cy = (cellIdx / w) | 0;
+
+      if (cellIdx === goalIdx && t === turnBudget) {
+        endId = curId;
+        break;
+      }
+
+      for (let d = 0; d < 4; d++) {
+        const nx = cx + DIRS[d].dx;
+        const ny = cy + DIRS[d].dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if (isCellBlocked(grid, nx, ny)) continue;
+        const nidx = ny * w + nx;
+        const nt = t + (d === dirPrev ? 0 : 1);
+        if (nt > turnBudget) continue;
+        const nid = enc(nidx, d, nt);
+        if (dist[nid] !== -1) continue;
+        dist[nid] = curLen + 1;
+        prev[nid] = curId;
+        q[qt++] = nid;
+      }
+    }
+
+    if (endId < 0) return null;
+
+    const cellsRev = [];
+    let cur = endId;
     for (;;) {
-      const cx = cur % w;
-      const cy = (cur / w) | 0;
-      path.push({ cx, cy });
-      if (cur === startIdx) break;
+      const tmp = (cur / strideT) | 0;
+      const cellIdx = tmp >> 2;
+      const cx = cellIdx % w;
+      const cy = (cellIdx / w) | 0;
+      cellsRev.push({ cx, cy });
+      if (cur === startId) break;
       cur = prev[cur];
       if (cur < 0) return null;
     }
-    path.reverse();
-    return path;
+    cellsRev.reverse();
+    return cellsRev;
+  }
+
+  function planLexicographic_(grid, startCell, goalCell) {
+    const w = grid.w;
+    const h = grid.h;
+    if (!startCell || !goalCell) return null;
+    if (isCellBlocked(grid, startCell.cx, startCell.cy)) return null;
+    if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return null;
+
+    if (startCell.cx === goalCell.cx && startCell.cy === goalCell.cy) {
+      return [{ cx: startCell.cx, cy: startCell.cy }];
+    }
+
+    const distFromStart = computeMinTurnsFromStart_(grid, startCell);
+    const goalIdx = goalCell.cy * w + goalCell.cx;
+    let minTurnsGoal = 1e9;
+    for (let d = 0; d < 4; d++) {
+      const sid = (goalIdx << 2) | d;
+      const v = distFromStart[sid];
+      if (v < minTurnsGoal) minTurnsGoal = v;
+    }
+    if (!Number.isFinite(minTurnsGoal) || minTurnsGoal >= 1e9) return null;
+
+    const distToGoal = computeMinTurnsToGoal_(grid, goalCell);
+
+    // Secondary objective: maximize the length of the first straight run from the robot.
+    const bestRunByDir = new Int32Array(4);
+    bestRunByDir.fill(0);
+    let bestRun = 0;
+
+    for (let d = 0; d < 4; d++) {
+      let cx = startCell.cx;
+      let cy = startCell.cy;
+      let run = 0;
+      for (;;) {
+        const nx = cx + DIRS[d].dx;
+        const ny = cy + DIRS[d].dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) break;
+        if (isCellBlocked(grid, nx, ny)) break;
+        cx = nx;
+        cy = ny;
+        run++;
+
+        const idx = (((cy * w + cx) << 2) | d);
+        const needTurns = distToGoal[idx];
+        if (needTurns <= minTurnsGoal) {
+          bestRunByDir[d] = run;
+          if (run > bestRun) bestRun = run;
+        }
+      }
+    }
+
+    if (bestRun <= 0) return null;
+
+    let bestPath = null;
+    let bestLen = 1e9;
+
+    for (let d = 0; d < 4; d++) {
+      if (bestRunByDir[d] !== bestRun) continue;
+
+      // Forced prefix: bestRun steps straight in direction d.
+      const prefix = [{ cx: startCell.cx, cy: startCell.cy }];
+      let cx = startCell.cx;
+      let cy = startCell.cy;
+      for (let i = 0; i < bestRun; i++) {
+        cx += DIRS[d].dx;
+        cy += DIRS[d].dy;
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h) {
+          cx = NaN;
+          break;
+        }
+        if (isCellBlocked(grid, cx, cy)) {
+          cx = NaN;
+          break;
+        }
+        prefix.push({ cx, cy });
+      }
+      if (!Number.isFinite(cx)) continue;
+
+      const last = prefix[prefix.length - 1];
+      const suffix = bfsShortestLenWithTurnBudget_(
+        grid,
+        { cx: last.cx, cy: last.cy, prevDirIdx: d },
+        goalCell,
+        minTurnsGoal,
+      );
+      if (!suffix) continue;
+
+      const full = prefix.concat(suffix.slice(1));
+      const len = full.length;
+      if (len < bestLen) {
+        bestLen = len;
+        bestPath = full;
+      }
+    }
+
+    return bestPath;
   }
 
   function pathToSegments(path) {
@@ -266,14 +540,6 @@ if (!elStart || !elStop || !elStatus) {
     }
     flush();
     return segs;
-  }
-
-  function dirStep(dir) {
-    if (dir === "E") return { dx: 1, dy: 0 };
-    if (dir === "W") return { dx: -1, dy: 0 };
-    if (dir === "N") return { dx: 0, dy: 1 };
-    if (dir === "S") return { dx: 0, dy: -1 };
-    return { dx: 0, dy: 0 };
   }
 
   function dirToHeadingDeg(dir) {
@@ -324,26 +590,6 @@ if (!elStart || !elStop || !elStatus) {
       pts.push({ x: (cx + 0.5) * cmPerCell, y: (cy + 0.5) * cmPerCell });
     }
     api.setPlannedPath(pts);
-  }
-
-  function farthestStraightCell_(grid, startCell, dir, maxCells) {
-    const d = dirStep(dir);
-    if (!d.dx && !d.dy) return null;
-
-    let cx = startCell.cx;
-    let cy = startCell.cy;
-    let moved = 0;
-    for (let i = 0; i < maxCells; i++) {
-      const nx = cx + d.dx;
-      const ny = cy + d.dy;
-      if (nx < 0 || ny < 0 || nx >= grid.w || ny >= grid.h) break;
-      if (isCellBlocked(grid, nx, ny)) break;
-      cx = nx;
-      cy = ny;
-      moved++;
-    }
-    if (moved <= 0) return null;
-    return { cx, cy, steps: moved, dir };
   }
 
   function shouldScanAfterMove_(segs, cellsMoved) {
@@ -529,7 +775,7 @@ if (!elStart || !elStop || !elStatus) {
       }
       if (window.StatusBus) window.StatusBus.set("autonomy", { startCx: startCell.cx, startCy: startCell.cy });
 
-      const path = bfsPlan(api.grid, startCell, goal.cell);
+      const path = planLexicographic_(api.grid, startCell, goal.cell);
       if (!path) {
         setStatus("NO PATH");
         setPlannedPathOverlay_(api, null);
