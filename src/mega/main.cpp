@@ -172,11 +172,37 @@ static bool isVirtualRed_(const ColorRgb& live) {
   if (!colorCalTask.hasCalibration()) return false;
   const ColorRgb* refs = colorCalTask.refs();
   if (!refs) return false;
-  const ColorRgb redRef = refs[0];
-  // Tunable threshold (normalized RGB distance).
-  const float kThresh = 0.18f;
-  const float d2 = colorDistSqNormalized_(live, redRef);
-  return isfinite(d2) && d2 <= (kThresh * kThresh);
+  // Use a lightweight nearest-prototype classifier:
+  // - Find which stored reference color is closest (in normalized RGB distance).
+  // - Only treat it as "virtual red" if the closest is index 0 AND it wins by a margin.
+  //
+  // This avoids false triggers when the ground is "close enough" to ref[0] under
+  // different lighting conditions.
+  constexpr float kAbsMaxDist = 0.18f;   // absolute "must be close" gate
+  constexpr float kWinMargin = 0.05f;    // "must be clearly closer than runner-up"
+  constexpr float kAbsMaxDistSq = kAbsMaxDist * kAbsMaxDist;
+  constexpr float kWinMarginSq = kWinMargin * kWinMargin;
+
+  float best = INFINITY;
+  float second = INFINITY;
+  int bestIdx = -1;
+
+  for (uint8_t i = 0; i < ColorCalibrationTask::kColorCount; i++) {
+    const float d2 = colorDistSqNormalized_(live, refs[i]);
+    if (!isfinite(d2)) continue;
+    if (d2 < best) {
+      second = best;
+      best = d2;
+      bestIdx = (int)i;
+    } else if (d2 < second) {
+      second = d2;
+    }
+  }
+
+  if (bestIdx != 0) return false;
+  if (!(isfinite(best) && best <= kAbsMaxDistSq)) return false;
+  if (!isfinite(second)) return true;  // no runner-up; accept
+  return (second - best) >= kWinMarginSq;
 }
 
 static void sendEvtPose_(const char* tag, float extra) {

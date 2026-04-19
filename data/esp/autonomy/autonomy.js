@@ -20,7 +20,7 @@ if (!elStart || !elStop || !elStatus) {
   const kCmdTimeoutMs = 25000;
 
   const kBackoffAfterReflexCm = -6; // tunable, "middle" value
-  const kMaxSegmentCm = 50; // cap single forward command length to reduce drift
+  const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
   const kScanAfterEachSegment = false; // scan primarily before turns / after reflex
 
   let running = false;
@@ -36,6 +36,14 @@ if (!elStart || !elStop || !elStatus) {
   let reflex = null; // { kind: "red"|"front", x_cm, y_cm }
 
   let virtualBlocked = null; // Uint8Array grid.w*grid.h (1 => blocked)
+  // Autonomy control flow:
+  // Execute exactly one primitive per loop iteration:
+  // - scan (if pending)
+  // - else turn (if needed)
+  // - else move (straight, capped)
+  // This avoids "path chasing" and guarantees replanning after scan/turn/move.
+  let pendingScanReason = null; // "turn"|"segment"|"recover"|"no-path"|...
+  let turnScanJustDone = false;
 
   function setStatus(text) {
     elStatus.textContent = String(text || "");
@@ -698,6 +706,9 @@ if (!elStart || !elStop || !elStatus) {
     if (!reflex) return false;
     const r = reflex;
     reflex = null;
+    // Reflex stop already forces a scan; drop any queued scan so we don't scan twice.
+    pendingScanReason = null;
+    turnScanJustDone = false;
 
     if (r.kind === "red") {
       const c = api.grid.worldToCell(r.x_cm, r.y_cm);
@@ -761,6 +772,16 @@ if (!elStart || !elStop || !elStatus) {
       await handleReflex(api);
       if (!running || stopRequested) break;
 
+      // If a scan is pending, do it as the only primitive for this iteration,
+      // then replan on the next iteration.
+      if (pendingScanReason) {
+        const reason = pendingScanReason;
+        pendingScanReason = null;
+        turnScanJustDone = reason === "turn";
+        await doScan(api, reason);
+        continue;
+      }
+
       const pose = api.getPose();
       if (isAtGoal(api, pose)) {
         setStatus("GOAL REACHED");
@@ -770,6 +791,7 @@ if (!elStart || !elStop || !elStatus) {
       const startCell = api.grid.worldToCell(pose.x, pose.y);
       if (!startCell) {
         // If pose drifts out of bounds, force a scan to pull it back.
+        turnScanJustDone = false;
         await doScan(api, "recover");
         continue;
       }
@@ -780,6 +802,7 @@ if (!elStart || !elStop || !elStatus) {
         setStatus("NO PATH");
         setPlannedPathOverlay_(api, null);
         if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: null });
+        turnScanJustDone = false;
         await doScan(api, "no-path");
         continue;
       }
@@ -801,27 +824,33 @@ if (!elStart || !elStop || !elStatus) {
       const curH = Number(pose.headingDeg);
       const dTurn = wrapDiff180(targetH - curH);
       if (Math.abs(dTurn) > 3) {
+        // Ensure we scan before turning. Do not scan twice for the same turn.
+        if (!turnScanJustDone) {
+          pendingScanReason = "turn";
+          continue;
+        }
         setStatus(`turn -> ${run.dir}`);
         if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, turnDeg: dTurn });
         await cmdTurn(dTurn);
-        await handleReflex(api);
-        if (!running || stopRequested) break;
+        turnScanJustDone = false;
+        continue; // replan after turn; do not move on the old plan
       }
+      turnScanJustDone = false;
 
       const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
       const maxCells = Math.max(1, Math.floor(kMaxSegmentCm / cmPerCell));
       const cellsToMove = Math.max(1, Math.min(run.steps, maxCells));
+      const hitMaxSegmentCap = run.steps > maxCells;
       const moveCm = cellsToMove * cmPerCell;
       setStatus(`move ${moveCm}cm`);
       if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, segCm: moveCm });
       await cmdMove(moveCm);
 
-      await handleReflex(api);
-      if (!running || stopRequested) break;
-
-      // Scan when we are about to need a turn (or if forced by config).
-      if (kScanAfterEachSegment || shouldScanAfterMove_(segs, cellsToMove)) {
-        await doScan(api, "turn");
+      // After a move, schedule the next scan if needed, then replan.
+      if (hitMaxSegmentCap) {
+        pendingScanReason = "segment";
+      } else if (kScanAfterEachSegment || shouldScanAfterMove_(segs, cellsToMove)) {
+        pendingScanReason = "turn";
       }
     }
 
