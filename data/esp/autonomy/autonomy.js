@@ -19,7 +19,7 @@ if (!elStart || !elStop || !elStatus) {
   const kPollAlertsMs = 140;
   const kCmdTimeoutMs = 25000;
 
-  const kBackoffAfterReflexCm = -6; // tunable, "middle" value
+  const kBackoffAfterReflexCm = -8; // tunable, "middle" value
   const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
   const kScanAfterEachSegment = false; // scan primarily before turns / after reflex
 
@@ -711,13 +711,23 @@ if (!elStart || !elStop || !elStatus) {
     turnScanJustDone = false;
 
     if (r.kind === "red") {
-      const c = api.grid.worldToCell(r.x_cm, r.y_cm);
+      // For red floor tiles: scan first to get the best corrected pose, then mark
+      // the virtual obstacle at that corrected pose (avoids odom/pose handoff jitter),
+      // then back off. No extra scan after the backoff to avoid scan thrash.
+      setStatus("RED stop -> scan");
+      await doScan(api, "red");
+      const pose = api.getPose();
+      const c = api.grid.worldToCell(pose.x, pose.y);
       if (c) vbSet(api.grid, c.cx, c.cy, 1);
+      setStatus("RED stop -> backoff");
+      await cmdMove(kBackoffAfterReflexCm);
+      return true;
     }
 
-    setStatus(`${r.kind.toUpperCase()} stop -> backoff`);
+    // For front obstacle stops, back off then rescan to re-localize in case of slip.
+    setStatus("FRONT stop -> backoff");
     await cmdMove(kBackoffAfterReflexCm);
-    await doScan(api, `${r.kind}`);
+    await doScan(api, "front");
     return true;
   }
 

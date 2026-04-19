@@ -632,7 +632,9 @@ void loop() {
       sendEvtPose_("FRONTSTOP", lidarFilteredCm);
     }
 
-    if (!gReflexLatchedRed && lastRgbValid && isVirtualRed_(lastRgb)) {
+    // Do not cancel a commanded backoff just because the color sensor is still
+    // over the red tile at the start of the reverse move.
+    if (!gReflexLatchedRed && !seqExecTask.reverseMoveActive() && lastRgbValid && isVirtualRed_(lastRgb)) {
       gReflexLatchedRed = true;
       seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);

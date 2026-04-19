@@ -247,6 +247,14 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   return false;
 }
 
+bool SequenceExecutorTask::reverseMoveActive() const {
+  if (state_ != State::Running) return false;
+  if (!steps_) return false;
+  const SequenceStep& step = steps_[stepIndex_];
+  if (step.type != SequenceStepType::MoveByDistance) return false;
+  return moveByCm_ < 0.0f;
+}
+
 void SequenceExecutorTask::cancel() {
   driveBy_.cancel();
   driveTo_.cancel();

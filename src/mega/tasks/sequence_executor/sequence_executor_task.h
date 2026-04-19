@@ -32,6 +32,10 @@ public:
 
   bool active() const;
   State state() const;
+  // True only when executing a backward MoveByDistance (e.g. reflex backoff).
+  // This is used by reflex logic to avoid canceling a commanded backoff just
+  // because the color sensor is still over the red tile.
+  bool reverseMoveActive() const;
 
 private:
   void setState_(State s);
