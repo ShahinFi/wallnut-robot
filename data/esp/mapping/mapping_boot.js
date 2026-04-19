@@ -162,6 +162,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     mapPose0: { x: mapW_cm * 0.5, y: mapH_cm * 0.2, headingDeg: 0 },
     poseLocked: false, // becomes true after initial localization
     poseSentToRobot: false,
+    poseOdomConfirmed: false, // becomes true once /odom matches the posted map pose
 
     scanActive: false,
     scanDoneSeen: false,
@@ -184,7 +185,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     // - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
     //   so we must use it directly (otherwise we'd apply the correction twice).
     const headingDeg = wrap360(state.compassDeg);
-    if (state.poseSentToRobot && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
+    if (state.poseSentToRobot && state.poseOdomConfirmed && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
       return { x: state.odomEast, y: state.odomNorth, headingDeg };
     }
     const dx = state.odomEast - state.odomAnchorEast;
@@ -214,6 +215,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = false;
     state.poseSentToRobot = false;
+    state.poseOdomConfirmed = false;
     setStatus("cleared (walls seeded, pose unlocked)");
     redraw();
   }
@@ -234,8 +236,35 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     try {
       let url = `/set_pose?x=${encodeURIComponent(x.toFixed(2))}&y=${encodeURIComponent(y.toFixed(2))}`;
       if (includeHeading && Number.isFinite(h)) url += `&h=${encodeURIComponent(wrap360(h).toFixed(2))}`;
-      await fetch(url, { method: "POST", cache: "no-store" });
+      const res = await fetch(url, { method: "POST", cache: "no-store" });
+      return !!res.ok;
     } catch {}
+    return false;
+  }
+
+  // Queue /set_pose posts so we can retry if the robot isn't armed yet.
+  const posePost = { pending: false, inFlight: false, includeHeading: false, pose: null };
+  function queuePoseToRobot_(pose, includeHeading) {
+    posePost.pose = { x: pose.x, y: pose.y, headingDeg: pose.headingDeg };
+    posePost.includeHeading = !!includeHeading;
+    posePost.pending = true;
+  }
+
+  async function tryPostPoseToRobot_() {
+    if (!posePost.pending || posePost.inFlight) return;
+    if (pollActive || state.scanActive) return;
+    posePost.inFlight = true;
+    try {
+      const ok = await postPoseToRobot(posePost.pose, { includeHeading: posePost.includeHeading });
+      if (ok) {
+        // Only switch to absolute /odom after we observe /odom rebased to this pose.
+        state.poseSentToRobot = true;
+        state.poseOdomConfirmed = false;
+        posePost.pending = false;
+      }
+    } finally {
+      posePost.inFlight = false;
+    }
   }
 
   // Buttons are wired later to start a scan and poll until DONE.
@@ -306,10 +335,23 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (window.NetGate && !window.NetGate.allow("pose")) return;
     posePollInFlight = true;
     try {
+      await tryPostPoseToRobot_();
       const [od, hdg] = await Promise.all([fetchOdomEN(), fetchCompassDeg()]);
       if (od) {
-        state.odomEast = od.e;
-        state.odomNorth = od.n;
+        if (state.poseSentToRobot && !state.poseOdomConfirmed) {
+          const dx = od.e - state.mapPose0.x;
+          const dy = od.n - state.mapPose0.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          // Confirm once odom is close to the posted pose, then switch to absolute mode.
+          if (Number.isFinite(dist) && dist <= 8) {
+            state.poseOdomConfirmed = true;
+            state.odomEast = od.e;
+            state.odomNorth = od.n;
+          }
+        } else {
+          state.odomEast = od.e;
+          state.odomNorth = od.n;
+        }
       }
       if (hdg != null) state.compassDeg = hdg;
       redraw();
@@ -429,13 +471,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = true;
     if (!state.poseSentToRobot) {
-      state.poseSentToRobot = true;
       // Initial: send position only (heading is already aligned via your manual north reset).
-      postPoseToRobot(state.mapPose0, { includeHeading: false });
-      // Immediately snap the displayed pose to the matched pose; /odom will follow
-      // once Mega rebases its world frame.
-      state.odomEast = state.mapPose0.x;
-      state.odomNorth = state.mapPose0.y;
+      queuePoseToRobot_(state.mapPose0, false);
     }
   }
 
@@ -475,7 +512,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
           commitLockedPose_(best.pose);
           if (wasLocked) {
             // Tracking: send position + matched heading for compass offset correction.
-            postPoseToRobot(state.mapPose0, { includeHeading: true });
+            queuePoseToRobot_(state.mapPose0, true);
           }
           poseStatus = `pose: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score.toFixed(3)}`;
         } else if (!state.poseLocked) {

@@ -75,6 +75,7 @@ static bool            mappingPoseInitialized = false;    // set once we have a 
 
 // ===== Option 1 security (UART passcode arming) =====
 static const char kEspPasscode[] = "1234";
+static const int  kEspPasscodeInt = 1234;
 static bool gEspArmed = false;
 static uint8_t gEspFailCount = 0;
 static bool gEspLocked = false;
@@ -172,11 +173,38 @@ static bool isVirtualRed_(const ColorRgb& live) {
   if (!colorCalTask.hasCalibration()) return false;
   const ColorRgb* refs = colorCalTask.refs();
   if (!refs) return false;
-  const ColorRgb redRef = refs[0];
-  // Tunable threshold (normalized RGB distance).
-  const float kThresh = 0.18f;
-  const float d2 = colorDistSqNormalized_(live, redRef);
-  return isfinite(d2) && d2 <= (kThresh * kThresh);
+
+  // Robust comparative classification (nearest prototype):
+  // Decide "red" by being closer to ref[0] than to the other stored references,
+  // not by being within a fixed radius around ref[0]. This avoids ground being
+  // flagged as red when lighting shifts but the *relative* ordering remains.
+  //
+  // Confidence is expressed as a ratio between the best and runner-up distances.
+  // Smaller ratio => more confident.
+  constexpr float kBestOverSecondMax = 0.80f; // tunable; 0.8 means best must be 20% closer than runner-up
+
+  float best = INFINITY;
+  float second = INFINITY;
+  int bestIdx = -1;
+
+  for (uint8_t i = 0; i < ColorCalibrationTask::kColorCount; i++) {
+    const float d2 = colorDistSqNormalized_(live, refs[i]);
+    if (!isfinite(d2)) continue;
+    if (d2 < best) {
+      second = best;
+      best = d2;
+      bestIdx = (int)i;
+    } else if (d2 < second) {
+      second = d2;
+    }
+  }
+
+  if (bestIdx != 0) return false;
+  if (!(isfinite(best) && isfinite(second) && second > 0.0f)) {
+    // If we can't form a runner-up comparison, don't trigger.
+    return false;
+  }
+  return (best / second) <= kBestOverSecondMax;
 }
 
 static void sendEvtPose_(const char* tag, float extra) {
@@ -639,13 +667,16 @@ void loop() {
     if (espCmd.type == EspCommand::Type::Passcode) {
       if (gEspLocked) {
         Serial2.println("AUTH:LOCKED");
-      } else if (espCmd.text.equals(kEspPasscode)) {
+      } else if (espCmd.value == kEspPasscodeInt) {
         gEspArmed = true;
         gEspFailCount = 0;
         Serial2.println("AUTH:OK");
       } else {
         gEspArmed = false;
-        if (gEspFailCount < 255) gEspFailCount++;
+        // If the payload was malformed (no digits parsed), do not count it as a try.
+        if (espCmd.value >= 0) {
+          if (gEspFailCount < 255) gEspFailCount++;
+        }
         const uint8_t triesLeft =
             (gEspFailCount >= kEspMaxFails) ? 0 : (uint8_t)(kEspMaxFails - gEspFailCount);
         if (gEspFailCount >= kEspMaxFails) {

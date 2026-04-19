@@ -18,9 +18,19 @@ static bool parseLine(const String& line, EspCommand& out) {
 
   if (s.startsWith("Passcode:")) {
     out.type = EspCommand::Type::Passcode;
-    out.value = 0;
-    out.text = s.substring(9);
-    out.text.trim();
+    // Robust: parse digits without allocating substrings, keep only the last 4 digits.
+    // This avoids fragile String heap behavior and tolerates occasional UART garbage.
+    int acc = 0;
+    int digits = 0;
+    for (int i = 9; i < s.length(); i++) {
+      const char c = s.charAt(i);
+      if (c >= '0' && c <= '9') {
+        digits++;
+        acc = (acc * 10 + (c - '0')) % 10000;
+      }
+    }
+    out.value = (digits > 0) ? acc : -1;
+    out.text = "";
     return true;
   }
   if (s.equalsIgnoreCase("Disarm")) {
