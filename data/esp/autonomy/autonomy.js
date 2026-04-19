@@ -426,6 +426,20 @@ if (!elStart || !elStop || !elStatus) {
     return true;
   }
 
+  async function ensureFacingNorth_(api) {
+    if (!running) return false;
+    const pose = api.getPose();
+    const curH = Number(pose?.headingDeg);
+    if (!Number.isFinite(curH)) return true;
+    const dTurn = wrapDiff180(0 - curH);
+    // Small deadband to avoid jitter.
+    if (Math.abs(dTurn) <= 3) return true;
+    setStatus("turn -> N");
+    if (window.StatusBus) window.StatusBus.set("autonomy", { turnDeg: dTurn });
+    await cmdTurn(dTurn);
+    return true;
+  }
+
   async function doScan(api, reason) {
     if (!running) return { ok: false, status: "stopped" };
     setStatus(`scan (${reason})...`);
@@ -484,14 +498,18 @@ if (!elStart || !elStop || !elStatus) {
       });
     }
 
+    // Project convention: robot heading 0 is aligned with map +Y (north).
+    // Always turn to north before the initial scan so the first match is stable.
+    await ensureFacingNorth_(api);
+    await handleReflex(api);
+    if (!running || stopRequested) return;
+
     const okInit = await ensureInitialLocalization(api);
     if (!okInit) {
       setStatus("init scan failed");
       running = false;
       return;
     }
-
-    await doScan(api, "start");
 
     while (running && !stopRequested) {
       await handleReflex(api);
