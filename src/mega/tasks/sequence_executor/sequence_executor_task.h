@@ -22,6 +22,8 @@ public:
   SequenceExecutorTask();
 
   void setSequence(const SequenceStep* steps);
+  // Scale applied to forward MOVE commands only (0..1). Latched by color sensor.
+  void setForwardSpeedScale(float scale01);
   void setAlignHeading(float headingDegContinuous);
   void clearAlignHeading();
   void begin(float headingDegContinuous, float avgTravelCm);
@@ -66,6 +68,8 @@ private:
   bool  alignEnabled_; 
   bool  aligning_;
   float alignHeadingDeg_;
+
+  float forwardSpeedScale_;
 
   // Move acceleration ramp (applied only to straight MoveByDistance steps).
   // No ramp on decel/stop; turns are unaffected.

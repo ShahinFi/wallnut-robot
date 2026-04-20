@@ -16,21 +16,25 @@ const float kStopDistanceCm  = 10.0f;
 const float kClearDistanceCm = 12.0f;
 const float kSlowDistanceCm  = 30.0f;
 const float kSlowSpeedScale  = 0.35f;
-const float kFastSpeedScale  = 0.50f;
+const float kFastSpeedScale  = 0.50f; // default forward speed (can be overridden by color latch)
 const float kGuardTurnDeg    = 90.0f;
 const uint8_t kGuardMaxTurns = 4;
 const uint8_t kGuardClearStreakNeeded = 3;
 
-static float computeMoveSpeedScale(float lidarAvgCm) {
+static float computeMoveSpeedScale(float lidarAvgCm, float forwardScale) {
+  float fast = forwardScale;
+  if (!isfinite(fast)) fast = kFastSpeedScale;
+  if (fast < 0.0f) fast = 0.0f;
+  if (fast > 1.0f) fast = 1.0f;
   // LiDAR can be temporarily invalid (startup / sensor glitch / during turret scan
   // transitions). Invalid readings must never stall an in-flight motion command,
   // otherwise the browser will wait for CMDOK until timeout.
   //
   // Safety is still enforced by the dedicated reflex stop logic in main.cpp.
-  if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return kFastSpeedScale;
+  if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return fast;
   if (lidarAvgCm < kStopDistanceCm) return 0.0f;
-  if (lidarAvgCm < kSlowDistanceCm) return kSlowSpeedScale;
-  return kFastSpeedScale;
+  if (lidarAvgCm < kSlowDistanceCm) return (fast < kSlowSpeedScale) ? fast : kSlowSpeedScale;
+  return fast;
 }
 }
 
@@ -51,6 +55,7 @@ SequenceExecutorTask::SequenceExecutorTask()
   alignEnabled_(false),
   aligning_(false),
   alignHeadingDeg_(0.0f),
+  forwardSpeedScale_(kFastSpeedScale),
   moveRampStartMs_(0),
   moveRampActive_(false),
   moveGuardState_(MoveGuardState::None),
@@ -75,6 +80,14 @@ SequenceExecutorTask::SequenceExecutorTask()
 void SequenceExecutorTask::setSequence(const SequenceStep* steps) {
   steps_ = steps;
   totalSteps_ = 0;  // no max steps; optional total display only
+}
+
+void SequenceExecutorTask::setForwardSpeedScale(float scale01) {
+  float s = scale01;
+  if (!isfinite(s)) return;
+  if (s < 0.0f) s = 0.0f;
+  if (s > 1.0f) s = 1.0f;
+  forwardSpeedScale_ = s;
 }
 
 void SequenceExecutorTask::setAlignHeading(float headingDegContinuous) {
@@ -171,7 +184,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     // Forward motion uses the obstacle-aware scaling; backing up does not.
     const float error = lidarAvgCm - targetCm_;
     const float speedAbs =
-        (error >= 0.0f) ? (kMoveSpeed * computeMoveSpeedScale(lidarAvgCm))
+        (error >= 0.0f) ? (kMoveSpeed * computeMoveSpeedScale(lidarAvgCm, forwardSpeedScale_))
                         : (kMoveSpeed * kFastSpeedScale);
     if (!driveTo_.active()) {
       driveTo_.begin(headingDegContinuous, avgTravelCm, targetCm_, speedAbs);
@@ -204,7 +217,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     }
     // Obstacle-aware scaling is only meaningful for forward motion. For backing
     // up (e.g. reflex backoff), do not let a close-forward wall stall the move.
-    const float scale = (moveByCm_ >= 0.0f) ? computeMoveSpeedScale(lidarAvgCm) : kFastSpeedScale;
+    const float scale = (moveByCm_ >= 0.0f) ? computeMoveSpeedScale(lidarAvgCm, forwardSpeedScale_) : kFastSpeedScale;
     const float baseSpeed = (moveByCm_ >= 0.0f) ? kMoveSpeed : -kMoveSpeed;
 
     // Accel ramp for straight moves only (no ramp on stop/decel; turns unaffected).

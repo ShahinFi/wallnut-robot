@@ -97,6 +97,11 @@ static bool gReflexLatchedRed = false;
 static bool gReflexLatchedFront = false;
 static bool gSeqWasActive = false;
 
+// Latched forward speed modes driven by stored colors:
+// - ref[1] => 75% forward PWM
+// - ref[2] => 35% forward PWM
+static float gForwardSpeedScale = 0.50f;
+
 static void onButtonIsr() {
   gButtonEdge = true;
 }
@@ -205,6 +210,46 @@ static bool isVirtualRed_(const ColorRgb& live) {
     return false;
   }
   return (best / second) <= kBestOverSecondMax;
+}
+
+static void maybeLatchForwardSpeedFromColor_(const ColorRgb& live) {
+  // Stored colors meaning:
+  // - refs[0] => virtual red obstacle (handled elsewhere)
+  // - refs[1] => speed mode 75%
+  // - refs[2] => speed mode 35%
+  if (!colorCalTask.hasCalibration()) return;
+  const ColorRgb* refs = colorCalTask.refs();
+  if (!refs) return;
+
+  constexpr float kBestOverSecondMax = 0.80f; // must win by 20%
+  constexpr float kSpeed75 = 0.75f;
+  constexpr float kSpeed35 = 0.35f;
+
+  float best = INFINITY;
+  float second = INFINITY;
+  int bestIdx = -1;
+
+  for (uint8_t i = 0; i < ColorCalibrationTask::kColorCount; i++) {
+    const float d2 = colorDistSqNormalized_(live, refs[i]);
+    if (!isfinite(d2)) continue;
+    if (d2 < best) {
+      second = best;
+      best = d2;
+      bestIdx = (int)i;
+    } else if (d2 < second) {
+      second = d2;
+    }
+  }
+
+  if (!(bestIdx == 1 || bestIdx == 2)) return;
+  if (!(isfinite(best) && isfinite(second) && second > 0.0f)) return;
+  if ((best / second) > kBestOverSecondMax) return;
+
+  const float desired = (bestIdx == 1) ? kSpeed75 : kSpeed35;
+  if (!isfinite(desired)) return;
+  if (fabsf(desired - gForwardSpeedScale) < 0.001f) return;
+  gForwardSpeedScale = desired;
+  seqExecTask.setForwardSpeedScale(gForwardSpeedScale);
 }
 
 static void sendEvtPose_(const char* tag, float extra) {
@@ -473,6 +518,7 @@ void setup() {
   encoderInit();
   espSetup();
   telemetryInit(200);
+  seqExecTask.setForwardSpeedScale(gForwardSpeedScale);
   Serial2.println("AUTH:OFF");
   // Send last saved encoder calibration (if any) so the web UI can show it.
   const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
@@ -616,6 +662,7 @@ void loop() {
       lastRgb = rgb;
       lastRgbValid = true;
       telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
+      maybeLatchForwardSpeedFromColor_(rgb);
     } else {
       lastRgbValid = false;
     }
