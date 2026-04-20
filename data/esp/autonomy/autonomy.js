@@ -20,7 +20,7 @@ if (!elStart || !elStop || !elStatus) {
   const kCmdTimeoutMs = 25000;
 
   const kBackoffAfterReflexCm = -8; // tunable, "middle" value
-  const kMaxSegmentCm = 25; // cap single forward command length to reduce drift
+  const kMaxSegmentCm = 30; // cap single forward command length to reduce drift
 
   let running = false;
   let stopRequested = false;
@@ -35,6 +35,7 @@ if (!elStart || !elStop || !elStatus) {
   let reflex = null; // { kind: "red"|"front", x_cm, y_cm }
 
   let virtualBlocked = null; // Uint8Array grid.w*grid.h (1 => blocked)
+  let redInflate = { xCells: 0, yCells: 0 };
   // Autonomy control flow (with stale live pose):
   // - Always scan BEFORE planning/replanning so pose/heading are fresh.
   // - Never scan just because we turned or the plan changed.
@@ -165,6 +166,23 @@ if (!elStart || !elStop || !elStatus) {
     if (!virtualBlocked) return;
     if (cx < 0 || cy < 0 || cx >= grid.w || cy >= grid.h) return;
     virtualBlocked[vbIdx(grid, cx, cy)] = v ? 1 : 0;
+    const api = mappingApi();
+    if (api?.setVirtualBlocked) api.setVirtualBlocked(virtualBlocked);
+  }
+
+  function vbMarkRect_(grid, cx0, cy0, rxCells, ryCells) {
+    if (!virtualBlocked) return;
+    const rx = Math.max(0, rxCells | 0);
+    const ry = Math.max(0, ryCells | 0);
+    for (let dy = -ry; dy <= ry; dy++) {
+      const cy = cy0 + dy;
+      if (cy < 0 || cy >= grid.h) continue;
+      for (let dx = -rx; dx <= rx; dx++) {
+        const cx = cx0 + dx;
+        if (cx < 0 || cx >= grid.w) continue;
+        virtualBlocked[vbIdx(grid, cx, cy)] = 1;
+      }
+    }
     const api = mappingApi();
     if (api?.setVirtualBlocked) api.setVirtualBlocked(virtualBlocked);
   }
@@ -571,6 +589,15 @@ if (!elStart || !elStop || !elStatus) {
     return !!c;
   }
 
+  function configureRedInflateFromDom_() {
+    const canvas = document.getElementById("mapCanvas");
+    if (!canvas) return;
+    const rx = Number(canvas.dataset.redInflateXCells);
+    const ry = Number(canvas.dataset.redInflateYCells);
+    redInflate.xCells = Number.isFinite(rx) ? Math.max(0, Math.floor(rx)) : 0;
+    redInflate.yCells = Number.isFinite(ry) ? Math.max(0, Math.floor(ry)) : 0;
+  }
+
   function isAtGoal(api, pose) {
     if (!goal.cell) return false;
     const c = api.grid.worldToCell(pose.x, pose.y);
@@ -707,7 +734,12 @@ if (!elStart || !elStop || !elStatus) {
       await doScan(api, "red");
       const pose = api.getPose();
       const c = api.grid.worldToCell(pose.x, pose.y);
-      if (c) vbSet(api.grid, c.cx, c.cy, 1);
+      if (c) {
+        const rx = redInflate.xCells | 0;
+        const ry = redInflate.yCells | 0;
+        if (rx > 0 || ry > 0) vbMarkRect_(api.grid, c.cx, c.cy, rx, ry);
+        else vbSet(api.grid, c.cx, c.cy, 1);
+      }
       setStatus("RED stop -> backoff");
       await cmdMove(kBackoffAfterReflexCm);
       return true;
@@ -740,6 +772,7 @@ if (!elStart || !elStop || !elStatus) {
       running = false;
       return;
     }
+    configureRedInflateFromDom_();
 
     setStatus(`goal cell=(${goal.cell.cx},${goal.cell.cy})`);
     if (window.StatusBus) {
