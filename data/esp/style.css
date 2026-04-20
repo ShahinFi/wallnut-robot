@@ -760,9 +760,9 @@ body.page-maze .status-pill {
   font-weight: 800;
   letter-spacing: .06em;
   font-size: 12px;
-  max-width: 26ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 

@@ -43,14 +43,23 @@ if (!elStart || !elStop || !elStatus) {
   //   then schedule a scan for the next iteration.
   let pendingScanReason = null; // "segment"|"recover"|"no-path"|...
 
-  function setStatus(text) {
-    // Display-only: when not armed, keep the AUTO status simple and consistent.
+  let lastAutoStatusRaw = "idle";
+
+  function isArmed_() {
     const authEl = document.getElementById("authStatus");
     const authText = authEl ? String(authEl.textContent || "").trim().toUpperCase() : "";
-    const armed = authText.startsWith("ARMED");
-    const out = armed ? String(text || "") : "Not armed";
+    return authText.startsWith("ARMED");
+  }
+
+  function refreshAutoStatusDisplay_() {
+    const out = isArmed_() ? String(lastAutoStatusRaw || "") : "Not armed";
     elStatus.textContent = out;
     if (window.StatusBus) window.StatusBus.set("autonomy", { state: out });
+  }
+
+  function setStatus(text) {
+    lastAutoStatusRaw = String(text || "");
+    refreshAutoStatusDisplay_();
   }
 
   function mappingApi() {
@@ -919,4 +928,14 @@ if (!elStart || !elStop || !elStatus) {
   });
 
   setStatus("idle");
+
+  // If auth state flips (DISARMED -> ARMED), refresh display-only status text
+  // without changing any autonomy behavior.
+  try {
+    const authEl = document.getElementById("authStatus");
+    if (authEl && typeof MutationObserver === "function") {
+      const mo = new MutationObserver(() => refreshAutoStatusDisplay_());
+      mo.observe(authEl, { subtree: true, characterData: true, childList: true });
+    }
+  } catch {}
 }

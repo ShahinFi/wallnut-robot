@@ -99,6 +99,18 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     elStatus.textContent = formatMapStatus_(dbg.lastStatusRaw);
   }
 
+  // If auth state flips (DISARMED -> ARMED), refresh display-only map status
+  // without changing mapping behavior.
+  try {
+    const authEl = document.getElementById("authStatus");
+    if (authEl && typeof MutationObserver === "function") {
+      const mo = new MutationObserver(() => {
+        elStatus.textContent = formatMapStatus_(dbg.lastStatusRaw || "idle");
+      });
+      mo.observe(authEl, { subtree: true, characterData: true, childList: true });
+    }
+  } catch {}
+
   // Single source of truth for all tunables: `data/esp/maze.html` <canvas id="mapCanvas" data-...>.
   // No JS fallbacks for core config (prevents silent drift between files).
   function reqNum_(prop, { min = null, max = null } = {}) {
