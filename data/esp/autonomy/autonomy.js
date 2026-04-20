@@ -44,8 +44,13 @@ if (!elStart || !elStop || !elStatus) {
   let pendingScanReason = null; // "segment"|"recover"|"no-path"|...
 
   function setStatus(text) {
-    elStatus.textContent = String(text || "");
-    if (window.StatusBus) window.StatusBus.set("autonomy", { state: String(text || "") });
+    // Display-only: when not armed, keep the AUTO status simple and consistent.
+    const authEl = document.getElementById("authStatus");
+    const authText = authEl ? String(authEl.textContent || "").trim().toUpperCase() : "";
+    const armed = authText.startsWith("ARMED");
+    const out = armed ? String(text || "") : "Not armed";
+    elStatus.textContent = out;
+    if (window.StatusBus) window.StatusBus.set("autonomy", { state: out });
   }
 
   function mappingApi() {

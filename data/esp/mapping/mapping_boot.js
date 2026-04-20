@@ -25,10 +25,78 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     lastSeq: 0,
     lastEvent: "none",
     pollErrors: 0,
+    lastStatusRaw: "",
   };
 
+  // Avoid TDZ issues: status formatter can read from this handle once the state
+  // object is initialized (later in this file).
+  let st = null;
+
+  function fmtDir_(d) {
+    return d === "-" ? "-" : "+";
+  }
+
+  function fmtPoseLock_(locked) {
+    return locked ? "pose locked" : "pose unlocked";
+  }
+
+  function formatMapStatus_(raw) {
+    let s = String(raw || "").trim();
+    if (!s) s = "idle";
+
+    // Strip any accidental debug suffixes like "| build=..." from older versions.
+    const bar = s.indexOf("|");
+    if (bar >= 0) s = s.substring(0, bar).trim();
+
+    const u = s.toUpperCase();
+    if (u.startsWith("CONFIG ERROR:")) return s;
+
+    // Match the rest of the UI: when not armed, keep the mapping status simple.
+    // Display-only (does not affect scan/matching behavior).
+    const authEl = document.getElementById("authStatus");
+    const authText = authEl ? String(authEl.textContent || "").trim().toUpperCase() : "";
+    const armed = authText.startsWith("ARMED");
+    if (!armed) return "Not armed";
+    if (u.includes("NOT ARMED")) return "Not armed";
+
+    const scanActive = !!st?.scanActive;
+    const scanDir = fmtDir_(st?.scanDir);
+    const nextDir = fmtDir_(st?.nextScanDir);
+    const poseLocked = !!st?.poseLocked;
+
+    if (scanActive) return `Scanning dir ${scanDir}`;
+
+    // Terminal scan outcomes (humanize).
+    if (u.startsWith("SCAN TIMEOUT")) return `Scan timeout (dir ${scanDir})`;
+    if (u.startsWith("SCAN CANCEL")) return `Scan cancelled (dir ${scanDir}, next ${nextDir})`;
+    if (u.startsWith("SCAN START FAILED")) return "Scan start failed";
+    if (u.startsWith("STARTING ")) return `Starting scan ${scanDir}…`;
+    if (u.startsWith("SCANNING ")) return `Scanning dir ${scanDir}`;
+
+    // Scan done variants.
+    if (u.startsWith("POSE NOT LOCKED")) return `Scan done (${fmtPoseLock_(false)}, next ${nextDir})`;
+    if (u.startsWith("POSE:")) {
+      // Keep the useful part (x/y/h) but remove score/noise, and add next dir.
+      // Example input: "pose: x=12.3 y=45.6 h=78.9 score=0.123"
+      const m = s.match(/x=([0-9.+-]+)\\s+y=([0-9.+-]+)\\s+h=([0-9.+-]+)/i);
+      if (m) return `Scan done (x=${m[1]} y=${m[2]} h=${m[3]}°, next ${nextDir})`;
+      return `Scan done (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
+    }
+    if (u.startsWith("SCAN DONE")) return `Scan done (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
+
+    if (u.startsWith("CLEARED")) return `Map cleared (${fmtPoseLock_(false)})`;
+
+    if (u === "IDLE") {
+      return `Idle (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
+    }
+
+    // Default: keep it short and append lock/next context.
+    return `${s} (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
+  }
+
   function setStatus(t) {
-    elStatus.textContent = `${t} | build=${BUILD} http=${dbg.lastHttp} seq=${dbg.lastSeq} evt=${dbg.lastEvent}`;
+    dbg.lastStatusRaw = String(t || "").trim();
+    elStatus.textContent = formatMapStatus_(dbg.lastStatusRaw);
   }
 
   // Single source of truth for all tunables: `data/esp/maze.html` <canvas id="mapCanvas" data-...>.
@@ -177,6 +245,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     // - subsequent scans alternate on DONE
     nextScanDir: "+",
   };
+  st = state;
 
   function currentPose() {
     // Pose contract:

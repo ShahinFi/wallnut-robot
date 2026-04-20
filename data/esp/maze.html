@@ -19,116 +19,33 @@
   </head>
   <body class="page-maze">
     <div class="app">
-      <header class="top">
-        <div>
+      <header class="top maze-topbar">
+        <div class="maze-topbar-left">
           <div class="tag">AUTONOMOUS ROBOT CONTROL</div>
           <h1>MAZE SOLVER</h1>
-          <div class="sub">start run & monitor sensors</div>
+        </div>
+        <div class="maze-topbar-mid">
+          <div class="mini-label">AUTO</div>
+          <div id="autoStatus">idle</div>
+        </div>
+        <div class="maze-topbar-right">
+          <button class="button button-secondary button-small" onclick="window.location.href='/'">DASH</button>
         </div>
       </header>
 
-      <main class="grid maze-grid">
-        <section class="panel maze-control">
-          <h2>Maze Control</h2>
-          <div class="auth-panel">
-            <div class="mini-label">PASSCODE</div>
-            <div class="auth-row">
-              <input
-                id="passcodeInput"
-                class="auth-input"
-                type="password"
-                inputmode="numeric"
-                autocomplete="off"
-                placeholder="Enter passcode"
-              />
-              <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
-              <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
-            </div>
-            <div id="authStatus" class="auth-status">DISARMED</div>
-            <div id="linkStatus" class="auth-status">LINK: --</div>
-          </div>
-          <div class="maze-actions">
-            <button class="button button-primary" data-requires-arm="1" onclick="startMazeSolver()">START MAZE SOLVER</button>
-            <button class="button button-secondary" onclick="window.location.href='/'">BACK TO DASHBOARD</button>
-          </div>
-
-          <h2>Autonomy</h2>
-          <div class="maze-actions">
-            <button class="button button-primary" data-requires-arm="1" id="autoStart">AUTO START</button>
-            <button class="button button-outline" id="autoStop">STOP</button>
-            <div class="readout readout-compact">
-              <div class="mini-label">AUTO</div>
-              <div id="autoStatus">idle</div>
-            </div>
-          </div>
-          <pre id="debugStatus" class="debug-status">net=--</pre>
-          <details class="debug-log">
-            <summary>Debug log</summary>
-            <pre id="debugLog" class="debug-status">disabled</pre>
-          </details>
-
-          <h2>Encoder Calibration</h2>
-          <div class="maze-actions">
-            <button class="button button-secondary" data-requires-arm="1" onclick="startEncoderCalibration()">RUN ENCODER CALIBRATION</button>
-            <div class="readout readout-compact">
-              <div class="mini-label">MM / PULSE</div>
-              <div id="encCalValue">--</div>
-            </div>
-          </div>
-
-          <h2>Turret Calibration</h2>
-          <div class="maze-actions turret-actions">
-            <div class="turret-btn-grid">
-              <button class="button button-secondary" data-requires-arm="1" onclick="startTurretCalibration()">START (TURN 360)</button>
-              <button class="button button-secondary" data-requires-arm="1" onclick="finishTurretCalibration()">DONE</button>
-              <button class="button button-outline turret-zero" data-requires-arm="1" onclick="setTurretZero()">SET ZERO</button>
-            </div>
-            <div class="readout readout-compact">
-              <div class="mini-label">TICKS / REV</div>
-              <div id="turretCalValue">--</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel sensor maze-lidar">
-          <h2>Lidar</h2>
-          <div class="readout">
-            <div class="mini-label">DISTANCE</div>
-            <div id="lidarValue">-- cm</div>
-            <div id="lidarWarning" class="warning hidden">Warning!</div>
-          </div>
-        </section>
-
-        <section class="panel sensor maze-compass">
-          <h2>Compass</h2>
-          <div class="readout">
-            <div class="mini-label">HEADING</div>
-            <div id="compassWebValue">--</div>
-          </div>
-        </section>
-
-        <section class="panel sensor maze-color">
-          <h2>Color Sensor</h2>
-          <div class="readout">
-            <div class="mini-label">RGB</div>
-            <div id="colorValue">--</div>
-            <div id="colorSwatch" class="color-swatch"></div>
-          </div>
-        </section>
-
-        <section class="panel maze-map">
+      <main class="maze2">
+        <section class="panel maze2-map">
           <div class="map-head">
             <div>
-              <h2>Mapping</h2>
-              <div class="sub">live scan + endpoint map (browser-side)</div>
+              <h2>Map</h2>
+              <div class="sub">Live map • Scan matching</div>
             </div>
-            <div class="map-actions">
-              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanPlus">SCAN +</button>
-              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanMinus">SCAN -</button>
-              <button class="button button-outline button-small" id="mapClear">CLEAR</button>
+            <div class="map-head-right">
+              <div class="mini-label">STATUS</div>
+              <div id="mapStatus" class="status-pill">idle</div>
             </div>
           </div>
-          <div class="map-canvas-wrap">
+          <div class="map-viewport">
             <canvas
               id="mapCanvas"
               width="760"
@@ -158,11 +75,100 @@
               data-update-occ-delta="10"
             ></canvas>
           </div>
-          <div class="map-foot">
-            <div class="mini-label">STATUS</div>
-            <div id="mapStatus">idle</div>
+        </section>
+
+        <div class="maze2-stack">
+        <section class="panel maze2-run">
+          <div class="deck-head">
+            <div class="deck-title">Run</div>
+          </div>
+          <div class="deck-body">
+            <div class="auth-row">
+              <input
+                id="passcodeInput"
+                class="auth-input"
+                type="password"
+                inputmode="numeric"
+                autocomplete="off"
+                placeholder="1234"
+              />
+              <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
+              <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+            </div>
+            <div class="run-actions">
+              <button class="button button-primary button-small" data-requires-arm="1" id="autoStart">AUTO START</button>
+              <button class="button button-outline button-small" id="autoStop">STOP</button>
+            </div>
+            <div class="run-meta">
+              <div id="authStatus" class="auth-status">DISARMED</div>
+              <div id="linkStatus" class="auth-status">LINK: --</div>
+            </div>
           </div>
         </section>
+
+        <section class="panel maze2-sensors">
+          <div class="deck-head">
+            <div class="deck-title">Sensors</div>
+          </div>
+          <div class="deck-body">
+            <div class="telemetry">
+              <div class="tele-item">
+                <div class="mini-label">LIDAR</div>
+                <div id="lidarValue">-- cm</div>
+                <div id="lidarWarning" class="warning hidden">Warning!</div>
+              </div>
+              <div class="tele-item">
+                <div class="mini-label">COMPASS</div>
+                <div id="compassWebValue">--</div>
+              </div>
+              <div class="tele-item tele-color">
+                <div class="mini-label">RGB</div>
+                <div id="colorValue">--</div>
+                <div id="colorSwatch" class="color-swatch"></div>
+              </div>
+            </div>
+            <div class="sensor-status">
+              <div class="mini-label">STATUS</div>
+              <pre id="debugStatus" class="debug-status debug-status-compact">net=--</pre>
+              <details class="debug-log">
+                <summary>Logs</summary>
+                <pre id="debugLog" class="debug-status debug-status-compact">disabled</pre>
+              </details>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel maze2-tools">
+          <div class="deck-head">
+            <div class="deck-title">Tools</div>
+          </div>
+          <div class="deck-body">
+            <div class="tool-row">
+              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanPlus">SCAN +</button>
+              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanMinus">SCAN -</button>
+              <button class="button button-outline button-small" id="mapClear">CLEAR</button>
+            </div>
+            <div class="tool-row tool-wide">
+              <button class="button button-secondary button-small" data-requires-arm="1" onclick="startEncoderCalibration()">ENC CAL</button>
+              <div class="readout readout-compact readout-inline">
+                <div class="mini-label">MM/PULSE</div>
+                <div id="encCalValue">--</div>
+              </div>
+            </div>
+            <div class="tool-row tool-wide">
+              <div class="turret-btn-grid">
+                <button class="button button-secondary button-small" data-requires-arm="1" onclick="startTurretCalibration()">TUR START</button>
+                <button class="button button-secondary button-small" data-requires-arm="1" onclick="finishTurretCalibration()">TUR DONE</button>
+                <button class="button button-outline button-small turret-zero" data-requires-arm="1" onclick="setTurretZero()">TUR ZERO</button>
+              </div>
+              <div class="readout readout-compact readout-inline">
+                <div class="mini-label">TICKS/REV</div>
+                <div id="turretCalValue">--</div>
+              </div>
+            </div>
+          </div>
+        </section>
+        </div>
       </main>
     </div>
   </body>

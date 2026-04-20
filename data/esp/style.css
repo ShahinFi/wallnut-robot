@@ -52,21 +52,15 @@ body {
 }
 body::-webkit-scrollbar { width: 0; height: 0; } /* WebKit: hide page scrollbars */
 
-/* Maze page: allow normal page scroll so the mapping panel is always reachable.
-   This avoids nested scroll containers on mobile/trackpads. */
+/* Maze page: fixed one-screen dashboard (no page scroll). */
 body.page-maze {
-  height: auto;
-  overflow-y: auto;
+  height: 100dvh;
+  min-height: 100svh;
+  overflow: hidden;
 }
 body.page-maze .app {
-  min-height: 0;
-  height: auto;
-}
-body.page-maze .grid {
-  overflow: visible;
-}
-body.page-maze .maze-control {
-  overflow: visible;
+  height: 100dvh;
+  min-height: 100svh;
 }
 
 .app {
@@ -467,19 +461,23 @@ button:disabled,
   }
 
   .maze-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "control lidar"
-      "control compass"
-      "control color"
-      "map map";
-    grid-template-rows: repeat(4, minmax(0, 1fr));
+      "map"
+      "side";
+    /* Keep map visible, and let the sidebar take remaining height and scroll. */
+    grid-template-rows: minmax(260px, 55vh) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 680px) {
   body {
     overflow-y: auto; /* allow natural page scroll on small screens */
+  }
+  body.page-maze {
+    height: 100dvh;
+    min-height: 100svh;
+    overflow: hidden;
   }
 
   .app {
@@ -523,17 +521,9 @@ button:disabled,
   .maze-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "control"
-      "lidar"
-      "compass"
-      "color"
-      "map";
-    grid-template-rows: none;
-  }
-
-  /* Avoid nested scrolling on small screens */
-  .maze-control {
-    overflow: visible;
+      "map"
+      "side";
+    grid-template-rows: minmax(240px, 52vh) minmax(0, 1fr);
   }
 }
 
@@ -615,26 +605,243 @@ button:disabled,
 }
 
 /* Maze page layout */
-.maze-grid {
-  grid-template-columns: 1.2fr 1fr;
-  grid-template-areas:
-    "control lidar"
-    "control compass"
-    "control color"
-    "map map";
-  /* Let the control panel grow without spilling outside its border; the outer grid scrolls (scrollbars hidden). */
-  grid-template-rows: repeat(4, auto);
-  align-content: start;
+/* /maze ground-up dashboard layout (isolated from .grid/.maze-grid rules) */
+body.page-maze .maze-topbar {
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+body.page-maze .maze-topbar-left {
+  min-width: 0;
+}
+body.page-maze .maze-topbar-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+body.page-maze .maze-topbar-mid #autoStatus {
+  font-weight: 900;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+body.page-maze .maze-topbar-right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.maze-control { grid-area: control; }
-.maze-lidar { grid-area: lidar; }
-.maze-compass { grid-area: compass; }
-.maze-color { grid-area: color; }
-.maze-map { grid-area: map; }
+body.page-maze h1 {
+  font-size: clamp(18px, 2.8vw, 30px);
+}
 
-.maze-map {
+body.page-maze .tag {
+  margin-bottom: 4px;
+}
+
+body.page-maze .maze2 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "run map sensors"
+    "tools map sensors";
+}
+
+body.page-maze .maze2 > .panel {
   min-width: 0;
+  min-height: 0;
+  padding: 12px;
+}
+
+body.page-maze .maze2-run { grid-area: run; }
+body.page-maze .maze2-map { grid-area: map; }
+body.page-maze .maze2-sensors { grid-area: sensors; }
+body.page-maze .maze2-tools { grid-area: tools; }
+
+/* Wrapper that becomes a scrollable stack on small screens, but is layout-neutral on desktop. */
+body.page-maze .maze2-stack {
+  display: contents;
+}
+
+body.page-maze .deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  padding-bottom: 8px;
+}
+
+body.page-maze .deck-title {
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+body.page-maze .deck-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+body.page-maze .run-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+body.page-maze .run-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+body.page-maze .maze2-map {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+body.page-maze .map-viewport {
+  margin-top: 8px;
+  border: 1px solid rgba(203,215,255,.14);
+  border-radius: 14px;
+  overflow: hidden;
+  background: radial-gradient(1200px 500px at 20% 0%, rgba(88,243,255,.12), transparent 55%),
+              radial-gradient(900px 600px at 90% 100%, rgba(255,95,135,.10), transparent 55%),
+              rgba(7,3,15,.35);
+  padding: 8px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.page-maze .maze2-map #mapCanvas {
+  max-width: 100%;
+  max-height: 100%;
+  width: 100%;
+  height: auto;
+}
+
+body.page-maze .map-head-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.page-maze .status-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.18);
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: .06em;
+  font-size: 12px;
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.page-maze .telemetry {
+  grid-template-columns: 1fr;
+}
+
+body.page-maze .sensor-status {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+body.page-maze #lidarValue {
+  font-size: clamp(18px, 2.2vw, 26px);
+}
+body.page-maze #compassWebValue {
+  font-size: clamp(16px, 2.0vw, 22px);
+}
+body.page-maze #colorValue {
+  font-size: 15px;
+}
+body.page-maze .color-swatch {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+body.page-maze .maze2-tools .tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+body.page-maze .maze2-tools .tool-wide {
+  flex-direction: column;
+  align-items: stretch;
+}
+body.page-maze .maze2-tools .readout-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+body.page-maze .maze2-tools .debug-status-compact {
+  max-height: 160px;
+}
+body.page-maze .maze2-tools .debug-log pre {
+  max-height: 220px;
+}
+
+@media (max-width: 980px) {
+  body.page-maze .maze2 {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "map"
+      "stack";
+    grid-template-rows: minmax(240px, 46vh) minmax(0, 1fr);
+  }
+  body.page-maze .maze2-map { grid-area: map; }
+  body.page-maze .maze2-stack {
+    grid-area: stack;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  body.page-maze .maze2-stack::-webkit-scrollbar { width: 0; height: 0; }
+  body.page-maze .telemetry {
+    grid-template-columns: 1fr;
+  }
+  body.page-maze .tele-color {
+    grid-column: auto;
+  }
 }
 
 .map-head {
@@ -642,13 +849,6 @@ button:disabled,
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-}
-
-.map-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
 }
 
 .map-canvas-wrap {
@@ -659,16 +859,20 @@ button:disabled,
   background: radial-gradient(1200px 500px at 20% 0%, rgba(88,243,255,.12), transparent 55%),
               radial-gradient(900px 600px at 90% 100%, rgba(255,95,135,.10), transparent 55%),
               rgba(7,3,15,.35);
-  /* Prevent the map from feeling "too large" on laptop screens. */
-  max-height: 520px;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 8px;
 }
 
 #mapCanvas {
   display: block;
+  max-width: 100%;
+  max-height: 100%;
   width: 100%;
-  height: auto;
-  /* Keep a compact, readable map panel without forcing huge vertical space. */
-  max-height: 520px;
+  height: 100%;
+  object-fit: contain;
 }
 
 .map-foot {
@@ -680,23 +884,298 @@ button:disabled,
   min-width: 0;
 }
 
-.maze-actions {
-  display: grid;
-  grid-template-columns: 1fr;
+/* Compact sidebar */
+.maze-side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  margin-bottom: 14px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.maze-side::-webkit-scrollbar { width: 0; height: 0; }
+
+.side-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.page-maze .top {
+  padding: 12px 14px;
+}
+.page-maze h1 {
+  font-size: clamp(20px, 3.2vw, 34px);
+}
+.page-maze .sub {
+  font-size: 11px;
+}
+
+.page-maze h2 {
+  margin-bottom: 8px;
+}
+
+.page-maze .panel {
+  padding: 12px;
+}
+
+.page-maze .button {
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  letter-spacing: .14em;
+}
+
+.auth-panel-compact {
+  margin-bottom: 0;
+  padding: 10px;
+}
+
+.auth-slim {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.side-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.readout-inline {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.telemetry {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   min-width: 0;
 }
 
-.maze-control .maze-actions + h2 {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+.tele-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  padding: 10px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
 }
 
-.maze-actions .button {
+.tele-color {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.page-maze #lidarValue,
+.page-maze #compassWebValue,
+.page-maze #colorValue {
+  font-weight: 900;
+  text-align: center;
+}
+
+.page-maze #lidarValue {
+  font-size: clamp(20px, 2.6vw, 28px);
+}
+.page-maze #compassWebValue {
+  font-size: clamp(18px, 2.2vw, 24px);
+}
+.page-maze #colorValue {
+  font-size: 16px;
+}
+
+.page-maze .color-swatch {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.debug-status-compact {
+  margin-top: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: 1.25;
+  max-height: 140px;
+  overflow: auto;
+}
+
+/* Decks (right column) */
+.deck {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  overflow: hidden;
+  min-width: 0;
+}
+
+.deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+.deck-title {
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.deck-kv {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.deck-body {
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.run-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.run-now {
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.run-now #autoStatus {
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: lowercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.tool-wide {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.tool-wide .readout-inline {
   width: 100%;
-  min-height: 56px;
+}
+
+.deck-logs .debug-status-compact {
+  max-height: 180px;
+}
+
+.deck-logs details.debug-log > summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 0 0;
+}
+
+.deck-logs details.debug-log > summary::-webkit-details-marker { display: none; }
+
+.deck-logs details.debug-log[open] > summary {
+  padding-bottom: 6px;
+}
+
+.deck-logs details.debug-log pre {
+  max-height: 220px;
+}
+
+/* Keep the last deck anchored low when there's room, but allow scrolling when not. */
+.deck-logs {
+  margin-top: auto;
+}
+
+/* Override old "advanced drawer" styles (no longer used) */
+.advanced {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  overflow: hidden;
+}
+
+.advanced > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  list-style: none;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.advanced > summary::-webkit-details-marker { display: none; }
+
+.advanced-body {
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 12px;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.adv-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.adv-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 
 /* Turret calibration button layout */
@@ -726,10 +1205,11 @@ button:disabled,
   }
 }
 
-/* Contain long control content within panel border (scrollbar hidden) */
-.maze-control {
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+@media (max-width: 680px) {
+  .telemetry {
+    grid-template-columns: 1fr;
+  }
+  .tele-color {
+    grid-column: auto;
+  }
 }
-.maze-control::-webkit-scrollbar { width: 0; height: 0; }
