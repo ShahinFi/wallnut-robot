@@ -48,8 +48,9 @@ String turretCalPacket = "TURCAL:--";
 String odomPacket = "ODOM:0.0,0.0";
 
 ESP8266WebServer server(80);
-static String serialLineBuf;
 static const size_t kMaxSerialLineLen = 128;
+static char gSerialLine[kMaxSerialLineLen + 1];
+static uint8_t gSerialLineLen = 0;
 
 // ====== Option 1: Passcode arming (UART) ======
 enum class AuthState : uint8_t { Disarmed, Armed, Locked };
@@ -96,6 +97,51 @@ void pollSerialNonBlocking();
 void serveFile(const char* path, const char* contentType);
 bool tryServeStaticUri(const String& uri);
 const char* contentTypeForPath(const String& path);
+
+static bool parseDecFloatSpan_(const char* s, const char* e, float& out) {
+  // Parse a decimal float in [s,e) without allocating or requiring NUL termination.
+  // Supports optional +/- sign and a fractional part after '.'.
+  while (s < e && (*s == ' ' || *s == '\t')) s++;
+  if (s >= e) return false;
+
+  bool neg = false;
+  if (*s == '-') {
+    neg = true;
+    s++;
+  } else if (*s == '+') {
+    s++;
+  }
+
+  bool any = false;
+  uint32_t ip = 0;
+  while (s < e && *s >= '0' && *s <= '9') {
+    any = true;
+    ip = ip * 10u + (uint32_t)(*s - '0');
+    s++;
+  }
+
+  uint32_t fp = 0;
+  uint32_t scale = 1;
+  if (s < e && *s == '.') {
+    s++;
+    while (s < e && *s >= '0' && *s <= '9') {
+      any = true;
+      // Cap fractional precision to keep math bounded.
+      if (scale < 1000000u) {
+        fp = fp * 10u + (uint32_t)(*s - '0');
+        scale *= 10u;
+      }
+      s++;
+    }
+  }
+
+  if (!any) return false;
+  float v = (float)ip;
+  if (scale > 1u) v += (float)fp / (float)scale;
+  if (neg) v = -v;
+  out = v;
+  return isfinite(out);
+}
 
 // ====== Event polling fallback (robust) ======
 // NOTE:
@@ -494,22 +540,38 @@ void processSerialLine(const String& data) {
     // - TSCAN:DONE
     // - TSCAN:CANCEL
     // - TSCAN:<angleDeg>,<distCm>
-    const String payload = data.substring(6); // after "TSCAN:"
-    if (payload.startsWith("BEGIN,")) {
-      const int dir = payload.indexOf('-') >= 0 ? -1 : 1;
+    const char* line = data.c_str();
+    const int len = data.length();
+    if (len <= 6) return;
+
+    const char* payload = line + 6;         // after "TSCAN:"
+    const char* end = line + len;           // one past end
+
+    // BEGIN/DONE/CANCEL are short and should not allocate.
+    if ((end - payload) >= 6 && strncmp(payload, "BEGIN,", 6) == 0) {
+      const char* p = payload + 6;
+      const int dir = (memchr(p, '-', (size_t)(end - p)) != nullptr) ? -1 : 1;
       pushScanBegin_(dir);
-    } else if (payload.startsWith("DONE")) {
-      pushScanDone_();
-    } else if (payload.startsWith("CANCEL")) {
-      pushScanCancel_();
-    } else {
-      const int comma = payload.indexOf(',');
-      if (comma > 0) {
-        const float a = payload.substring(0, comma).toFloat();
-        const float d = payload.substring(comma + 1).toFloat();
-        pushScanSample_(a, d);
-      }
+      return;
     }
+    if ((end - payload) >= 4 && strncmp(payload, "DONE", 4) == 0) {
+      pushScanDone_();
+      return;
+    }
+    if ((end - payload) >= 6 && strncmp(payload, "CANCEL", 6) == 0) {
+      pushScanCancel_();
+      return;
+    }
+
+    // Sample: "<angleDeg>,<distCm>"
+    const void* cpos = memchr(payload, ',', (size_t)(end - payload));
+    if (!cpos) return;
+    const char* comma = (const char*)cpos;
+    float a = NAN;
+    float d = NAN;
+    if (!parseDecFloatSpan_(payload, comma, a)) return;
+    if (!parseDecFloatSpan_(comma + 1, end, d)) return;
+    pushScanSample_(a, d);
   }
 
   // Push reflex / command events into the alerts ring.
@@ -520,18 +582,19 @@ void pollSerialNonBlocking() {
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
     if (c == '\n' || c == '\r') {
-      if (serialLineBuf.length() > 0) {
-        processSerialLine(serialLineBuf);
-        serialLineBuf = "";
+      if (gSerialLineLen > 0) {
+        gSerialLine[gSerialLineLen] = '\0';
+        processSerialLine(String(gSerialLine));
+        gSerialLineLen = 0;
       }
       continue;
     }
 
-    if (serialLineBuf.length() >= kMaxSerialLineLen) {
-      serialLineBuf = "";
+    if (gSerialLineLen >= kMaxSerialLineLen) {
+      gSerialLineLen = 0;
       continue;
     }
-    serialLineBuf += c;
+    gSerialLine[gSerialLineLen++] = c;
   }
 }
 
@@ -855,10 +918,16 @@ void handleEvents() {
     return;
   }
 
-  // seq == index+1
-  for (uint16_t i = 0; i < gScanCount; ++i) {
+  // seq == index+1, so we can start directly from `from` without scanning old entries.
+  // (This avoids long CPU loops that can starve WiFi / trigger WDT resets on ESP8266.)
+  if (from >= (uint32_t)gScanCount) {
+    server.send(200, "text/plain", "");
+    return;
+  }
+
+  const uint16_t startIdx = (from > 0) ? (uint16_t)from : 0u; // from=N => start at seq N+1 => index N
+  for (uint16_t i = startIdx; i < gScanCount; ++i) {
     const uint32_t seq = (uint32_t)i + 1u;
-    if (seq <= from) continue;
 
     out += String(seq);
     out += "|";
@@ -887,6 +956,9 @@ void handleEvents() {
 
     // Avoid huge responses; client will keep polling with updated "from".
     if (out.length() >= 1800) break;
+
+    // Keep ESP8266 WiFi/OS happy during large scans.
+    if ((i & 0x3Fu) == 0) yield();
   }
 
   server.send(200, "text/plain", out);
@@ -903,6 +975,7 @@ void handleAlerts() {
   // Emit alerts sorted by seq, like the original events ring did.
   uint32_t lastEmitted = from;
   for (;;) {
+    yield();
     uint32_t nextSeq = 0xFFFFFFFFu;
     uint16_t nextIdx = 0;
     bool found = false;
