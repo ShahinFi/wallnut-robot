@@ -41,6 +41,8 @@ String lidarData = "0 cm";
 String lidarPacket = "LIDAR:0,SEQ:0,T:0";
 String compassData = "0,N";
 String rgbPacket = "RGB:0,0,0";
+String rgbClassPacket = "CLASS:0";  // 0=NONE, 1..4 = stored color index
+String rgbRefsPacket = "REFS:--";   // REFS:r,g,b;... (4 refs) or "--"
 String encCalPacket = "ENC_CAL:--";
 String turretCalPacket = "TURCAL:--";
 String odomPacket = "ODOM:0.0,0.0";
@@ -67,6 +69,8 @@ void handleCompass();
 void handleLidar();
 void handleCompassData();
 void handleRgb();
+void handleRgbClass();
+void handleRgbRefs();
 void handleMaze();
 void handleMazeCommand();
 void handleArm();
@@ -74,9 +78,8 @@ void handleDisarm();
 void handleAuth();
 void handleEncCal();
 void handleTurretCal();
-void handleTurretCalStart();
-void handleTurretCalDone();
 void handleTurretZero();
+void handleTurretTpr();
 void handleTurretScanPlus();
 void handleTurretScanMinus();
 void handleTurretScanCancel();
@@ -371,14 +374,17 @@ void setup() {
   server.on("/lidar", handleLidar);
   server.on("/compassdata", handleCompassData);
   server.on("/rgb", handleRgb);
+  server.on("/rgb_class", handleRgbClass);
+  server.on("/rgb_refs", handleRgbRefs);
   server.on("/arm", HTTP_POST, handleArm);
   server.on("/disarm", HTTP_POST, handleDisarm);
   server.on("/auth", handleAuth);
   server.on("/enc_cal", handleEncCal);
   server.on("/turret_cal", handleTurretCal);
-  server.on("/turret_cal_start", HTTP_POST, handleTurretCalStart);
-  server.on("/turret_cal_done", HTTP_POST, handleTurretCalDone);
   server.on("/turret_zero", HTTP_POST, handleTurretZero);
+  // Accept both POST and GET for robustness (UI uses POST; GET is handy for quick manual testing).
+  server.on("/turret_tpr", HTTP_POST, handleTurretTpr);
+  server.on("/turret_tpr", HTTP_GET, handleTurretTpr);
   server.on("/scan_plus", HTTP_POST, handleTurretScanPlus);
   server.on("/scan_minus", HTTP_POST, handleTurretScanMinus);
   server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel);
@@ -441,6 +447,13 @@ void processSerialLine(const String& data) {
     compassData = data.substring(8);
   } else if (data.startsWith("RGB:")) {
     rgbPacket = data;
+  } else if (data.startsWith("RGBCLS:")) {
+    // Expected: RGBCLS:<idx> where idx is 0..4 (0=NONE).
+    const int v = data.substring(7).toInt();
+    if (v >= 0 && v <= 4) rgbClassPacket = String("CLASS:") + String(v);
+  } else if (data.startsWith("RGBREF:")) {
+    // Expected: RGBREF:r,g,b;r,g,b;r,g,b;r,g,b
+    rgbRefsPacket = String("REFS:") + data.substring(7);
   } else if (data.startsWith("ENC_CAL:")) {
     encCalPacket = data;
   } else if (data.startsWith("TURCAL:")) {
@@ -587,6 +600,22 @@ void handleRgb() {
   server.send(200, "text/plain", rgbPacket);
 }
 
+void handleRgbClass() {
+  if (!isArmed()) {
+    server.send(200, "text/plain", "CLASS:0");
+    return;
+  }
+  server.send(200, "text/plain", rgbClassPacket);
+}
+
+void handleRgbRefs() {
+  if (!isArmed()) {
+    server.send(200, "text/plain", "REFS:--");
+    return;
+  }
+  server.send(200, "text/plain", rgbRefsPacket);
+}
+
 void handleEncCal() {
   if (server.method() == HTTP_POST) {
     if (!isArmed()) return rejectNotArmed();
@@ -612,21 +641,30 @@ void handleTurretCal() {
   server.send(200, "text/plain", turretCalPacket);
 }
 
-void handleTurretCalStart() {
-  if (!isArmed()) return rejectNotArmed();
-  Serial.println("TurretCalStart");
-  server.send(200, "text/plain", "STARTED");
-}
-
-void handleTurretCalDone() {
-  if (!isArmed()) return rejectNotArmed();
-  Serial.println("TurretCalDone");
-  server.send(200, "text/plain", "DONE");
-}
-
 void handleTurretZero() {
   if (!isArmed()) return rejectNotArmed();
   Serial.println("TurretZero");
+  server.send(200, "text/plain", "OK");
+}
+
+void handleTurretTpr() {
+  if (!isArmed()) return rejectNotArmed();
+  if (!server.hasArg("pos") || !server.hasArg("neg")) {
+    server.send(400, "text/plain", "MISSING_POSNEG");
+    return;
+  }
+  const uint32_t pos = (uint32_t)server.arg("pos").toInt();
+  const uint32_t neg = (uint32_t)server.arg("neg").toInt();
+  // Keep range aligned with Mega-side sanity checks.
+  if (pos < 10u || pos > 200000u || neg < 10u || neg > 200000u) {
+    server.send(400, "text/plain", "BAD_RANGE");
+    return;
+  }
+  // Forward to Mega as a single line command.
+  Serial.print("TurretTpr:");
+  Serial.print((unsigned long)pos);
+  Serial.print(",");
+  Serial.println((unsigned long)neg);
   server.send(200, "text/plain", "OK");
 }
 

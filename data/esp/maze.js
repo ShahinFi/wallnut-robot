@@ -38,9 +38,6 @@ const CalUiState = Object.freeze({
 });
 
 let encCalUiState = CalUiState.Idle;
-let turretCalUiState = CalUiState.Idle;
-let turretDoneWaitStartMs = 0;
-const kTurretDoneWaitTimeoutMs = 8000;
 
 function setControlsEnabled(enabled) {
   document.querySelectorAll("[data-requires-arm='1']").forEach((el) => {
@@ -65,8 +62,6 @@ function setSensorPlaceholdersLocked(locked) {
   if (turretEl) turretEl.innerText = "--";
   if (locked) {
     encCalUiState = CalUiState.Idle;
-    turretCalUiState = CalUiState.Idle;
-    turretDoneWaitStartMs = 0;
   }
   if (swatchEl) {
     swatchEl.style.backgroundColor = "transparent";
@@ -229,30 +224,24 @@ function startEncoderCalibration() {
     .catch(() => {});
 }
 
-function startTurretCalibration() {
-  sendCommand("/turret_cal_start", { method: "POST" })
-    .then(() => {
-      const el = document.getElementById("turretCalValue");
-      turretCalUiState = CalUiState.Running;
-      turretDoneWaitStartMs = 0;
-      if (el) el.innerText = "CALIBRATING...";
-    })
-    .catch(() => {});
-}
-
-function finishTurretCalibration() {
-  sendCommand("/turret_cal_done", { method: "POST" })
-    .then(() => {
-      const el = document.getElementById("turretCalValue");
-      turretCalUiState = CalUiState.Saving;
-      turretDoneWaitStartMs = Date.now();
-      if (el) el.innerText = "SAVING...";
-    })
-    .catch(() => {});
-}
-
 function setTurretZero() {
   sendCommand("/turret_zero", { method: "POST" }).catch(() => {});
+}
+
+function setTurretTpr() {
+  const posEl = document.getElementById("turretTprPos");
+  const negEl = document.getElementById("turretTprNeg");
+  const pos = posEl ? parseInt(posEl.value, 10) : NaN;
+  const neg = negEl ? parseInt(negEl.value, 10) : NaN;
+  if (!Number.isFinite(pos) || !Number.isFinite(neg) || pos <= 0 || neg <= 0) return;
+  const qs = `pos=${encodeURIComponent(pos)}&neg=${encodeURIComponent(neg)}`;
+  const outEl = document.getElementById("turretCalValue");
+  if (outEl) outEl.innerText = "SETTING...";
+  sendCommand(`/turret_tpr?${qs}`, { method: "POST" }).catch(() => {});
+  // Kick a quicker refresh instead of waiting for the 700ms interval.
+  setTimeout(() => {
+    try { pollTurretCal(); } catch (e) {}
+  }, 250);
 }
 
 // Encoder calibration polling
@@ -305,50 +294,23 @@ async function pollTurretCal() {
     if (text.startsWith("TURCAL:")) {
       const payload = text.substring(7).trim();
       if (payload === "--" || payload.length === 0) {
-        // Not ready yet.
-        if (turretCalUiState !== CalUiState.Running && turretCalUiState !== CalUiState.Saving) {
-          turretCalValueEl.innerText = "--";
-        }
-        return;
-      }
-      if (payload === "CALIBRATING") {
-        // Keep "SAVING..." if user already pressed DONE.
-        if (turretCalUiState !== CalUiState.Saving) {
-          turretCalUiState = CalUiState.Running;
-          turretCalValueEl.innerText = "CALIBRATING...";
-        }
+        turretCalValueEl.innerText = "--";
         return;
       }
       if (payload === "FAIL") {
-        turretCalUiState = CalUiState.Error;
-        turretDoneWaitStartMs = 0;
-        turretCalValueEl.innerText = "FAILED (TRY AGAIN)";
+        turretCalValueEl.innerText = "FAILED";
         return;
       }
       if (payload === "ZEROED") {
-        turretCalUiState = CalUiState.Done;
-        turretDoneWaitStartMs = 0;
         turretCalValueEl.innerText = "ZERO SET";
         return;
       }
 
-      turretCalUiState = CalUiState.Done;
-      turretDoneWaitStartMs = 0;
       turretCalValueEl.innerText = payload;
       return;
     }
     if (text === "--" || text.length === 0) {
-      // While calibrating/saving, "--" just means "no TURCAL packet yet".
-      if (turretCalUiState === CalUiState.Saving && turretDoneWaitStartMs) {
-        const elapsed = Date.now() - turretDoneWaitStartMs;
-        if (elapsed >= kTurretDoneWaitTimeoutMs) {
-          turretCalUiState = CalUiState.Error;
-          turretDoneWaitStartMs = 0;
-          turretCalValueEl.innerText = "NO RESULT (CHECK ROBOT)";
-        }
-      } else if (turretCalUiState !== CalUiState.Running && turretCalUiState !== CalUiState.Saving) {
-        turretCalValueEl.innerText = "--";
-      }
+      turretCalValueEl.innerText = "--";
       return;
     }
     turretCalValueEl.innerText = text;
@@ -420,6 +382,9 @@ pollCompass();
 // RGB polling
 const colorValueEl = document.getElementById("colorValue");
 const colorSwatchEl = document.getElementById("colorSwatch");
+const classValueEl = document.getElementById("classValue");
+const classSwatchEl = document.getElementById("classSwatch");
+let rgbRefs = null; // [{r,g,b}, ...] or null
 async function pollRgb() {
   if (pollingPaused()) return;
   if (requiresArmDisabled()) return;
@@ -448,6 +413,66 @@ async function pollRgb() {
 
 setInterval(pollRgb, 400);
 pollRgb();
+
+async function pollRgbRefs() {
+  if (pollingPaused()) return;
+  if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  try {
+    const res = await fetchWithTimeout("/rgb_refs", { cache: "no-store" });
+    if (!res.ok) return;
+    const text = (await res.text()).trim();
+    if (!text.startsWith("REFS:")) return;
+    const payload = text.substring(5).trim();
+    if (!payload || payload === "--") {
+      rgbRefs = null;
+      return;
+    }
+    const parts = payload.split(";");
+    const out = [];
+    for (const p of parts) {
+      const rgb = p.split(",");
+      if (rgb.length < 3) continue;
+      const r = parseInt(rgb[0], 10);
+      const g = parseInt(rgb[1], 10);
+      const b = parseInt(rgb[2], 10);
+      if ([r, g, b].some((v) => isNaN(v))) continue;
+      out.push({ r, g, b });
+    }
+    rgbRefs = out.length ? out : null;
+  } catch (e) {}
+}
+
+async function pollRgbClass() {
+  if (pollingPaused()) return;
+  if (requiresArmDisabled()) return;
+  if (!netAllowsTelemetry()) return;
+  try {
+    const res = await fetchWithTimeout("/rgb_class", { cache: "no-store" });
+    if (!res.ok) return;
+    const text = (await res.text()).trim();
+    if (!text.startsWith("CLASS:")) return;
+    const v = parseInt(text.substring(6), 10);
+    if (isNaN(v)) return;
+
+    if (classValueEl) classValueEl.innerText = v <= 0 ? "NONE" : `#${v}`;
+    if (classSwatchEl) {
+      if (v > 0 && rgbRefs && rgbRefs[v - 1]) {
+        const c = rgbRefs[v - 1];
+        classSwatchEl.style.backgroundColor = `rgb(${c.r}, ${c.g}, ${c.b})`;
+        classSwatchEl.classList.remove("is-empty");
+      } else {
+        classSwatchEl.style.backgroundColor = "transparent";
+        classSwatchEl.classList.add("is-empty");
+      }
+    }
+  } catch (e) {}
+}
+
+setInterval(pollRgbRefs, 2000);
+pollRgbRefs();
+setInterval(pollRgbClass, 400);
+pollRgbClass();
 
 // Initialize auth gating
 setControlsEnabled(false);

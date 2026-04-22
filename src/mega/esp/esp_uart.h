@@ -12,9 +12,8 @@ struct EspCommand {
     Maze,
     EncCal,
     MapPose,
-    TurretCalStart,
-    TurretCalDone,
     TurretZero,
+    TurretTpr,
     TurretScanPlus,
     TurretScanMinus,
     TurretScanCancel,
@@ -22,6 +21,7 @@ struct EspCommand {
     Disarm
   } type;
   int value;
+  int value2;  // optional second integer payload (used by TurretTpr)
   String text;
 };
 

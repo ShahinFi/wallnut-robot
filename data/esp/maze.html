@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -77,7 +77,6 @@
           </div>
         </section>
 
-        <div class="maze2-stack">
         <section class="panel maze2-run">
           <div class="deck-head">
             <div class="deck-title">Run</div>
@@ -106,68 +105,110 @@
           </div>
         </section>
 
-        <section class="panel maze2-sensors">
-          <div class="deck-head">
-            <div class="deck-title">Sensors</div>
-          </div>
-          <div class="deck-body">
-            <div class="telemetry">
-              <div class="tele-item">
-                <div class="mini-label">LIDAR</div>
-                <div id="lidarValue">-- cm</div>
-                <div id="lidarWarning" class="warning hidden">Warning!</div>
-              </div>
-              <div class="tele-item">
-                <div class="mini-label">COMPASS</div>
-                <div id="compassWebValue">--</div>
-              </div>
-              <div class="tele-item tele-color">
-                <div class="mini-label">RGB</div>
-                <div id="colorValue">--</div>
-                <div id="colorSwatch" class="color-swatch"></div>
+        <div class="maze2-stack">
+        <div class="maze2-sensors">
+          <section class="panel maze2-sensors-panel">
+            <div class="deck-head">
+              <div class="deck-title">Sensors</div>
+            </div>
+            <div class="deck-body">
+              <div class="telemetry">
+                <div class="tele-item">
+                  <div class="mini-label">LIDAR</div>
+                  <div id="lidarValue">-- cm</div>
+                  <div id="lidarWarning" class="warning hidden">Warning!</div>
+                </div>
+                <div class="tele-item">
+                  <div class="mini-label">COMPASS</div>
+                  <div id="compassWebValue">--</div>
+                </div>
+                <div class="tele-item">
+                  <div class="mini-label">COLOR SENSOR</div>
+                  <div class="tele-item tele-color">
+                    <div class="mini-label">RGB</div>
+                    <div id="colorValue">--</div>
+                    <div id="colorSwatch" class="color-swatch"></div>
+                  </div>
+                  <div class="tele-item tele-color">
+                    <div class="mini-label">CLASS</div>
+                    <div id="classValue">--</div>
+                    <div id="classSwatch" class="color-swatch is-empty"></div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="sensor-status">
-              <div class="mini-label">STATUS</div>
-              <pre id="debugStatus" class="debug-status debug-status-compact">net=--</pre>
-              <details class="debug-log">
-                <summary>Logs</summary>
-                <pre id="debugLog" class="debug-status debug-status-compact">disabled</pre>
-              </details>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="panel maze2-tools">
-          <div class="deck-head">
-            <div class="deck-title">Tools</div>
-          </div>
-          <div class="deck-body">
-            <div class="tool-row">
-              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanPlus">SCAN +</button>
-              <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanMinus">SCAN -</button>
-              <button class="button button-outline button-small" id="mapClear">CLEAR</button>
+          <section class="panel maze2-status">
+            <div class="deck-head">
+              <div class="deck-title">Status</div>
             </div>
-            <div class="tool-row tool-wide">
-              <button class="button button-secondary button-small" data-requires-arm="1" onclick="startEncoderCalibration()">ENC CAL</button>
-              <div class="readout readout-compact readout-inline">
-                <div class="mini-label">MM/PULSE</div>
-                <div id="encCalValue">--</div>
+            <div class="deck-body">
+              <div class="sensor-status">
+                <pre id="debugStatus" class="debug-status debug-status-compact">net=--</pre>
+                <details class="debug-log">
+                  <summary>Logs</summary>
+                  <pre id="debugLog" class="debug-status debug-status-compact">disabled</pre>
+                </details>
               </div>
             </div>
-            <div class="tool-row tool-wide">
-              <div class="turret-btn-grid">
-                <button class="button button-secondary button-small" data-requires-arm="1" onclick="startTurretCalibration()">TUR START</button>
-                <button class="button button-secondary button-small" data-requires-arm="1" onclick="finishTurretCalibration()">TUR DONE</button>
-                <button class="button button-outline button-small turret-zero" data-requires-arm="1" onclick="setTurretZero()">TUR ZERO</button>
+          </section>
+        </div>
+
+        <div class="maze2-tools">
+          <section class="panel maze2-turret">
+            <div class="deck-head">
+              <div class="deck-title">Turret</div>
+            </div>
+            <div class="deck-body">
+              <div class="tool-section">
+                <div class="mini-label tool-section-title">SCAN</div>
+                <div class="tool-row tool-row-fill">
+                  <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanPlus">SCAN +</button>
+                  <button class="button button-secondary button-small" data-requires-arm="1" id="mapScanMinus">SCAN -</button>
+                  <button class="button button-outline button-small" id="mapClear">CLEAR</button>
+                </div>
+                <div class="tool-row tool-row-fill">
+                  <button class="button button-outline button-small turret-zero" data-requires-arm="1" onclick="setTurretZero()" title="Set current turret direction as 0° (forward)">SET 0&deg;</button>
+                </div>
               </div>
-              <div class="readout readout-compact readout-inline">
-                <div class="mini-label">TICKS/REV</div>
-                <div id="turretCalValue">--</div>
+
+              <div class="tool-divider"></div>
+
+              <div class="tool-section">
+                <div class="mini-label tool-section-title">CALIBRATION</div>
+                <div class="tool-row tool-wide">
+                  <div class="readout readout-compact readout-inline">
+                    <div class="mini-label">TICKS/REV</div>
+                    <div id="turretCalValue">--</div>
+                  </div>
+                </div>
+                <div class="tool-row tool-wide turret-tpr-row">
+                  <input class="tool-input" data-requires-arm="1" id="turretTprPos" type="number" inputmode="numeric" placeholder="CW ticks/rev" min="10" max="200000" />
+                  <input class="tool-input" data-requires-arm="1" id="turretTprNeg" type="number" inputmode="numeric" placeholder="CCW ticks/rev" min="10" max="200000" />
+                </div>
+                <div class="tool-row tool-row-fill turret-tpr-actions">
+                  <button class="button button-outline button-small" data-requires-arm="1" onclick="setTurretTpr()">SET</button>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section class="panel maze2-encoders">
+            <div class="deck-head">
+              <div class="deck-title">Motor Encoders</div>
+            </div>
+            <div class="deck-body">
+              <div class="tool-row tool-wide">
+                <button class="button button-secondary button-small" data-requires-arm="1" onclick="startEncoderCalibration()">MEASURE MM/PULSE</button>
+                <div class="readout readout-compact readout-inline">
+                  <div class="mini-label">MM/PULSE</div>
+                  <div id="encCalValue">--</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
         </div>
       </main>
     </div>

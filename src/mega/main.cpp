@@ -21,6 +21,7 @@
 #include "telemetry/telemetry.h"
 #include "telemetry/telemetry_test.h"
 #include "color/color_sensor.h"
+#include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
 #include "tasks/mapping/mapping_task.h"
 
@@ -101,6 +102,7 @@ static bool gSeqWasActive = false;
 // - ref[1] => 75% forward PWM
 // - ref[2] => 35% forward PWM
 static float gForwardSpeedScale = 0.50f;
+static int8_t gLastRgbClassSent = -1;  // 0=NONE, 1..kColorCount
 
 static void onButtonIsr() {
   gButtonEdge = true;
@@ -160,56 +162,53 @@ static float clamp_(float v, float lo, float hi) {
   return v;
 }
 
-static float colorDistSqNormalized_(const ColorRgb& a, const ColorRgb& b) {
-  float ar = (float)a.r, ag = (float)a.g, ab = (float)a.b;
-  float br = (float)b.r, bg = (float)b.g, bb = (float)b.b;
-  const float sa = ar + ag + ab;
-  const float sb = br + bg + bb;
-  if (sa > 0.0f) { ar /= sa; ag /= sa; ab /= sa; }
-  if (sb > 0.0f) { br /= sb; bg /= sb; bb /= sb; }
-  const float dr = ar - br;
-  const float dg = ag - bg;
-  const float db = ab - bb;
-  return dr * dr + dg * dg + db * db;
-}
-
 static bool isVirtualRed_(const ColorRgb& live) {
   // Project convention: first saved calibration color is the virtual obstacle (red).
   if (!colorCalTask.hasCalibration()) return false;
   const ColorRgb* refs = colorCalTask.refs();
   if (!refs) return false;
 
-  // Robust comparative classification (nearest prototype):
-  // Decide "red" by being closer to ref[0] than to the other stored references,
-  // not by being within a fixed radius around ref[0]. This avoids ground being
-  // flagged as red when lighting shifts but the *relative* ordering remains.
-  //
-  // Confidence is expressed as a ratio between the best and runner-up distances.
-  // Smaller ratio => more confident.
-  constexpr float kBestOverSecondMax = 0.80f; // tunable; 0.8 means best must be 20% closer than runner-up
+  color::ClassifyConfig cfg;
+  cfg.absMaxDist = 0.18f;
+  cfg.bestOverSecondMax = 0.80f;
+  const color::ClassifyResult r = color::classifyNearest(live, refs, ColorCalibrationTask::kColorCount, cfg);
+  return r.idx == 0;
+}
 
-  float best = INFINITY;
-  float second = INFINITY;
-  int bestIdx = -1;
-
+static void sendRgbRefsToEsp_() {
+  if (!colorCalTask.hasCalibration()) return;
+  const ColorRgb* refs = colorCalTask.refs();
+  if (!refs) return;
+  Serial2.print("RGBREF:");
   for (uint8_t i = 0; i < ColorCalibrationTask::kColorCount; i++) {
-    const float d2 = colorDistSqNormalized_(live, refs[i]);
-    if (!isfinite(d2)) continue;
-    if (d2 < best) {
-      second = best;
-      best = d2;
-      bestIdx = (int)i;
-    } else if (d2 < second) {
-      second = d2;
-    }
+    if (i) Serial2.print(";");
+    Serial2.print((int)refs[i].r);
+    Serial2.print(",");
+    Serial2.print((int)refs[i].g);
+    Serial2.print(",");
+    Serial2.print((int)refs[i].b);
   }
+  Serial2.println();
+}
 
-  if (bestIdx != 0) return false;
-  if (!(isfinite(best) && isfinite(second) && second > 0.0f)) {
-    // If we can't form a runner-up comparison, don't trigger.
-    return false;
-  }
-  return (best / second) <= kBestOverSecondMax;
+static int8_t classifyColorIdx1BasedOrNone_(const ColorRgb& live) {
+  if (!colorCalTask.hasCalibration()) return 0;
+  const ColorRgb* refs = colorCalTask.refs();
+  if (!refs) return 0;
+  color::ClassifyConfig cfg;
+  cfg.absMaxDist = 0.18f;
+  cfg.bestOverSecondMax = 0.80f;
+  const color::ClassifyResult r = color::classifyNearest(live, refs, ColorCalibrationTask::kColorCount, cfg);
+  if (r.idx < 0) return 0;
+  return (int8_t)(r.idx + 1);
+}
+
+static void maybeSendRgbClassToEsp_(const ColorRgb& live, bool liveValid) {
+  const int8_t cls = liveValid ? classifyColorIdx1BasedOrNone_(live) : (int8_t)0;
+  if (cls == gLastRgbClassSent) return;
+  gLastRgbClassSent = cls;
+  Serial2.print("RGBCLS:");
+  Serial2.println((int)cls);
 }
 
 static void maybeLatchForwardSpeedFromColor_(const ColorRgb& live) {
@@ -221,31 +220,16 @@ static void maybeLatchForwardSpeedFromColor_(const ColorRgb& live) {
   const ColorRgb* refs = colorCalTask.refs();
   if (!refs) return;
 
-  constexpr float kBestOverSecondMax = 0.80f; // must win by 20%
   constexpr float kSpeed75 = 0.75f;
   constexpr float kSpeed35 = 0.35f;
 
-  float best = INFINITY;
-  float second = INFINITY;
-  int bestIdx = -1;
+  color::ClassifyConfig cfg;
+  cfg.absMaxDist = 0.18f;
+  cfg.bestOverSecondMax = 0.80f;
+  const color::ClassifyResult r = color::classifyNearest(live, refs, ColorCalibrationTask::kColorCount, cfg);
+  if (!(r.idx == 1 || r.idx == 2)) return;
 
-  for (uint8_t i = 0; i < ColorCalibrationTask::kColorCount; i++) {
-    const float d2 = colorDistSqNormalized_(live, refs[i]);
-    if (!isfinite(d2)) continue;
-    if (d2 < best) {
-      second = best;
-      best = d2;
-      bestIdx = (int)i;
-    } else if (d2 < second) {
-      second = d2;
-    }
-  }
-
-  if (!(bestIdx == 1 || bestIdx == 2)) return;
-  if (!(isfinite(best) && isfinite(second) && second > 0.0f)) return;
-  if ((best / second) > kBestOverSecondMax) return;
-
-  const float desired = (bestIdx == 1) ? kSpeed75 : kSpeed35;
+  const float desired = (r.idx == 1) ? kSpeed75 : kSpeed35;
   if (!isfinite(desired)) return;
   if (fabsf(desired - gForwardSpeedScale) < 0.001f) return;
   gForwardSpeedScale = desired;
@@ -520,6 +504,8 @@ void setup() {
   telemetryInit(200);
   seqExecTask.setForwardSpeedScale(gForwardSpeedScale);
   Serial2.println("AUTH:OFF");
+  // Provide reference swatches to the browser at boot if calibration exists.
+  sendRgbRefsToEsp_();
   // Send last saved encoder calibration (if any) so the web UI can show it.
   const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
   if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
@@ -662,9 +648,11 @@ void loop() {
       lastRgb = rgb;
       lastRgbValid = true;
       telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
+      maybeSendRgbClassToEsp_(rgb, true);
       maybeLatchForwardSpeedFromColor_(rgb);
     } else {
       lastRgbValid = false;
+      maybeSendRgbClassToEsp_(lastRgb, false);
     }
   }
 
@@ -833,30 +821,49 @@ void loop() {
       return;
     }
 
-    if (espCmd.type == EspCommand::Type::TurretCalStart) {
-      turretEncCal.start(turretMotor.ticksAbs());
-      Serial.println("Turret cal start");
-      Serial2.println("TURCAL:CALIBRATING");
-      return;
-    } else if (espCmd.type == EspCommand::Type::TurretCalDone) {
-      const bool ok = turretEncCal.finish(turretMotor.ticksAbs());
-      Serial.println(ok ? "Turret cal done" : "Turret cal failed");
-      if (ok) {
-        turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
-        Serial2.print("TURCAL:");
-        Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
-        Serial2.print(",");
-        Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
-      } else {
-        Serial2.println("TURCAL:FAIL");
-      }
-      return;
-    } else if (espCmd.type == EspCommand::Type::TurretZero) {
+    if (espCmd.type == EspCommand::Type::TurretZero) {
       turretEncCal.setZeroTicks(turretMotor.ticksAbs());
       // Also zero the continuous turret-to-body angle state.
       turretAngle.setZero();
       Serial.println("Turret zero set");
       Serial2.println("TURCAL:ZEROED");
+      return;
+    } else if (espCmd.type == EspCommand::Type::TurretTpr) {
+      // Manual override: set CW/CCW ticks/rev from UI (persist to EEPROM).
+      const uint32_t pos = (uint32_t)espCmd.value;
+      const uint32_t neg = (uint32_t)espCmd.value2;
+      // Keep range aligned with TurretEncoderCal EEPROM sanity checks.
+      if (pos < 10u || pos > 200000u || neg < 10u || neg > 200000u) {
+        Serial.println("Turret TPR out of range");
+        Serial2.println("TURCAL:FAIL");
+        if (turretEncCal.hasCalibration()) {
+          Serial2.print("TURCAL:");
+          Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+          Serial2.print(",");
+          Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+        }
+        return;
+      }
+
+      const bool okPos = turretEncCal.setTicksPerRevPos(pos);
+      const bool okNeg = turretEncCal.setTicksPerRevNeg(neg);
+      if (okPos && okNeg && turretEncCal.hasCalibration()) {
+        turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
+        Serial.println("Turret TPR set");
+        Serial2.print("TURCAL:");
+        Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+        Serial2.print(",");
+        Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+      } else {
+        Serial.println("Turret TPR set failed");
+        Serial2.println("TURCAL:FAIL");
+        if (turretEncCal.hasCalibration()) {
+          Serial2.print("TURCAL:");
+          Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+          Serial2.print(",");
+          Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+        }
+      }
       return;
     }
 
@@ -1219,7 +1226,11 @@ void loop() {
 
   // Allow ESP Disarm/Passcode handling above to work even while these are active.
   if (colorCalTask.active()) {
+    const bool hadCal = colorCalTask.hasCalibration();
     colorCalTask.update(&lastRgb, lastRgbValid);
+    // When calibration finishes and becomes available, publish the refs once so
+    // the web UI can show stable swatches for CLASS.
+    if (!hadCal && colorCalTask.hasCalibration()) sendRgbRefsToEsp_();
     return;
   }
 
