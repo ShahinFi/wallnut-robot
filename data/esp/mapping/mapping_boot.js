@@ -1,9 +1,9 @@
-import { bodyToMap, polarToBody, wrap360 } from "./conventions.js";
-import { HitGrid } from "./grid.js";
-import { clipEndpointToMap, forEachCellOnSegmentWorld } from "./raycast.js";
-import { parseTscanPayload } from "./tscan.js";
-import { MapRenderer } from "./render.js";
-import { searchWindowRectWalls } from "./matcher.js";
+import { bodyToMap, polarToBody, wrap360 } from "./core/conventions.js";
+import { HitGrid } from "./core/grid.js";
+import { clipEndpointToMap, forEachCellOnSegmentWorld } from "./geom/raycast.js";
+import { parseTscanPayload } from "./scan/tscan.js";
+import { MapRenderer } from "./view/render.js";
+import { searchWindowRectWalls } from "./match/matcher.js";
 
 // Browser-side mapping bootstrap for /maze page.
 // Keeps Mega "executor" and browser "brain".

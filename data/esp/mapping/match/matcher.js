@@ -1,5 +1,5 @@
-import { degToRad, wrap360 } from "./conventions.js";
-import { clipEndpointToMap, forEachCellOnSegmentWorld } from "./raycast.js";
+import { degToRad, wrap360 } from "../core/conventions.js";
+import { clipEndpointToMap, forEachCellOnSegmentWorld } from "../geom/raycast.js";
 
 function precomputeRot(headingDeg) {
   const h = degToRad(headingDeg);
