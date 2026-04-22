@@ -277,7 +277,8 @@ static void rejectNotArmed() { server.send(403, "text/plain", "NOT_ARMED"); }
 //   `/alerts?from=N` returns lines of `seq|EVT:...`.
 static const uint16_t kAlertRingSize = 256;
 static uint32_t gAlertNextSeq = 1;
-static uint16_t gAlertHead = 0;
+static uint16_t gAlertHead = 0;   // next write index
+static uint16_t gAlertCount = 0;  // number of valid entries (<= kAlertRingSize)
 
 struct AlertEvt {
   uint32_t seq;           // monotonic seq
@@ -294,15 +295,8 @@ static AlertEvt gAlerts[kAlertRingSize];
 static void resetAlertRing_() {
   gAlertNextSeq = 1;
   gAlertHead = 0;
-  for (uint16_t i = 0; i < kAlertRingSize; ++i) {
-    gAlerts[i].seq = 0;
-    gAlerts[i].tag[0] = '\0';
-    gAlerts[i].x_cm = NAN;
-    gAlerts[i].y_cm = NAN;
-    gAlerts[i].heading_deg = NAN;
-    gAlerts[i].extra = NAN;
-    gAlerts[i].hasExtra = false;
-  }
+  gAlertCount = 0;
+  // No need to clear the ring; gAlertCount gates reads.
 }
 
 static void pushAlertLine_(const String& line) {
@@ -342,6 +336,7 @@ static void pushAlertLine_(const String& line) {
   }
 
   gAlertHead = (uint16_t)((gAlertHead + 1) % kAlertRingSize);
+  if (gAlertCount < kAlertRingSize) gAlertCount++;
 }
 
 void setup() {
@@ -972,43 +967,48 @@ void handleAlerts() {
   String out;
   out.reserve(1400);
 
-  // Emit alerts sorted by seq, like the original events ring did.
-  uint32_t lastEmitted = from;
-  for (;;) {
-    yield();
-    uint32_t nextSeq = 0xFFFFFFFFu;
-    uint16_t nextIdx = 0;
-    bool found = false;
+  if (gAlertCount == 0) {
+    server.send(200, "text/plain", "");
+    return;
+  }
 
-    for (uint16_t i = 0; i < kAlertRingSize; ++i) {
-      const uint32_t seq = gAlerts[i].seq;
-      if (seq == 0) continue;
-      if (seq <= lastEmitted) continue;
-      if (seq < nextSeq) {
-        nextSeq = seq;
-        nextIdx = i;
-        found = true;
-      }
-    }
+  const uint16_t oldestIdx = (uint16_t)((gAlertHead + kAlertRingSize - gAlertCount) % kAlertRingSize);
+  const uint16_t newestIdx = (uint16_t)((gAlertHead + kAlertRingSize - 1) % kAlertRingSize);
+  const uint32_t newestSeq = gAlerts[newestIdx].seq;
 
-    if (!found) break;
-    out += String(nextSeq);
+  if (from >= newestSeq) {
+    server.send(200, "text/plain", "");
+    return;
+  }
+
+  // Walk the ring in chronological order and emit entries with seq > from.
+  // (Bounded to 256 entries, and we yield periodically.)
+  uint16_t emitted = 0;
+  for (uint16_t i = 0; i < gAlertCount; ++i) {
+    const uint16_t idx = (uint16_t)((oldestIdx + i) % kAlertRingSize);
+    const AlertEvt& e = gAlerts[idx];
+    if (e.seq == 0) continue;
+    if (e.seq <= from) continue;
+
+    out += String(e.seq);
     out += "|";
     out += "EVT:";
-    out += gAlerts[nextIdx].tag;
+    out += e.tag;
     out += ",";
-    out += String(gAlerts[nextIdx].x_cm, 2);
+    out += String(e.x_cm, 2);
     out += ",";
-    out += String(gAlerts[nextIdx].y_cm, 2);
+    out += String(e.y_cm, 2);
     out += ",";
-    out += String(gAlerts[nextIdx].heading_deg, 1);
-    if (gAlerts[nextIdx].hasExtra && isfinite(gAlerts[nextIdx].extra)) {
+    out += String(e.heading_deg, 1);
+    if (e.hasExtra && isfinite(e.extra)) {
       out += ",";
-      out += String(gAlerts[nextIdx].extra, 1);
+      out += String(e.extra, 1);
     }
     out += "\n";
-    lastEmitted = nextSeq;
+
+    emitted++;
     if (out.length() >= 1200) break;
+    if ((emitted & 0x1Fu) == 0) yield();
   }
 
   server.send(200, "text/plain", out);

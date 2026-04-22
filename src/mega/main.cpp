@@ -178,6 +178,35 @@ static void sendRgbRefsToEsp_() {
   Serial2.println();
 }
 
+static int8_t classifyColorIdx1BasedOrNone_(const ColorRgb& live);
+
+static void sendTelemetrySnapshotToEsp_() {
+  // Refresh cached UI values on the ESP (useful after an ESP reset or page refresh).
+  // This does not change any protocol; it only re-sends the same telemetry tags.
+  sendRgbRefsToEsp_();
+
+  // Color class (0=NONE, 1..4 = stored ref index).
+  const int8_t cls = lastRgbValid ? classifyColorIdx1BasedOrNone_(lastRgb) : (int8_t)0;
+  gLastRgbClassSent = cls;
+  Serial2.print("RGBCLS:");
+  Serial2.println((int)cls);
+
+  // Encoder calibration (mm/pulse) if available.
+  const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
+  if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
+    Serial2.print("ENC_CAL:");
+    Serial2.println(mmPerPulse, 2);
+  }
+
+  // Turret ticks/rev if available.
+  if (turretEncCal.hasCalibration()) {
+    Serial2.print("TURCAL:");
+    Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+    Serial2.print(",");
+    Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+  }
+}
+
 static int8_t classifyColorIdx1BasedOrNone_(const ColorRgb& live) {
   if (!colorCalTask.hasCalibration()) return 0;
   const ColorRgb* refs = colorCalTask.refs();
@@ -640,9 +669,11 @@ void loop() {
       if (gEspLocked) {
         Serial2.println("AUTH:LOCKED");
       } else if (espCmd.value == kEspPasscodeInt) {
+        const bool wasArmed = gEspArmed;
         gEspArmed = true;
         gEspFailCount = 0;
         Serial2.println("AUTH:OK");
+        if (!wasArmed) sendTelemetrySnapshotToEsp_();
       } else {
         gEspArmed = false;
         // If the payload was malformed (no digits parsed), do not count it as a try.
