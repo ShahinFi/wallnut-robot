@@ -749,7 +749,9 @@ void loop() {
       // Also zero the continuous turret-to-body angle state.
       turretAngle.setZero();
       Serial.println("Turret zero set");
-      Serial2.println("TURCAL:ZEROED");
+      // NOTE: Keep TURCAL:* reserved for ticks/rev calibration values only.
+      // Turret zero is a scan-control action, so it uses its own channel.
+      Serial2.println("TURZERO:OK");
       return;
     } else if (espCmd.type == EspCommand::Type::TurretTpr) {
       // Manual override: set CW/CCW ticks/rev from UI (persist to EEPROM).

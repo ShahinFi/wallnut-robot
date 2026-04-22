@@ -225,19 +225,64 @@ function startEncoderCalibration() {
 }
 
 function setTurretZero() {
-  sendCommand("/turret_zero", { method: "POST" }).catch(() => {});
+  const btn = document.getElementById("turretZeroBtn");
+  const flash = (cls) => {
+    if (!btn) return;
+    if (btn._flashRestoreHtml === undefined) {
+      btn._flashRestoreHtml = btn.innerHTML;
+    }
+    btn.classList.remove("is-flash-ok", "is-flash-fail");
+    btn.classList.add(cls);
+    clearTimeout(btn._flashTimer);
+    btn.innerText = cls === "is-flash-ok" ? "SUCCESS" : "FAILED";
+    btn._flashTimer = setTimeout(() => {
+      btn.classList.remove("is-flash-ok", "is-flash-fail");
+      if (btn._flashRestoreHtml !== undefined) btn.innerHTML = btn._flashRestoreHtml;
+    }, 2500);
+  };
+
+  sendCommand("/turret_zero", { method: "POST" })
+    .then((res) => {
+      if (res && res.ok) flash("is-flash-ok");
+      else flash("is-flash-fail");
+    })
+    .catch(() => {
+      flash("is-flash-fail");
+    });
 }
 
 function setTurretTpr() {
   const posEl = document.getElementById("turretTprPos");
   const negEl = document.getElementById("turretTprNeg");
+  const btn = document.getElementById("turretTprSetBtn");
+  const flash = (cls) => {
+    if (!btn) return;
+    if (btn._flashRestoreHtml === undefined) {
+      btn._flashRestoreHtml = btn.innerHTML;
+    }
+    btn.classList.remove("is-flash-ok", "is-flash-fail");
+    btn.classList.add(cls);
+    clearTimeout(btn._flashTimer);
+    btn.innerText = cls === "is-flash-ok" ? "SUCCESS" : "FAILED";
+    btn._flashTimer = setTimeout(() => {
+      btn.classList.remove("is-flash-ok", "is-flash-fail");
+      if (btn._flashRestoreHtml !== undefined) btn.innerHTML = btn._flashRestoreHtml;
+    }, 2500);
+  };
   const pos = posEl ? parseInt(posEl.value, 10) : NaN;
   const neg = negEl ? parseInt(negEl.value, 10) : NaN;
   if (!Number.isFinite(pos) || !Number.isFinite(neg) || pos <= 0 || neg <= 0) return;
   const qs = `pos=${encodeURIComponent(pos)}&neg=${encodeURIComponent(neg)}`;
   const outEl = document.getElementById("turretCalValue");
   if (outEl) outEl.innerText = "SETTING...";
-  sendCommand(`/turret_tpr?${qs}`, { method: "POST" }).catch(() => {});
+  sendCommand(`/turret_tpr?${qs}`, { method: "POST" })
+    .then((res) => {
+      if (res && res.ok) flash("is-flash-ok");
+      else flash("is-flash-fail");
+    })
+    .catch(() => {
+      flash("is-flash-fail");
+    });
   // Kick a quicker refresh instead of waiting for the 700ms interval.
   setTimeout(() => {
     try { pollTurretCal(); } catch (e) {}
@@ -301,11 +346,6 @@ async function pollTurretCal() {
         turretCalValueEl.innerText = "FAILED";
         return;
       }
-      if (payload === "ZEROED") {
-        turretCalValueEl.innerText = "ZERO SET";
-        return;
-      }
-
       turretCalValueEl.innerText = payload;
       return;
     }

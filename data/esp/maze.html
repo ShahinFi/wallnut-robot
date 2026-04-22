@@ -172,7 +172,7 @@
                   <button class="button button-outline button-small" id="mapClear">CLEAR</button>
                 </div>
                 <div class="tool-row tool-row-fill">
-                  <button class="button button-outline button-small turret-zero" data-requires-arm="1" onclick="setTurretZero()" title="Set current turret direction as 0° (forward)">SET 0&deg;</button>
+                  <button class="button button-outline button-small turret-zero" id="turretZeroBtn" data-requires-arm="1" onclick="setTurretZero()" title="Set current turret direction as 0° (forward)">SET 0&deg;</button>
                 </div>
               </div>
 
@@ -191,7 +191,7 @@
                   <input class="tool-input" data-requires-arm="1" id="turretTprNeg" type="number" inputmode="numeric" placeholder="CCW ticks/rev" min="10" max="200000" />
                 </div>
                 <div class="tool-row tool-row-fill turret-tpr-actions">
-                  <button class="button button-outline button-small" data-requires-arm="1" onclick="setTurretTpr()">SET</button>
+                  <button class="button button-outline button-small" id="turretTprSetBtn" data-requires-arm="1" onclick="setTurretTpr()">SET</button>
                 </div>
               </div>
             </div>

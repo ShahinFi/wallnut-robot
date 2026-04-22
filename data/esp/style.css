@@ -198,6 +198,21 @@ h2 {
   transform: scale(.98);
 }
 
+/* Short-lived action feedback (used by /maze). */
+.button.is-flash-ok {
+  background: linear-gradient(135deg, rgba(88,243,255,.95), rgba(155,107,255,.75));
+  color: #12081f;
+  border: 1px solid rgba(88,243,255,.75);
+  box-shadow: 0 0 18px rgba(88,243,255,.25), 0 8px 16px rgba(0,0,0,.28);
+}
+
+.button.is-flash-fail {
+  background: linear-gradient(135deg, rgba(255,95,135,.95), rgba(255,47,168,.75));
+  color: #12081f;
+  border: 1px solid rgba(255,95,135,.75);
+  box-shadow: 0 0 18px rgba(255,95,135,.24), 0 8px 16px rgba(0,0,0,.28);
+}
+
 .button-small {
   min-height: 44px;
   padding: 10px 12px;
