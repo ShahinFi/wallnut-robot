@@ -4,4 +4,5 @@
 *.code-workspace
 platformio_override.ini
 src/esp/wifi_secrets.h
+src/mega/secrets.h
 .codex

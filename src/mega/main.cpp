@@ -24,6 +24,21 @@
 #include "tasks/color_calibration/color_calibration_task.h"
 #include "tasks/color_maze/color_maze_task.h"
 
+// Optional local secrets file (gitignored): src/mega/secrets.h
+#if defined(__has_include)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#endif
+
+// Default passcode fallback (used if secrets.h is absent).
+#ifndef ESP_PASSCODE_STR
+#define ESP_PASSCODE_STR "1234"
+#endif
+#ifndef ESP_PASSCODE_INT
+#define ESP_PASSCODE_INT 1234
+#endif
+
 // AVR-only free SRAM estimator (helps diagnose "stuck at boot" after adding features).
 #if defined(ARDUINO_ARCH_AVR)
 extern int __heap_start, *__brkval;
@@ -62,8 +77,8 @@ static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
 
 // ===== Option 1 security (UART passcode arming) =====
-static const char kEspPasscode[] = "1234";
-static const int  kEspPasscodeInt = 1234;
+static const char kEspPasscode[] = ESP_PASSCODE_STR;
+static const int  kEspPasscodeInt = ESP_PASSCODE_INT;
 static bool gEspArmed = false;
 static uint8_t gEspFailCount = 0;
 static bool gEspLocked = false;
