@@ -36,6 +36,7 @@ body {
   min-height: 100%;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   color: var(--text);
+  -webkit-text-size-adjust: 100%;
   background:
     linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px),
@@ -236,6 +237,8 @@ button:disabled,
   color: var(--text);
   padding: 0 12px;
   outline: none;
+  font-size: 16px; /* iOS: prevent focus zoom */
+  font-weight: 400; /* keep inputs consistent (not bold) */
 }
 
 .auth-input:focus {
@@ -253,7 +256,8 @@ button:disabled,
   color: var(--text);
   padding: 0 10px;
   outline: none;
-  font-weight: 700;
+  font-size: 16px; /* iOS: prevent focus zoom */
+  font-weight: 400; /* match passcode input */
 }
 
 .tool-input:focus {

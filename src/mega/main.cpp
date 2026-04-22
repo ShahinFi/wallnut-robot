@@ -22,7 +22,6 @@
 #include "color/color_sensor.h"
 #include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
-#include "tasks/mapping/mapping_task.h"
 #include "tasks/color_maze/color_maze_task.h"
 
 // AVR-only free SRAM estimator (helps diagnose "stuck at boot" after adding features).
@@ -61,12 +60,6 @@ static bool            headingValid = false;
 static CompassData     lastHeading = {};
 static bool            seqHeadingSet = false;
 static float           seqHeadingHoldDeg = 0.0f;
-static mapping::MappingTask mappingTask;
-static mapping::Pose2D mappingPose = {};       // last corrected pose (map X east, Y north)
-static mapping::Pose2D mappingPriorPose = {};  // prior pose for the in-flight capture
-static WorldOdomData   mappingOdomAnchor = {0.0f, 0.0f};  // odom world pose at mappingPose time
-static bool            mappingPoseValid = false;          // becomes true once we successfully match at least once
-static bool            mappingPoseInitialized = false;    // set once we have a reasonable initial guess
 
 // ===== Option 1 security (UART passcode arming) =====
 static const char kEspPasscode[] = "1234";
@@ -398,11 +391,6 @@ static void onTurretSweepSample(const TurretSweepScan360::Sample& s, void* user)
   Serial2.print(",");
   Serial2.print(s.distanceCm, 1);
   Serial2.println();
-
-  // Mapping capture hook (thin): store the raw scan points for later matching/replay.
-  if (mappingTask.capturing()) {
-    mappingTask.onSample(s.angleDeg, s.distanceCm);
-  }
 }
 
 static SequenceStep seqSteps[] = {
@@ -411,19 +399,6 @@ static SequenceStep seqSteps[] = {
   {SequenceStepType::MoveToDistance, 27.2f},
   {SequenceStepType::End, 0.0f}
 };
-
-static void mappingInitPoseDefaults_() {
-  const auto gc = mappingTask.config().grid;
-  // Default initial guess inside the map:
-  // - X: centered
-  // - Y: within the [0..0.4*H] placement band (we choose 0.2*H as a neutral midpoint)
-  mappingPose.x_cm = 0.5f * (float)gc.mapW_cm;
-  mappingPose.y_cm = 0.2f * (float)gc.mapH_cm;
-  mappingPose.headingDeg = 0.0f;
-  mappingPriorPose = mappingPose;
-  mappingPoseValid = false;
-  mappingPoseInitialized = true;
-}
 
 static void mazeLcdTick_(float headingDegWrapped, float lidarFilteredCm) {
   maze_lcd::setIp(gEspIpStr);
@@ -492,21 +467,6 @@ void setup() {
     cfg.sampleEveryTicks = 1;
     turretSweep.setConfig(cfg);
   }
-  // Mapping defaults (tunable).
-  {
-    mapping::MappingTask::Config cfg;
-    cfg.grid.mapW_cm = 46;
-    cfg.grid.mapH_cm = 26;
-    cfg.grid.cell_cm = 2;
-    // Map/world coordinates are in absolute cm from the map's bottom-left corner:
-    // X in [0..mapW], Y in [0..mapH].
-    cfg.grid.originX_cm = 0.0f;
-    cfg.grid.originY_cm = 0.0f;
-    cfg.enableMatching = true;
-    cfg.lidarOffset.x_cm = 0.0f;
-    cfg.lidarOffset.y_cm = 0.0f;
-    mappingTask.setConfig(cfg);
-  }
   colorSensorOk = colorSensor.begin();
   if (!colorSensorOk) {
     Serial.println("Color sensor failed (continuing without RGB telemetry)");
@@ -544,10 +504,6 @@ void setup() {
   odom.setPulsesPerMeter(787.0f);
   odomManagerInit(&odom);
 
-  // Initialize mapping pose defaults + anchor now that odom state exists.
-  mappingInitPoseDefaults_();
-  mappingOdomAnchor = odomWorldRead();
-
   // --- DriveByDistance test config ---
   DriveByDistance::Config dcfg = driveByDistance.config();
   dcfg.maxSpeed = 0.6f;
@@ -557,7 +513,7 @@ void setup() {
 
   seqExecTask.setSequence(seqSteps);
 
-  Serial.println("Ready. Send 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
+  Serial.println("Ready. Send 'd' drive, 'k' cal, 'h' set heading, 'q' exec.");
 }
 
 void loop() {
@@ -586,36 +542,6 @@ void loop() {
     if (done) {
       Serial.println("TSCAN:DONE");
       Serial2.println("TSCAN:DONE");
-      if (mappingTask.capturing()) {
-        // If we don't yet have a validated map pose, use a larger initial search:
-        // - X: full map width
-        // - Y: [0..0.4*mapH] as the initial placement band (user-defined)
-        // - Heading: still local around compass (kept thin)
-        if (!mappingPoseValid && mappingTask.grid().totalHits() > 0) {
-          const auto gc = mappingTask.config().grid;
-          mapping::CorrelativeMatcher::SearchWindow w;
-          w.xMin_cm = 0.0f;
-          w.xMax_cm = (float)gc.mapW_cm;
-          w.yMin_cm = 0.0f;
-          w.yMax_cm = 0.4f * (float)gc.mapH_cm;
-          const auto mc = mappingTask.config().matcher;
-          w.headingMin_deg = mappingPriorPose.headingDeg - mc.searchDHeadingDeg;
-          w.headingMax_deg = mappingPriorPose.headingDeg + mc.searchDHeadingDeg;
-          w.stepX_cm = mc.step_cm;
-          w.stepY_cm = mc.step_cm;
-          w.stepHeading_deg = mc.stepHeadingDeg;
-          mappingTask.finishCaptureAndUpdateInWindow(w, mappingPriorPose, mappingPose);
-        } else {
-          mappingTask.finishCaptureAndUpdate(mappingPriorPose, mappingPose);
-        }
-        mappingTask.printSummary();
-        // Keep "valid" sticky once we have a match; don't drop it on a single failure.
-        if (mappingTask.lastMatchScore() >= 0) mappingPoseValid = true;
-        // Only advance the anchor if we actually applied the update (or seeded the map).
-        if (mappingTask.lastUpdateApplied()) {
-          mappingOdomAnchor = odomWorldRead();
-        }
-      }
     }
     if (Serial.available()) {
       const char c = (char)Serial.read();
@@ -975,7 +901,7 @@ void loop() {
 
     // Serial control should always be able to take over. The color calibration
     // task is initiated by a physical button, but it must not lock out console
-    // hotkeys (including plot_tscan.py sending mapping commands).
+    // hotkeys.
     if (colorCalTask.active()) colorCalTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
     if (c == 'd' || c == 'D') {
@@ -1074,71 +1000,6 @@ void loop() {
       Serial.println("TSCAN:BEGIN,-");
       Serial2.println("TSCAN:BEGIN,-");
       turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
-    }
-    if (c == 'b' || c == 'B') {
-      // Mapping: capture + scan, then match + update map on DONE.
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      motorDrive(0.0f, 0.0f);
-
-      if (!mappingPoseInitialized) {
-        mappingInitPoseDefaults_();
-        mappingOdomAnchor = odomWorldRead();
-      }
-
-      const WorldOdomData w = odomWorldRead();
-      const float dx = w.eastCm - mappingOdomAnchor.eastCm;
-      const float dy = w.northCm - mappingOdomAnchor.northCm;
-      mappingPriorPose.x_cm = mappingPose.x_cm + dx;
-      mappingPriorPose.y_cm = mappingPose.y_cm + dy;
-      mappingPriorPose.headingDeg = heading.headingDegContinuous;
-      mappingPose = mappingPriorPose;
-      mappingTask.beginCapture(mappingPriorPose);
-
-      Serial.println("MAP:CAPTURE_BEGIN");
-      Serial.println("TSCAN:BEGIN,+");
-      Serial2.println("TSCAN:BEGIN,+");
-      turretSweep.begin(&turretMotor, &turretAngle, &lidar, +1, turretMotor.ticksAbs(), millis());
-    }
-    if (c == 'n' || c == 'N') {
-      // Mapping: capture - scan, then match + update map on DONE.
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      motorDrive(0.0f, 0.0f);
-
-      if (!mappingPoseInitialized) {
-        mappingInitPoseDefaults_();
-        mappingOdomAnchor = odomWorldRead();
-      }
-
-      const WorldOdomData w = odomWorldRead();
-      const float dx = w.eastCm - mappingOdomAnchor.eastCm;
-      const float dy = w.northCm - mappingOdomAnchor.northCm;
-      mappingPriorPose.x_cm = mappingPose.x_cm + dx;
-      mappingPriorPose.y_cm = mappingPose.y_cm + dy;
-      mappingPriorPose.headingDeg = heading.headingDegContinuous;
-      mappingPose = mappingPriorPose;
-      mappingTask.beginCapture(mappingPriorPose);
-
-      Serial.println("MAP:CAPTURE_BEGIN");
-      Serial.println("TSCAN:BEGIN,-");
-      Serial2.println("TSCAN:BEGIN,-");
-      turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
-    }
-    if (c == 'v' || c == 'V') {
-      mappingTask.printMap(1);
-    }
-    if (c == 'r' || c == 'R') {
-      mappingTask.resetMap();
-      mappingInitPoseDefaults_();
-      odomWorldReset(heading.headingDegContinuous);
-      odomLocalReset();
-      mappingOdomAnchor = odomWorldRead();
-      Serial.println("MAP:RESET");
     }
   }
 
