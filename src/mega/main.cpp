@@ -9,6 +9,7 @@
 #include "lidar/turret/actions/turret_sweep_scan_360.h"
 #include "motor/motor.h"
 #include "display/lcd.h"
+#include "missions/maze/maze_lcd.h"
 #include "encoder/encoder.h"
 #include "odometry/odometry.h"
 #include "odometry/odometry_manager.h"
@@ -24,8 +25,6 @@
 #include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
 #include "tasks/mapping/mapping_task.h"
-
-#include "tasks/room_measure/room_measure_task.h"
 #include "tasks/follow_distance/follow_distance_task.h"
 #include "tasks/color_maze/color_maze_task.h"
 
@@ -47,7 +46,6 @@ static TurretMotor     turretMotor;
 static TurretEncoderCal turretEncCal;
 static TurretAngleTracker turretAngle;
 static TurretSweepScan360 turretSweep;
-static RoomMeasureTask roomTask;
 static FollowDistanceTask followTask;
 static uint32_t        lastCompassUiMs = 0;
 static Odometry        odom(0.0f);
@@ -61,6 +59,8 @@ static bool            colorSensorOk = false;
 static uint32_t        lastRgbMs = 0;
 static ColorRgb        lastRgb = {0, 0, 0};
 static bool            lastRgbValid = false;
+static char            gEspIpStr[16] = "0.0.0.0";
+static uint32_t        gLastIpReqMs = 0;
 static ColorMazeTask   colorMazeTask;
 static uint32_t        lastEncDbgMs = 0;
 static bool            headingValid = false;
@@ -431,15 +431,42 @@ static void mappingInitPoseDefaults_() {
   mappingPoseInitialized = true;
 }
 
+static void mazeLcdTick_(float headingDegWrapped, float lidarFilteredCm) {
+  maze_lcd::setIp(gEspIpStr);
+  const maze_lcd::AuthState auth =
+      gEspLocked ? maze_lcd::AuthState::Locked : (gEspArmed ? maze_lcd::AuthState::Armed : maze_lcd::AuthState::Disarmed);
+
+  maze_lcd::AutoState astate = maze_lcd::AutoState::Idle;
+  if (turretSweep.active()) astate = maze_lcd::AutoState::Scan;
+  else if (seqExecTask.active()) astate = maze_lcd::AutoState::Run;
+
+  const WorldOdomData w = odomWorldRead();
+  const int16_t x = (int16_t)lroundf(w.eastCm);
+  const int16_t y = (int16_t)lroundf(w.northCm);
+  const uint16_t h = (uint16_t)lroundf(wrapDeg360_(headingDegWrapped));
+  const uint16_t ahead = isfinite(lidarFilteredCm) ? (uint16_t)lroundf(lidarFilteredCm) : 0u;
+  const uint8_t cls = (uint8_t)((gLastRgbClassSent < 0) ? 0 : gLastRgbClassSent);
+
+  maze_lcd::update(auth, astate, x, y, h, ahead, cls);
+}
+
+static bool hasValidEspIp_() {
+  // Treat anything other than the default placeholder as valid.
+  return strncmp(gEspIpStr, "0.0.0.0", 7) != 0;
+}
+
+static void maybeRequestEspIp_() {
+  if (hasValidEspIp_()) return;
+  const uint32_t now = millis();
+  if (gLastIpReqMs != 0 && (now - gLastIpReqMs) < 1500) return;
+  gLastIpReqMs = now;
+  Serial2.println("IPREQ");
+}
+
 void setup() {
   Serial.begin(115200);
-  lcdInit();
-  lcdWrite(0, 0, "Booting...", true);
-  lcdWrite(1, 0, "Init sensors...", true);
+  maze_lcd::init();
   {
-    char buf[21];
-    snprintf(buf, sizeof(buf), "RAM:%d", freeRamBytes());
-    lcdWrite(3, 0, buf, true);
     Serial.print("Free RAM at boot: ");
     Serial.println(freeRamBytes());
   }
@@ -447,15 +474,13 @@ void setup() {
   // --- Hardware ---
   if (!compass.begin()) {
     Serial.println("Compass failed");
-    lcdWrite(2, 0, "Compass failed", true);
-    lcdWrite(3, 0, "Check I2C/wiring", true);
+    maze_lcd::showFatal("Compass failed", "Check I2C/wiring");
     while (1) {}
   }
 
   if (!lidar.begin()) {
     Serial.println("LiDAR failed");
-    lcdWrite(2, 0, "LiDAR failed", true);
-    lcdWrite(3, 0, "Check I2C/wiring", true);
+    maze_lcd::showFatal("LiDAR failed", "Check I2C/wiring");
     while (1) {}
   }
 
@@ -501,6 +526,8 @@ void setup() {
 
   encoderInit();
   espSetup();
+  // Deterministic IP delivery for LCD: request until we receive ESPIP:<ip>.
+  maybeRequestEspIp_();
   telemetryInit(200);
   seqExecTask.setForwardSpeedScale(gForwardSpeedScale);
   Serial2.println("AUTH:OFF");
@@ -534,27 +561,11 @@ void setup() {
   dcfg.timeoutMs = 8000;
   driveByDistance.setConfig(dcfg);
 
-  // --- Room measurement physical config ONLY ---
-  RoomMeasureTask::Config cfg;
-  cfg.lidarToCenterOffsetCm = 18.0f;   // measured once
-  cfg.ceilingHeightCm       = 100.0f;  // task requirement
-
-  roomTask.setConfig(cfg);
-  roomTask.reset();
-
   // --- Follow distance (target only) ---
   followTask.setTargetDistanceCm(30.0f);
-  followTask.reset();
-
-  wallAlignTask.reset();
-  wallSeqTask.reset();
-  encCalTask.reset();
   seqExecTask.setSequence(seqSteps);
-  seqExecTask.reset();
 
-  Serial.println("Ready. Send 'm' room, 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
-  lcdWrite(1, 0, "Ready", true);
-  lcdWrite(2, 0, "Hotkeys: b/n/v/r", true);
+  Serial.println("Ready. Send 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
 }
 
 void loop() {
@@ -665,6 +676,7 @@ void loop() {
       seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);
       sendEvtPose_("FRONTSTOP", lidarFilteredCm);
+      maze_lcd::notifyStopFront();
     }
 
     // Do not cancel a commanded backoff just because the color sensor is still
@@ -674,6 +686,7 @@ void loop() {
       seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);
       sendEvtPose_("RED", NAN);
+      maze_lcd::notifyStopRed();
     }
   }
 
@@ -683,7 +696,6 @@ void loop() {
       if (digitalRead(kButtonPin) == LOW) {
         gLastButtonMs = nowMs;
         if (!colorCalTask.active()) {
-          if (roomTask.active()) roomTask.cancel();
           if (followTask.active()) followTask.cancel();
           if (driveByDistance.active()) driveByDistance.cancel();
           if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -701,6 +713,14 @@ void loop() {
 
   EspCommand espCmd;
   if (espPoll(espCmd)) {
+    if (espCmd.type == EspCommand::Type::EspIp) {
+      if (espCmd.text.length() > 0) {
+        espCmd.text.toCharArray(gEspIpStr, sizeof(gEspIpStr));
+        gEspIpStr[sizeof(gEspIpStr) - 1] = '\0';
+        maze_lcd::setIp(gEspIpStr);
+      }
+      return;
+    }
     if (espCmd.type == EspCommand::Type::Passcode) {
       if (gEspLocked) {
         Serial2.println("AUTH:LOCKED");
@@ -736,7 +756,6 @@ void loop() {
         gEspArmed = false;
         Serial2.println("AUTH:OFF");
       }
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -750,7 +769,6 @@ void loop() {
 
     if (gEspLocked) {
       Serial2.println("AUTH:LOCKED");
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -764,7 +782,6 @@ void loop() {
 
     if (!gEspArmed) {
       Serial2.println("AUTH:REQUIRED");
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -868,7 +885,6 @@ void loop() {
     }
 
     // Commands below this point are motion/task-affecting.
-    if (roomTask.active()) roomTask.cancel();
     if (followTask.active()) followTask.cancel();
     if (driveByDistance.active()) driveByDistance.cancel();
     if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -985,18 +1001,7 @@ void loop() {
     // hotkeys (including plot_tscan.py sending mapping commands).
     if (colorCalTask.active()) colorCalTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
-    if ((c == 'm' || c == 'M') && !roomTask.active()) {
-      if (followTask.active()) followTask.cancel();
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      roomTask.begin(heading.headingDegContinuous);
-    }
     if (c == 'f' || c == 'F') {
-      if (roomTask.active()) roomTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
@@ -1006,7 +1011,6 @@ void loop() {
       if (!followTask.active()) followTask.begin(heading.headingDegContinuous, 0.0f);
     }
     if (c == 'd' || c == 'D') {
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
@@ -1018,7 +1022,6 @@ void loop() {
       driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
     }
     if (c == 'w' || c == 'W') {
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
@@ -1030,7 +1033,6 @@ void loop() {
       wallAlignTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 's' || c == 'S') {
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1042,7 +1044,6 @@ void loop() {
       wallSeqTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
     if (c == 'k' || c == 'K') {
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1060,7 +1061,6 @@ void loop() {
       Serial.println(seqHeadingHoldDeg, 2);
     }
     if (c == 'q' || c == 'Q') {
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1119,7 +1119,6 @@ void loop() {
     }
     if (c == 'p' || c == 'P') {
       // Turret 1-rev scan (positive direction).
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1135,7 +1134,6 @@ void loop() {
     }
     if (c == 'i' || c == 'I') {
       // Turret 1-rev scan (negative direction).
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1151,7 +1149,6 @@ void loop() {
     }
     if (c == 'b' || c == 'B') {
       // Mapping: capture + scan, then match + update map on DONE.
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1182,7 +1179,6 @@ void loop() {
     }
     if (c == 'n' || c == 'N') {
       // Mapping: capture - scan, then match + update map on DONE.
-      if (roomTask.active()) roomTask.cancel();
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
       if (wallAlignTask.active()) wallAlignTask.cancel();
@@ -1231,12 +1227,14 @@ void loop() {
     // When calibration finishes and becomes available, publish the refs once so
     // the web UI can show stable swatches for CLASS.
     if (!hadCal && colorCalTask.hasCalibration()) sendRgbRefsToEsp_();
+    mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
     return;
   }
 
   if (colorMazeTask.active()) {
     OdometryData od = odomRaw();
     colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
+    mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
     return;
   }
 
@@ -1267,8 +1265,6 @@ void loop() {
     driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
   } else if (followTask.active()) {
     followTask.update(heading.headingDegContinuous, 0.0f, lidarFilteredCm);
-  } else {
-    roomTask.update(heading.headingDegContinuous, lidarFilteredCm);
   }
 
   // Command completion event (lets browser know a step finished).
@@ -1289,4 +1285,7 @@ void loop() {
     }
   }
   gSeqWasActive = seqActiveNow;
+
+  maybeRequestEspIp_();
+  mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
 }

@@ -34,6 +34,14 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
+  if (s.startsWith("ESPIP:")) {
+    out.type = EspCommand::Type::EspIp;
+    out.value = 0;
+    out.value2 = 0;
+    out.text = s.substring(6);
+    out.text.trim();
+    return true;
+  }
   if (s.equalsIgnoreCase("Disarm")) {
     out.type = EspCommand::Type::Disarm;
     out.value = 0;

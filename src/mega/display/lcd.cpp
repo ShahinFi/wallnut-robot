@@ -19,7 +19,8 @@ static LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 // Global LCD update throttle to reduce loop load.
 static const uint32_t kLcdThrottleMs = 300;
-static const uint32_t kLcdBurstWindowMs = 10;
+// Allow enough time for multi-line updates (LiquidCrystal writes are relatively slow).
+static const uint32_t kLcdBurstWindowMs = 80;
 static uint32_t gLastBurstMs = 0;
 static uint32_t gBurstUntilMs = 0;
 

@@ -335,6 +335,9 @@ void setup() {
       Serial.println("\nWiFi connected (STA).");
       Serial.print("IP address: ");
       Serial.println(WiFi.localIP());
+      // Report to Mega (UART protocol) for LCD display (best-effort).
+      Serial.print("ESPIP:");
+      Serial.println(WiFi.localIP());
     } else {
       Serial.println("\nWiFi STA connect failed. Falling back to AP.");
       WiFi.disconnect();
@@ -352,6 +355,9 @@ void setup() {
     Serial.print("AP SSID: ");
     Serial.println(kWifiApSsid);
     Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
+    // Report to Mega (UART protocol) for LCD display (best-effort).
+    Serial.print("ESPIP:");
     Serial.println(WiFi.softAPIP());
   }
 
@@ -410,6 +416,23 @@ void processSerialLine(const String& data) {
   // Any valid line from the Mega means the UART link is alive.
   gLastMegaRxMs = millis();
   gHasMegaRx = true;
+
+  // Deterministic IP reporting for Mega LCD:
+  // Mega can miss the ESP's one-shot `ESPIP:` during boot, so Mega may request it.
+  // Request:  IPREQ
+  // Response: ESPIP:<ip>
+  if (data.equalsIgnoreCase("IPREQ")) {
+    IPAddress ip;
+    if (WiFi.status() == WL_CONNECTED) ip = WiFi.localIP();
+    if ((uint32_t)ip != 0) {
+      Serial.print("ESPIP:");
+      Serial.println(ip);
+    } else {
+      Serial.print("ESPIP:");
+      Serial.println(WiFi.softAPIP());
+    }
+    return;
+  }
 
   if (data.startsWith("AUTH:")) {
     // Expected formats:
