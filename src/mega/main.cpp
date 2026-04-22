@@ -14,7 +14,6 @@
 #include "odometry/odometry.h"
 #include "odometry/odometry_manager.h"
 #include "actions/drive_by_distance.h"
-#include "tasks/wall_align_90/wall_align_90_task.h"
 #include "tasks/wall_sequence/wall_sequence_task.h"
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
 #include "tasks/sequence_executor/sequence_executor_task.h"
@@ -50,7 +49,6 @@ static FollowDistanceTask followTask;
 static uint32_t        lastCompassUiMs = 0;
 static Odometry        odom(0.0f);
 static DriveByDistance driveByDistance;
-static WallAlign90Task wallAlignTask;
 static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
@@ -698,7 +696,6 @@ void loop() {
         if (!colorCalTask.active()) {
           if (followTask.active()) followTask.cancel();
           if (driveByDistance.active()) driveByDistance.cancel();
-          if (wallAlignTask.active()) wallAlignTask.cancel();
           if (wallSeqTask.active()) wallSeqTask.cancel();
           if (encCalTask.active()) encCalTask.cancel();
           if (seqExecTask.active()) seqExecTask.cancel();
@@ -758,7 +755,6 @@ void loop() {
       }
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -771,7 +767,6 @@ void loop() {
       Serial2.println("AUTH:LOCKED");
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -784,7 +779,6 @@ void loop() {
       Serial2.println("AUTH:REQUIRED");
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -887,7 +881,6 @@ void loop() {
     // Commands below this point are motion/task-affecting.
     if (followTask.active()) followTask.cancel();
     if (driveByDistance.active()) driveByDistance.cancel();
-    if (wallAlignTask.active()) wallAlignTask.cancel();
     if (wallSeqTask.active()) wallSeqTask.cancel();
     if (encCalTask.active()) encCalTask.cancel();
     if (seqExecTask.active()) seqExecTask.cancel();
@@ -1003,7 +996,6 @@ void loop() {
     if (colorMazeTask.active()) colorMazeTask.cancel();
     if (c == 'f' || c == 'F') {
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1012,7 +1004,6 @@ void loop() {
     }
     if (c == 'd' || c == 'D') {
       if (followTask.active()) followTask.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1021,21 +1012,9 @@ void loop() {
       OdometryData od = odomRaw();
       driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
     }
-    if (c == 'w' || c == 'W') {
-      if (followTask.active()) followTask.cancel();
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      odomHardResetKeepWorld(heading.headingDegContinuous);
-      OdometryData od = odomRaw();
-      wallAlignTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-    }
     if (c == 's' || c == 'S') {
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1046,7 +1025,6 @@ void loop() {
     if (c == 'k' || c == 'K') {
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1063,7 +1041,6 @@ void loop() {
     if (c == 'q' || c == 'Q') {
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1080,7 +1057,6 @@ void loop() {
     if (c == 'c' || c == 'C') {
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1121,7 +1097,6 @@ void loop() {
       // Turret 1-rev scan (positive direction).
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1136,7 +1111,6 @@ void loop() {
       // Turret 1-rev scan (negative direction).
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1151,7 +1125,6 @@ void loop() {
       // Mapping: capture + scan, then match + update map on DONE.
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1181,7 +1154,6 @@ void loop() {
       // Mapping: capture - scan, then match + update map on DONE.
       if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallAlignTask.active()) wallAlignTask.cancel();
       if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
@@ -1257,9 +1229,6 @@ void loop() {
   } else if (wallSeqTask.active()) {
     OdometryData od = odomRaw();
     wallSeqTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
-  } else if (wallAlignTask.active()) {
-    OdometryData od = odomRaw();
-    wallAlignTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
   } else if (driveByDistance.active()) {
     OdometryData od = odomRaw();
     driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
