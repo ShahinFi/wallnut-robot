@@ -14,7 +14,6 @@
 #include "odometry/odometry.h"
 #include "odometry/odometry_manager.h"
 #include "actions/drive_by_distance.h"
-#include "tasks/wall_sequence/wall_sequence_task.h"
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
 #include "tasks/sequence_executor/sequence_executor_task.h"
 #include "esp/esp_uart.h"
@@ -24,7 +23,6 @@
 #include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
 #include "tasks/mapping/mapping_task.h"
-#include "tasks/follow_distance/follow_distance_task.h"
 #include "tasks/color_maze/color_maze_task.h"
 
 // AVR-only free SRAM estimator (helps diagnose "stuck at boot" after adding features).
@@ -45,11 +43,9 @@ static TurretMotor     turretMotor;
 static TurretEncoderCal turretEncCal;
 static TurretAngleTracker turretAngle;
 static TurretSweepScan360 turretSweep;
-static FollowDistanceTask followTask;
 static uint32_t        lastCompassUiMs = 0;
 static Odometry        odom(0.0f);
 static DriveByDistance driveByDistance;
-static WallSequenceTask wallSeqTask;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
 static ColorSensor     colorSensor;
@@ -559,11 +555,9 @@ void setup() {
   dcfg.timeoutMs = 8000;
   driveByDistance.setConfig(dcfg);
 
-  // --- Follow distance (target only) ---
-  followTask.setTargetDistanceCm(30.0f);
   seqExecTask.setSequence(seqSteps);
 
-  Serial.println("Ready. Send 'f' follow, 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
+  Serial.println("Ready. Send 'd' drive, 'w' wall, 's' seq, 'k' cal, 'h' set heading, 'q' exec.");
 }
 
 void loop() {
@@ -694,9 +688,7 @@ void loop() {
       if (digitalRead(kButtonPin) == LOW) {
         gLastButtonMs = nowMs;
         if (!colorCalTask.active()) {
-          if (followTask.active()) followTask.cancel();
           if (driveByDistance.active()) driveByDistance.cancel();
-          if (wallSeqTask.active()) wallSeqTask.cancel();
           if (encCalTask.active()) encCalTask.cancel();
           if (seqExecTask.active()) seqExecTask.cancel();
           motorDrive(0.0f, 0.0f);
@@ -753,9 +745,7 @@ void loop() {
         gEspArmed = false;
         Serial2.println("AUTH:OFF");
       }
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -765,9 +755,7 @@ void loop() {
 
     if (gEspLocked) {
       Serial2.println("AUTH:LOCKED");
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -777,9 +765,7 @@ void loop() {
 
     if (!gEspArmed) {
       Serial2.println("AUTH:REQUIRED");
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -879,9 +865,7 @@ void loop() {
     }
 
     // Commands below this point are motion/task-affecting.
-    if (followTask.active()) followTask.cancel();
     if (driveByDistance.active()) driveByDistance.cancel();
-    if (wallSeqTask.active()) wallSeqTask.cancel();
     if (encCalTask.active()) encCalTask.cancel();
     if (seqExecTask.active()) seqExecTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -994,17 +978,7 @@ void loop() {
     // hotkeys (including plot_tscan.py sending mapping commands).
     if (colorCalTask.active()) colorCalTask.cancel();
     if (colorMazeTask.active()) colorMazeTask.cancel();
-    if (c == 'f' || c == 'F') {
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      if (!followTask.active()) followTask.begin(heading.headingDegContinuous, 0.0f);
-    }
     if (c == 'd' || c == 'D') {
-      if (followTask.active()) followTask.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1012,20 +986,8 @@ void loop() {
       OdometryData od = odomRaw();
       driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
     }
-    if (c == 's' || c == 'S') {
-      if (followTask.active()) followTask.cancel();
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
-      odomHardResetKeepWorld(heading.headingDegContinuous);
-      OdometryData od = odomRaw();
-      wallSeqTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-    }
     if (c == 'k' || c == 'K') {
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
       odomHardResetKeepWorld(heading.headingDegContinuous);
@@ -1039,9 +1001,7 @@ void loop() {
       Serial.println(seqHeadingHoldDeg, 2);
     }
     if (c == 'q' || c == 'Q') {
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
       odomHardResetKeepWorld(heading.headingDegContinuous);
@@ -1055,9 +1015,7 @@ void loop() {
       }
     }
     if (c == 'c' || c == 'C') {
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1095,9 +1053,7 @@ void loop() {
     }
     if (c == 'p' || c == 'P') {
       // Turret 1-rev scan (positive direction).
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1109,9 +1065,7 @@ void loop() {
     }
     if (c == 'i' || c == 'I') {
       // Turret 1-rev scan (negative direction).
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1123,9 +1077,7 @@ void loop() {
     }
     if (c == 'b' || c == 'B') {
       // Mapping: capture + scan, then match + update map on DONE.
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1152,9 +1104,7 @@ void loop() {
     }
     if (c == 'n' || c == 'N') {
       // Mapping: capture - scan, then match + update map on DONE.
-      if (followTask.active()) followTask.cancel();
       if (driveByDistance.active()) driveByDistance.cancel();
-      if (wallSeqTask.active()) wallSeqTask.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       if (colorMazeTask.active()) colorMazeTask.cancel();
@@ -1226,14 +1176,9 @@ void loop() {
         Serial2.println(mmPerPulse, 2);
       }
     }
-  } else if (wallSeqTask.active()) {
-    OdometryData od = odomRaw();
-    wallSeqTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
   } else if (driveByDistance.active()) {
     OdometryData od = odomRaw();
     driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
-  } else if (followTask.active()) {
-    followTask.update(heading.headingDegContinuous, 0.0f, lidarFilteredCm);
   }
 
   // Command completion event (lets browser know a step finished).
