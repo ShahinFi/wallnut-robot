@@ -84,12 +84,12 @@
           </div>
         </section>
 
-        <section class="panel maze2-run">
+        <section class="panel maze2-auth">
           <div class="deck-head">
-            <div class="deck-title">Run</div>
+            <div class="deck-title">Auth</div>
           </div>
           <div class="deck-body">
-            <div class="auth-row">
+            <div class="auth-form">
               <input
                 id="passcodeInput"
                 class="auth-input"
@@ -98,16 +98,26 @@
                 autocomplete="off"
                 placeholder="1234"
               />
-              <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
-              <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+              <div class="auth-buttons">
+                <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
+                <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+              </div>
             </div>
+            <div class="auth-meta">
+              <div id="authStatus" class="auth-status">DISARMED</div>
+              <div id="linkStatus" class="auth-status">LINK: --</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel maze2-run">
+          <div class="deck-head">
+            <div class="deck-title">Run</div>
+          </div>
+          <div class="deck-body">
             <div class="run-actions">
               <button class="button button-primary button-small" data-requires-arm="1" id="autoStart">AUTO START</button>
               <button class="button button-outline button-small" id="autoStop">STOP</button>
-            </div>
-            <div class="run-meta">
-              <div id="authStatus" class="auth-status">DISARMED</div>
-              <div id="linkStatus" class="auth-status">LINK: --</div>
             </div>
           </div>
         </section>

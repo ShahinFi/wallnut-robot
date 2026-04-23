@@ -19,91 +19,110 @@
     <script src="js/common/comms/orchestrator.js" defer></script>
     <script src="js/pages/script.js" defer></script>
   </head>
-  <body>
+  <body class="page-dash">
     <div class="app">
-      <header class="top">
+      <header class="top dash-topbar">
         <div>
           <div class="tag">AUTONOMOUS ROBOT CONTROL</div>
-          <h1>MOBILE ROBOT CONTROL</h1>
-          <div class="sub">control & telemetry dashboard</div>
+          <h1>DASHBOARD</h1>
         </div>
       </header>
 
-      <main class="grid">
-        <section class="panel drive">
-          <h2>Movement</h2>
-          <div class="auth-panel">
-            <div class="mini-label">PASSCODE</div>
-            <div class="auth-row">
+      <main class="dash2">
+        <section class="panel dash2-auth">
+          <div class="deck-head">
+            <div class="deck-title">Auth</div>
+          </div>
+          <div class="deck-body">
+            <div class="auth-form">
               <input
                 id="passcodeInput"
                 class="auth-input"
                 type="password"
                 inputmode="numeric"
                 autocomplete="off"
-                placeholder="Enter passcode"
+                placeholder="1234"
               />
-              <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
-              <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+              <div class="auth-buttons">
+                <button class="button button-outline button-small" onclick="armRobot()">ARM</button>
+                <button class="button button-secondary button-small" onclick="disarmRobot()">DISARM</button>
+              </div>
             </div>
-            <div id="authStatus" class="auth-status">DISARMED</div>
-            <div id="linkStatus" class="auth-status">LINK: --</div>
-          </div>
-          <div class="container">
-            <button class="button fwd" data-requires-arm="1" onclick="forwards5()">FORWARD<br />5cm</button>
-            <button class="button fwd" data-requires-arm="1" onclick="forwards20()">FORWARD<br />20cm</button>
-            <button class="button back" data-requires-arm="1" onclick="backwards5()">BACKWARD<br />5cm</button>
-            <button class="button back" data-requires-arm="1" onclick="backwards20()">BACKWARD<br />20cm</button>
-          </div>
-          <div class="utility-actions">
-            <button class="button button-secondary" onclick="openMazeSolver()">MAZE SOLVER</button>
+            <div class="auth-meta">
+              <div id="authStatus" class="auth-status">DISARMED</div>
+              <div id="linkStatus" class="auth-status">LINK: --</div>
+            </div>
           </div>
         </section>
 
-        <section class="panel turn">
-          <h2>Turning</h2>
-          <label class="label" for="compassSlider">Turn Angle</label>
-          <input
-            type="range"
-            min="-360"
-            max="360"
-            step="5"
-            id="compassSlider"
-            oninput="updateCompass(this.value)"
-            onchange="sendCompassValue(this.value)"
-            value="0"
-          />
-          <div id="compassValue">0Â°</div>
-
-          <div class="north-container">
-            <button class="button button-outline" data-requires-arm="1" onclick="setNorth()">SET NORTH</button>
-            <button class="button button-primary" data-requires-arm="1" onclick="faceNorth()">FACE NORTH</button>
+        <section class="panel dash2-mission">
+          <div class="deck-head">
+            <div class="deck-title">Mission</div>
+          </div>
+          <div class="deck-body">
+            <button class="button button-primary button-small" onclick="openMazeSolver()">MAZE DASHBOARD</button>
           </div>
         </section>
 
-        <section class="panel sensor">
-          <h2>Lidar</h2>
-          <div class="readout">
-            <div class="mini-label">DISTANCE</div>
-            <div id="lidarValue">-- cm</div>
-            <div id="lidarWarning" class="warning hidden">Warning!</div>
+        <section class="panel dash2-drive">
+          <div class="deck-head">
+            <div class="deck-title">Movement</div>
+          </div>
+          <div class="deck-body">
+            <div class="container">
+              <button class="button fwd" data-requires-arm="1" onclick="forwards5()">FORWARD<br />5cm</button>
+              <button class="button fwd" data-requires-arm="1" onclick="forwards20()">FORWARD<br />20cm</button>
+              <button class="button back" data-requires-arm="1" onclick="backwards5()">BACKWARD<br />5cm</button>
+              <button class="button back" data-requires-arm="1" onclick="backwards20()">BACKWARD<br />20cm</button>
+            </div>
           </div>
         </section>
 
-        <section class="panel sensor">
-          <h2>Compass</h2>
-          <div class="readout">
-            <div class="mini-label">HEADING</div>
-            <div id="compassWebValue">--</div>
+        <section class="panel dash2-turn">
+          <div class="deck-head">
+            <div class="deck-title">Turning</div>
+          </div>
+          <div class="deck-body">
+            <label class="label" for="compassSlider">Turn Angle</label>
+            <input
+              type="range"
+              min="-360"
+              max="360"
+              step="5"
+              id="compassSlider"
+              oninput="updateCompass(this.value)"
+              onchange="sendCompassValue(this.value)"
+              value="0"
+            />
+            <div id="compassValue">0°</div>
+            <div class="north-container">
+              <button class="button button-outline" data-requires-arm="1" onclick="setNorth()">SET NORTH</button>
+              <button class="button button-secondary" data-requires-arm="1" onclick="faceNorth()">FACE NORTH</button>
+            </div>
           </div>
         </section>
 
-        <section class="panel sensor">
-          <h2>Color Sensor</h2>
-          <div class="readout">
-            <div class="mini-label">RGB</div>
-            <div id="colorValue">--</div>
-            <div id="colorSwatch" class="color-swatch"></div>
+        <section class="panel dash2-sensors">
+          <div class="deck-head">
+            <div class="deck-title">Sensors</div>
+          </div>
+          <div class="deck-body">
+            <div class="telemetry">
+              <div class="tele-item">
+                <div class="mini-label">LIDAR</div>
+                <div id="lidarValue">-- cm</div>
+                <div id="lidarWarning" class="warning hidden">Warning!</div>
+              </div>
+              <div class="tele-item">
+                <div class="mini-label">COMPASS</div>
+                <div id="compassWebValue">--</div>
+              </div>
+              <div class="tele-item tele-color">
+                <div class="mini-label">COLOR</div>
+                <div id="colorValue">--</div>
+                <div id="colorSwatch" class="color-swatch"></div>
+              </div>
+            </div>
           </div>
         </section>
       </main>

@@ -64,6 +64,17 @@ body.page-maze .app {
   min-height: 100svh;
 }
 
+/* Main dashboard page: keep the same one-screen dashboard feel as /maze, but simpler. */
+body.page-dash {
+  height: 100dvh;
+  min-height: 100svh;
+  overflow: hidden;
+}
+body.page-dash .app {
+  height: 100dvh;
+  min-height: 100svh;
+}
+
 .app {
   width: calc(100vw - 16px);
   margin: 0 auto;
@@ -94,6 +105,137 @@ body.page-maze .app {
   margin-bottom: var(--gap);
   position: relative;
   overflow: hidden;
+}
+
+.dash-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.page-dash .dash-topbar {
+  padding: 10px 12px;
+  align-items: center;
+}
+
+body.page-dash h1 {
+  font-size: clamp(18px, 2.8vw, 30px);
+}
+
+body.page-dash .tag {
+  margin-bottom: 4px;
+}
+
+.dash2 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "auth drive sensors"
+    "mission turn sensors";
+}
+
+body.page-dash .dash2 > .panel {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+
+body.page-dash .dash2-auth { grid-area: auth; }
+body.page-dash .dash2-mission { grid-area: mission; }
+body.page-dash .dash2-drive { grid-area: drive; }
+body.page-dash .dash2-turn { grid-area: turn; }
+body.page-dash .dash2-sensors { grid-area: sensors; }
+
+body.page-dash .deck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  padding-bottom: 6px;
+}
+
+body.page-dash .deck-title {
+  font-weight: 900;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+body.page-dash .deck-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+body.page-dash .dash2-sensors .deck-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+body.page-dash .telemetry {
+  grid-template-columns: 1fr;
+}
+
+body.page-dash .tele-color {
+  grid-column: auto;
+}
+
+body.page-dash .color-swatch {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+body.page-dash .dash2-drive .container .button {
+  min-height: 66px;
+  padding: 10px 10px;
+}
+
+body.page-dash #lidarValue,
+body.page-dash #compassWebValue,
+body.page-dash #colorValue {
+  font-weight: 900;
+  text-align: center;
+}
+
+body.page-dash #lidarValue {
+  font-size: clamp(20px, 2.6vw, 28px);
+}
+body.page-dash #compassWebValue {
+  font-size: clamp(18px, 2.2vw, 24px);
+}
+body.page-dash #colorValue {
+  font-size: 16px;
+}
+
+@media (max-width: 980px) {
+  body.page-dash {
+    height: auto;
+    min-height: 100svh;
+    overflow-y: auto;
+  }
+  body.page-dash .app {
+    height: auto;
+    min-height: 100svh;
+  }
+  body.page-dash .dash2 {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: visible;
+  }
 }
 
 .tag,
@@ -131,10 +273,11 @@ h1 {
   gap: var(--gap);
   grid-template-columns: 1.2fr 1fr 1fr;
   grid-template-areas:
+    "mission mission mission"
     "drive turn lidar"
     "drive turn compass"
     "drive turn color";
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto repeat(3, minmax(0, 1fr));
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -143,12 +286,12 @@ h1 {
 }
 .grid::-webkit-scrollbar { width: 0; height: 0; }
 
+.mission { grid-area: mission; }
 .drive { grid-area: drive; }
 .turn { grid-area: turn; }
-/* Main dashboard uses fixed panel ordering. Maze page assigns areas via explicit classes. */
-.grid:not(.maze-grid) > .panel:nth-child(3) { grid-area: lidar; }
-.grid:not(.maze-grid) > .panel:nth-child(4) { grid-area: compass; }
-.grid:not(.maze-grid) > .panel:nth-child(5) { grid-area: color; }
+.lidar-panel { grid-area: lidar; }
+.compass-panel { grid-area: compass; }
+.color-panel { grid-area: color; }
 
 .panel {
   padding: var(--pad);
@@ -169,6 +312,11 @@ h2 {
 .container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.mission-row {
+  display: flex;
   gap: 10px;
 }
 
@@ -305,6 +453,54 @@ button:disabled,
   background: linear-gradient(135deg, rgba(255,79,216,.9), rgba(155,107,255,.7));
   border: 1px solid rgba(255, 79, 216, 0.6);
   box-shadow: 0 0 18px rgba(255,79,216,.22), 0 8px 16px rgba(0,0,0,.28);
+}
+
+/* Main dashboard: keep Movement/Turning controls visually consistent with /maze (less "neon candy"). */
+body.page-dash .fwd {
+  background: linear-gradient(135deg, rgba(255,215,106,.22), rgba(255,79,216,.12));
+  border: 1px solid rgba(255,215,106,.55);
+  color: var(--text);
+  box-shadow: none;
+}
+
+body.page-dash .back {
+  background: linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  border: 1px solid rgba(88,243,255,.24);
+  color: var(--text);
+  box-shadow: none;
+}
+
+body.page-dash #compassSlider::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(88,243,255,.38), rgba(155,107,255,.26));
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+body.page-dash #compassSlider::-moz-range-track {
+  background: linear-gradient(90deg, rgba(88,243,255,.38), rgba(155,107,255,.26));
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+body.page-dash #compassSlider::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  margin-top: -7px;
+  border: 2px solid rgba(255,255,255,.9);
+  background: radial-gradient(circle at 30% 30%, white, rgba(88,243,255,.65) 30%, rgba(155,107,255,.75) 78%);
+  box-shadow: 0 0 14px rgba(88,243,255,.28);
+}
+
+body.page-dash #compassSlider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255,255,255,.9);
+  background: radial-gradient(circle at 30% 30%, white, rgba(88,243,255,.65) 30%, rgba(155,107,255,.75) 78%);
+  box-shadow: 0 0 14px rgba(88,243,255,.28);
+}
+
+body.page-dash #compassValue {
+  font-size: 22px;
+  margin-top: 8px;
+  text-shadow: 0 0 12px rgba(88,243,255,.22);
 }
 
 .label,
@@ -698,8 +894,9 @@ body.page-maze .maze2 {
   gap: 8px;
   overflow: hidden;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(260px, 320px);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
+    "auth map sensors"
     "run map sensors"
     "tools map sensors";
 }
@@ -710,6 +907,7 @@ body.page-maze .maze2 > .panel {
   padding: 10px;
 }
 
+body.page-maze .maze2-auth { grid-area: auth; }
 body.page-maze .maze2-run { grid-area: run; }
 body.page-maze .maze2-map { grid-area: map; }
 body.page-maze .maze2-sensors {
@@ -755,6 +953,26 @@ body.page-maze .deck-title {
 body.page-maze .deck-body {
   display: grid;
   gap: 8px;
+  min-width: 0;
+}
+
+.auth-form {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auth-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
