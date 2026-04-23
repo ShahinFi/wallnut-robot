@@ -3,10 +3,6 @@
 static String espInput;
 static const size_t kMaxEspLineLen = 128;
 
-// By default we do NOT echo Serial2 traffic to USB Serial, because it can spam
-// tools that use the USB port (plot scripts, logging, etc.).
-static const bool kEchoEspToUsbSerial = false;
-
 void espSetup() {
   Serial2.begin(115200);
 }
@@ -163,7 +159,6 @@ bool espPoll(EspCommand& out) {
 
   while (Serial2.available()) {
     char c = Serial2.read();
-    if (kEchoEspToUsbSerial) Serial.write(c);
     if (c == '\n' || c == '\r') {
       if (espInput.length()) {
         const String line = espInput;

@@ -18,7 +18,6 @@
 #include "tasks/sequence_executor/sequence_executor_task.h"
 #include "esp/esp_uart.h"
 #include "telemetry/telemetry.h"
-#include "telemetry/telemetry_test.h"
 #include "color/color_sensor.h"
 #include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
@@ -36,17 +35,6 @@
 #endif
 #ifndef ESP_PASSCODE_INT
 #define ESP_PASSCODE_INT 1234
-#endif
-
-// AVR-only free SRAM estimator (helps diagnose "stuck at boot" after adding features).
-#if defined(ARDUINO_ARCH_AVR)
-extern int __heap_start, *__brkval;
-static int freeRamBytes() {
-  int v;
-  return (int)&v - (__brkval ? (int)__brkval : (int)&__heap_start);
-}
-#else
-static int freeRamBytes() { return -1; }
 #endif
 
 static Compass         compass;
@@ -282,150 +270,11 @@ static void sendEvtPose_(const char* tag, float extra) {
   Serial2.println();
 }
 
-// Quick hardware sanity test for turret direction/sign.
-// Press:
-// - 'u' => cmd +0.25 for 1s
-// - 'j' => cmd -0.25 for 1s
-static void turretDebugPulse(float cmd, uint32_t ms) {
-  const long t0 = turretMotor.ticksAbs();
-  const float a0 = turretAngle.angleDegSigned();
-
-  turretMotor.setCmd(cmd);
-  const uint32_t endMs = millis() + ms;
-  while ((int32_t)(millis() - endMs) < 0) {
-    turretAngle.update(turretMotor.ticksAbs(), turretMotor.lastCmd());
-    delay(5);
-  }
-  turretMotor.stop();
-  turretAngle.update(turretMotor.ticksAbs(), 0.0f);
-
-  const long t1 = turretMotor.ticksAbs();
-  const long dt = t1 - t0;
-  const long dir = (cmd > 0.0f) ? 1L : -1L;
-  const long dsignedTicks = (long)turretAngle.config().angleSign * dir * dt;
-  const float a1 = turretAngle.angleDegSigned();
-
-  Serial.print("Turret pulse cmd=");
-  Serial.print(cmd, 2);
-  Serial.print(" ms=");
-  Serial.print((unsigned long)ms);
-  Serial.print(" dticks=");
-  Serial.print(dt);
-  Serial.print(" dsigned_ticks=");
-  Serial.print(dsignedTicks);
-  Serial.print(" ddeg=");
-  Serial.print(a1 - a0, 2);
-
-  Serial.println();
-}
-
-static void turretDebugOneRev(float cmd) {
-  const int dirSign = (cmd < 0.0f) ? -1 : 1;
-  const uint32_t tpr = turretAngle.ticksPerRevForDirSign(dirSign);
-  if (tpr == 0) {
-    Serial.println("Turret 1rev: no ticksPerRev (calibrate first).");
-    return;
-  }
-
-  const uint32_t kTimeoutMs = 8000;
-  const long t0 = turretMotor.ticksAbs();
-  const float a0 = turretAngle.angleDegSigned();
-
-  turretMotor.setCmd(cmd);
-  const uint32_t startMs = millis();
-  bool timedOut = false;
-  while ((uint32_t)(millis() - startMs) < kTimeoutMs) {
-    const long tNow = turretMotor.ticksAbs();
-    turretAngle.update(tNow, turretMotor.lastCmd());
-    if ((tNow - t0) >= (long)tpr) break;
-    delay(5);
-  }
-  if ((uint32_t)(millis() - startMs) >= kTimeoutMs) timedOut = true;
-
-  turretMotor.stop();
-  turretAngle.update(turretMotor.ticksAbs(), 0.0f);
-
-  const long t1 = turretMotor.ticksAbs();
-  const long dt = t1 - t0;
-  const long dir = (cmd > 0.0f) ? 1L : -1L;
-  const long dsignedTicks = (long)turretAngle.config().angleSign * dir * dt;
-  const float a1 = turretAngle.angleDegSigned();
-
-  Serial.print("Turret 1rev cmd=");
-  Serial.print(cmd, 2);
-  Serial.print(" targetTicks=");
-  Serial.print((unsigned long)tpr);
-  Serial.print(" dticks=");
-  Serial.print(dt);
-  Serial.print(" dsigned_ticks=");
-  Serial.print(dsignedTicks);
-  Serial.print(" ddeg=");
-  Serial.print(a1 - a0, 2);
-  if (timedOut) Serial.print(" (TIMEOUT)");
-  Serial.println();
-}
-
-static void handleAtCommand(const String& cmdRaw) {
-  String cmd = cmdRaw;
-  cmd.trim();
-  if (cmd.length() == 0) return;
-
-  // @tpr 1234   => set BOTH + and - ticks/rev (persist)
-  // @tpr=1234   => same
-  // @tpr+ 1234  => set + only (persist)
-  // @tpr- 1234  => set - only (persist)
-  if (cmd.startsWith("tpr")) {
-    const char ch = (cmd.length() > 3) ? cmd.charAt(3) : '\0';
-    const bool setPosOnly = (ch == '+');
-    const bool setNegOnly = (ch == '-');
-
-    int prefixLen = 3;
-    if (setPosOnly || setNegOnly) prefixLen = 4;
-
-    String rest = cmd.substring(prefixLen);
-    rest.trim();
-    if (rest.startsWith("=")) rest = rest.substring(1);
-    rest.trim();
-
-    const long v = rest.toInt();
-    if (v <= 0) {
-      Serial.println("Usage: @tpr 1234 | @tpr+ 1234 | @tpr- 1234");
-      return;
-    }
-
-    const uint32_t tpr = (uint32_t)v;
-    bool ok = false;
-    if (setPosOnly) ok = turretEncCal.setTicksPerRevPos(tpr);
-    else if (setNegOnly) ok = turretEncCal.setTicksPerRevNeg(tpr);
-    else ok = turretEncCal.setTicksPerRev(tpr);
-
-    Serial.print("Turret set ticksPerRev");
-    if (setPosOnly) Serial.print("+");
-    else if (setNegOnly) Serial.print("-");
-    Serial.print("=");
-    Serial.print((unsigned long)tpr);
-    Serial.println(ok ? " OK" : " FAIL");
-
-    if (ok) {
-      turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
-      Serial2.print("TURCAL:");
-      Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
-      Serial2.print(",");
-      Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
-    }
-    return;
-  }
-
-  Serial.print("Unknown @cmd: ");
-  Serial.println(cmd);
-}
-
 static void onTurretSweepSample(const TurretSweepScan360::Sample& s, void* user) {
   (void)user;
   // Thin scan stream (bandwidth-friendly).
   // TSCAN:angleDeg,distanceCm
-  // Do not stream per-sample scan points to USB Serial (too noisy for debugging).
-  // Keep streaming to Serial2 for browser-side mapping.
+  // Do not stream per-sample scan points anywhere except the ESP link.
 
   // Mirror scan stream to ESP (Serial2) so the browser can do mapping/SLAM.
   Serial2.print("TSCAN:");
@@ -475,22 +324,15 @@ static void maybeRequestEspIp_() {
 }
 
 void setup() {
-  Serial.begin(115200);
   maze_lcd::init();
-  {
-    Serial.print("Free RAM at boot: ");
-    Serial.println(freeRamBytes());
-  }
 
   // --- Hardware ---
   if (!compass.begin()) {
-    Serial.println("Compass failed");
     maze_lcd::showFatal("Compass failed", "Check I2C/wiring");
     while (1) {}
   }
 
   if (!lidar.begin()) {
-    Serial.println("LiDAR failed");
     maze_lcd::showFatal("LiDAR failed", "Check I2C/wiring");
     while (1) {}
   }
@@ -510,9 +352,6 @@ void setup() {
     turretSweep.setConfig(cfg);
   }
   colorSensorOk = colorSensor.begin();
-  if (!colorSensorOk) {
-    Serial.println("Color sensor failed (continuing without RGB telemetry)");
-  }
 
   motorInit();
   pinMode(kButtonPin, INPUT_PULLUP);
@@ -554,8 +393,6 @@ void setup() {
   driveByDistance.setConfig(dcfg);
 
   seqExecTask.setSequence(seqSteps);
-
-  Serial.println("Ready. Send 'd' drive, 'k' cal, 'h' set heading, 'q' exec.");
 }
 
 void loop() {
@@ -582,16 +419,7 @@ void loop() {
   if (turretSweep.active()) {
     const bool done = turretSweep.update(turretTicksNow, nowMs);
     if (done) {
-      Serial.println("TSCAN:DONE");
       Serial2.println("TSCAN:DONE");
-    }
-    if (Serial.available()) {
-      const char c = (char)Serial.read();
-      if (c == 'x' || c == 'X') {
-        turretSweep.cancel();
-        Serial.println("TSCAN:CANCEL");
-        Serial2.println("TSCAN:CANCEL");
-      }
     }
     return;
   }
@@ -610,7 +438,6 @@ void loop() {
 
   telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel,
                   wOdom.eastCm, wOdom.northCm);
-  telemetryTestUpdate(lidarFilteredCm);
 
   if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
     lastRgbMs = nowMs;
@@ -765,22 +592,7 @@ void loop() {
 
           // Rebase world odometry with the matched heading to avoid a fake "turn jump" in the integrator.
           odomWorldRebase(matchWrapped);
-
-          Serial.print("Compass offset adjusted by ");
-          Serial.print(kAlpha * err, 2);
-          Serial.print(" deg (err=");
-          Serial.print(err, 2);
-          Serial.print(") newOff=");
-          Serial.println(off, 2);
         }
-
-        Serial.print("Map pose set (odom world): east=");
-        Serial.print(east, 2);
-        Serial.print(" north=");
-        Serial.println(north, 2);
-      } else {
-        Serial.print("Bad MapPose payload: ");
-        Serial.println(espCmd.text);
       }
       return;
     }
@@ -789,7 +601,6 @@ void loop() {
       turretEncCal.setZeroTicks(turretMotor.ticksAbs());
       // Also zero the continuous turret-to-body angle state.
       turretAngle.setZero();
-      Serial.println("Turret zero set");
       // NOTE: Keep TURCAL:* reserved for ticks/rev calibration values only.
       // Turret zero is a scan-control action, so it uses its own channel.
       Serial2.println("TURZERO:OK");
@@ -800,7 +611,6 @@ void loop() {
       const uint32_t neg = (uint32_t)espCmd.value2;
       // Keep range aligned with TurretEncoderCal EEPROM sanity checks.
       if (pos < 10u || pos > 200000u || neg < 10u || neg > 200000u) {
-        Serial.println("Turret TPR out of range");
         Serial2.println("TURCAL:FAIL");
         if (turretEncCal.hasCalibration()) {
           Serial2.print("TURCAL:");
@@ -815,13 +625,11 @@ void loop() {
       const bool okNeg = turretEncCal.setTicksPerRevNeg(neg);
       if (okPos && okNeg && turretEncCal.hasCalibration()) {
         turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
-        Serial.println("Turret TPR set");
         Serial2.print("TURCAL:");
         Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
         Serial2.print(",");
         Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
       } else {
-        Serial.println("Turret TPR set failed");
         Serial2.println("TURCAL:FAIL");
         if (turretEncCal.hasCalibration()) {
           Serial2.print("TURCAL:");
@@ -842,7 +650,6 @@ void loop() {
     if (espCmd.type == EspCommand::Type::TurretScanCancel) {
       if (turretSweep.active()) {
         turretSweep.cancel();
-        Serial.println("TSCAN:CANCEL");
         Serial2.println("TSCAN:CANCEL");
       }
       motorDrive(0.0f, 0.0f);
@@ -853,8 +660,6 @@ void loop() {
       if (turretSweep.active()) return;  // ignore if already scanning
       motorDrive(0.0f, 0.0f);
       const int dir = (espCmd.type == EspCommand::Type::TurretScanMinus) ? -1 : +1;
-      Serial.print("TSCAN:BEGIN,");
-      Serial.println(dir < 0 ? "-" : "+");
       Serial2.print("TSCAN:BEGIN,");
       Serial2.println(dir < 0 ? "-" : "+");
       turretSweep.begin(&turretMotor, &turretAngle, &lidar, dir, turretMotor.ticksAbs(), millis());
@@ -870,8 +675,6 @@ void loop() {
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      Serial.print("DBG:CMD BEGIN MOVE cm=");
-      Serial.println(espCmd.value);
       // Ensure CMD completion events are never missed even if the step finishes
       // within the same loop iteration (edge detector needs "was active" true).
       gSeqWasActive = true;
@@ -883,14 +686,11 @@ void loop() {
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
       seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      Serial.print("DBG:CMD BEGIN TURN deg=");
-      Serial.println(espCmd.value);
       gSeqWasActive = true;
       gReflexLatchedRed = false;
       gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::North) {
       if (!seqHeadingSet) {
-        Serial.println("Seq heading not set. Press 'h' first.");
       } else {
         const float delta = wrapDegDiff180(seqHeadingHoldDeg, heading.headingDegContinuous);
         espSteps[0] = {SequenceStepType::TurnDeg, delta};
@@ -905,118 +705,8 @@ void loop() {
     } else if (espCmd.type == EspCommand::Type::SetNorth) {
       seqHeadingHoldDeg = heading.headingDegContinuous;
       seqHeadingSet = true;
-      Serial.print("Seq heading set (ESP): ");
-      Serial.println(seqHeadingHoldDeg, 2);
     } else if (espCmd.type == EspCommand::Type::EncCal) {
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-    }
-  }
-
-  if (Serial.available()) {
-    const char peek = (char)Serial.peek();
-    if (peek == '@') {
-      Serial.read();  // consume '@'
-      const String line = Serial.readStringUntil('\n');
-      handleAtCommand(line);
-      return;
-    }
-
-    const char c = Serial.read();
-
-    // Serial control should always be able to take over. The color calibration
-    // task is initiated by a physical button, but it must not lock out console
-    // hotkeys.
-    if (colorCalTask.active()) colorCalTask.cancel();
-    if (c == 'd' || c == 'D') {
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      odomHardResetKeepWorld(heading.headingDegContinuous);
-      OdometryData od = odomRaw();
-      driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
-    }
-    if (c == 'k' || c == 'K') {
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      odomHardResetKeepWorld(heading.headingDegContinuous);
-      OdometryData od = odomRaw();
-      encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-    }
-    if (c == 'h' || c == 'H') {
-      seqHeadingHoldDeg = heading.headingDegContinuous;
-      seqHeadingSet = true;
-      Serial.print("Seq heading set: ");
-      Serial.println(seqHeadingHoldDeg, 2);
-    }
-    if (c == 'q' || c == 'Q') {
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      odomHardResetKeepWorld(heading.headingDegContinuous);
-      OdometryData od = odomRaw();
-      if (!seqHeadingSet) {
-        Serial.println("Seq heading not set. Press 'h' first.");
-      } else {
-        seqExecTask.setAlignHeading(seqHeadingHoldDeg);
-        seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-        gSeqWasActive = true;
-      }
-    }
-    if (c == 'c' || c == 'C') {
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-    }
-    if (c == 't' || c == 'T') {
-      telemetryTestStart();
-    }
-    if (c == 'u' || c == 'U') {
-      Serial.print("Turret ticksPerRev+= ");
-      Serial.print((unsigned long)turretAngle.ticksPerRevPos());
-      Serial.print(" ticksPerRev-= ");
-      Serial.println((unsigned long)turretAngle.ticksPerRevNeg());
-      turretDebugPulse(+0.25f, 1000);
-    }
-    if (c == 'j' || c == 'J') {
-      Serial.print("Turret ticksPerRev+= ");
-      Serial.print((unsigned long)turretAngle.ticksPerRevPos());
-      Serial.print(" ticksPerRev-= ");
-      Serial.println((unsigned long)turretAngle.ticksPerRevNeg());
-      turretDebugPulse(-0.25f, 1000);
-    }
-    if (c == 'o' || c == 'O') {
-      Serial.print("Turret ticksPerRev+= ");
-      Serial.print((unsigned long)turretAngle.ticksPerRevPos());
-      Serial.print(" ticksPerRev-= ");
-      Serial.println((unsigned long)turretAngle.ticksPerRevNeg());
-      turretDebugOneRev(+0.25f);
-    }
-    if (c == 'l' || c == 'L') {
-      Serial.print("Turret ticksPerRev+= ");
-      Serial.print((unsigned long)turretAngle.ticksPerRevPos());
-      Serial.print(" ticksPerRev-= ");
-      Serial.println((unsigned long)turretAngle.ticksPerRevNeg());
-      turretDebugOneRev(-0.25f);
-    }
-    if (c == 'p' || c == 'P') {
-      // Turret 1-rev scan (positive direction).
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-
-      Serial.println("TSCAN:BEGIN,+");
-      Serial2.println("TSCAN:BEGIN,+");
-      turretSweep.begin(&turretMotor, &turretAngle, &lidar, +1, turretMotor.ticksAbs(), millis());
-    }
-    if (c == 'i' || c == 'I') {
-      // Turret 1-rev scan (negative direction).
-      if (driveByDistance.active()) driveByDistance.cancel();
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-
-      Serial.println("TSCAN:BEGIN,-");
-      Serial2.println("TSCAN:BEGIN,-");
-      turretSweep.begin(&turretMotor, &turretAngle, &lidar, -1, turretMotor.ticksAbs(), millis());
     }
   }
 
@@ -1057,16 +747,11 @@ void loop() {
   if (gSeqWasActive && !seqActiveNow) {
     const SequenceExecutorTask::State st = seqExecTask.state();
     if (st == SequenceExecutorTask::State::Succeeded) {
-      Serial.println("DBG:CMD DONE -> CMDOK");
       sendEvtPose_("CMDOK", NAN);
     } else if (st == SequenceExecutorTask::State::Failed) {
-      Serial.println("DBG:CMD DONE -> CMDFAIL");
       sendEvtPose_("CMDFAIL", NAN);
     } else if (st == SequenceExecutorTask::State::Cancelled) {
-      Serial.println("DBG:CMD DONE -> CMDCANCEL");
       sendEvtPose_("CMDCANCEL", NAN);
-    } else {
-      Serial.println("DBG:CMD DONE -> (unknown state)");
     }
   }
   gSeqWasActive = seqActiveNow;
