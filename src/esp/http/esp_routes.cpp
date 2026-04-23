@@ -176,13 +176,8 @@ static void handleTurretScanCancel_() {
   g.server->send(200, "text/plain", "OK");
 }
 
-static void handleMaze_() {
-  if (!isArmed_()) return rejectNotArmed_();
-  Serial.println("Maze");
-  g.server->send(200, "text/plain", "Maze OK");
-}
-
-static void handleMazeCommand_() { handleMaze_(); }
+// NOTE: Legacy "color maze" mode was removed. The browser-driven /maze mission
+// is served via GET /maze and uses other endpoints (/scan_*, /events, /move, /turn, ...).
 
 static void handleArm_() {
   if (g.state->authState == EspState::AuthState::Locked) {
@@ -371,7 +366,6 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/north", []() { handleNorth_(); });
   server.on("/setnorth", []() { handleSetNorth_(); });
   server.on("/maze", HTTP_GET, []() { esp_static_files::serveFile(*g.server, "/esp/maze.html", "text/html"); });
-  server.on("/maze", HTTP_POST, handleMazeCommand_);
   server.on("/lidar", handleLidar_);
   server.on("/compassdata", handleCompassData_);
   server.on("/rgb", handleRgb_);

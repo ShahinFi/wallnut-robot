@@ -72,13 +72,6 @@ function setNorth() {
   console.log("set north");
 }
 
-// Solve maze
-function solveMaze() {
-  // Start the existing (color-based) maze behavior on the Mega.
-  sendCommand("/maze", { method: "POST" });
-  console.log("start color maze");
-}
-
 // Open the dedicated maze solver page (separate from color maze).
 function openMazeSolver() {
   window.location.href = "/maze";

@@ -86,13 +86,6 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
-  if (s.equalsIgnoreCase("Maze")) {
-    out.type = EspCommand::Type::Maze;
-    out.value = 0;
-    out.value2 = 0;
-    out.text = "";
-    return true;
-  }
   if (s.equalsIgnoreCase("EncCal")) {
     out.type = EspCommand::Type::EncCal;
     out.value = 0;

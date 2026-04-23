@@ -22,7 +22,6 @@
 #include "color/color_sensor.h"
 #include "color/color_classifier.h"
 #include "tasks/color_calibration/color_calibration_task.h"
-#include "tasks/color_maze/color_maze_task.h"
 
 // Optional local secrets file (gitignored): src/mega/secrets.h
 #if defined(__has_include)
@@ -69,7 +68,6 @@ static ColorRgb        lastRgb = {0, 0, 0};
 static bool            lastRgbValid = false;
 static char            gEspIpStr[16] = "0.0.0.0";
 static uint32_t        gLastIpReqMs = 0;
-static ColorMazeTask   colorMazeTask;
 static uint32_t        lastEncDbgMs = 0;
 static bool            headingValid = false;
 static CompassData     lastHeading = {};
@@ -720,7 +718,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
@@ -730,7 +727,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
@@ -740,7 +736,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
       return;
     }
@@ -842,7 +837,6 @@ void loop() {
     if (driveByDistance.active()) driveByDistance.cancel();
     if (encCalTask.active()) encCalTask.cancel();
     if (seqExecTask.active()) seqExecTask.cancel();
-    if (colorMazeTask.active()) colorMazeTask.cancel();
 
     // Turret scan commands (from browser). These must not be blocked by odom resets.
     if (espCmd.type == EspCommand::Type::TurretScanCancel) {
@@ -913,24 +907,6 @@ void loop() {
       seqHeadingSet = true;
       Serial.print("Seq heading set (ESP): ");
       Serial.println(seqHeadingHoldDeg, 2);
-    } else if (espCmd.type == EspCommand::Type::Maze) {
-      if (colorCalTask.hasCalibration()) {
-        ColorMazeTask::Config cfg;
-        cfg.driveSpeed = 0.30f;
-        cfg.backoffCm = 5.0f;
-        cfg.turnDeg = 30.0f;
-        cfg.cooldownMs = 400;
-        cfg.leftThreshold = 0.18f;
-        cfg.rightThreshold = 0.18f;
-        cfg.endThreshold = 0.14f;
-        cfg.useNormalized = true;
-        colorMazeTask.setConfig(cfg);
-        colorMazeTask.setCalibration(colorCalTask.refs(), true);
-        colorMazeTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      } else {
-        colorMazeTask.setCalibration(nullptr, false);
-        colorMazeTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      }
     } else if (espCmd.type == EspCommand::Type::EncCal) {
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
@@ -951,11 +927,9 @@ void loop() {
     // task is initiated by a physical button, but it must not lock out console
     // hotkeys.
     if (colorCalTask.active()) colorCalTask.cancel();
-    if (colorMazeTask.active()) colorMazeTask.cancel();
     if (c == 'd' || c == 'D') {
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       odomHardResetKeepWorld(heading.headingDegContinuous);
       OdometryData od = odomRaw();
       driveByDistance.beginByDistance(heading.headingDegContinuous, od.avgCmSigned, 20.0f, 0.5f);
@@ -963,7 +937,6 @@ void loop() {
     if (c == 'k' || c == 'K') {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       odomHardResetKeepWorld(heading.headingDegContinuous);
       OdometryData od = odomRaw();
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
@@ -977,7 +950,6 @@ void loop() {
     if (c == 'q' || c == 'Q') {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       odomHardResetKeepWorld(heading.headingDegContinuous);
       OdometryData od = odomRaw();
       if (!seqHeadingSet) {
@@ -992,7 +964,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
     }
     if (c == 't' || c == 'T') {
       telemetryTestStart();
@@ -1030,7 +1001,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,+");
@@ -1042,7 +1012,6 @@ void loop() {
       if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
-      if (colorMazeTask.active()) colorMazeTask.cancel();
       motorDrive(0.0f, 0.0f);
 
       Serial.println("TSCAN:BEGIN,-");
@@ -1058,13 +1027,6 @@ void loop() {
     // When calibration finishes and becomes available, publish the refs once so
     // the web UI can show stable swatches for CLASS.
     if (!hadCal && colorCalTask.hasCalibration()) sendRgbRefsToEsp_();
-    mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
-    return;
-  }
-
-  if (colorMazeTask.active()) {
-    OdometryData od = odomRaw();
-    colorMazeTask.update(heading.headingDegContinuous, od.avgCmSigned, &lastRgb, lastRgbValid);
     mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
     return;
   }

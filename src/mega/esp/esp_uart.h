@@ -9,7 +9,6 @@ struct EspCommand {
     Turn,
     North,
     SetNorth,
-    Maze,
     EncCal,
     MapPose,
     TurretZero,

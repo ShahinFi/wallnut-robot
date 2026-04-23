@@ -209,11 +209,6 @@ async function disarmRobot() {
   refreshAuth();
 }
 
-function startMazeSolver() {
-  // Use POST so GET /maze can serve the page.
-  sendCommand("/maze", { method: "POST" });
-}
-
 function startEncoderCalibration() {
   sendCommand("/enc_cal", { method: "POST" })
     .then(() => {
