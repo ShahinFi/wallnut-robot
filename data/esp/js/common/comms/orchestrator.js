@@ -5,9 +5,9 @@
   if (window.CommsOrchestrator) return;
 
   const tm = window.TelemetryManager;
-  const am = window.AlertsManager;
+  const am = window.AlertsManager || null;
   const store = window.TelemetryStore;
-  if (!tm || !am || !store) {
+  if (!tm || !store) {
     console.warn("CommsOrchestrator missing dependency");
     return;
   }
@@ -25,7 +25,8 @@
   let running = true;
   let autonomyRunning = false;
   let timer = 0;
-  let lastMode = "";
+  let lastKey = "";
+  let lastArmed = false;
 
   function netMode_() {
     const g = window.NetGate;
@@ -34,28 +35,45 @@
 
   function apply_() {
     const mode = netMode_();
-    if (mode === lastMode && timer) return;
-    lastMode = mode;
+    const st0 = store.get ? store.get() : null;
+    const auth0 = String(st0 && st0.auth && st0.auth.state ? st0.auth.state : "DISARMED").toUpperCase();
+    const key = `${mode}|${auth0}|${autonomyRunning ? 1 : 0}`;
+    if (key === lastKey && timer) return;
+    lastKey = key;
 
     if (!running) {
       tm.stop();
-      am.stop();
+      if (am) am.stop();
       return;
     }
+
+    const armed = auth0 === "ARMED";
+    if (!armed) {
+      if (lastArmed) {
+        if (typeof store.clearTelemetry === "function") store.clearTelemetry();
+      }
+      lastArmed = false;
+      tm.stop();
+      if (am) am.stop();
+      return;
+    }
+    lastArmed = true;
 
     if (mode === "scan") {
       tm.setPeriod(cfg.telemetryScanMs);
       tm.start();
       // During scan we pause alerts to preserve bandwidth (scan is transactional).
-      am.stop();
+      if (am) am.stop();
       return;
     }
 
     if (mode === "cmd") {
       tm.setPeriod(cfg.telemetryCmdMs);
       tm.start();
-      am.setPeriod(cfg.alertsCmdMs);
-      am.start();
+      if (am) {
+        am.setPeriod(cfg.alertsCmdMs);
+        am.start();
+      }
       return;
     }
 
@@ -63,10 +81,12 @@
     tm.setPeriod(cfg.telemetryIdleMs);
     tm.start();
     if (autonomyRunning) {
-      am.setPeriod(cfg.alertsIdleMs);
-      am.start();
+      if (am) {
+        am.setPeriod(cfg.alertsIdleMs);
+        am.start();
+      }
     } else {
-      am.stop();
+      if (am) am.stop();
     }
   }
 
@@ -86,7 +106,7 @@
     if (timer) clearTimeout(timer);
     timer = 0;
     tm.stop();
-    am.stop();
+    if (am) am.stop();
   }
 
   function setAutonomyRunning(v) {
@@ -96,4 +116,3 @@
 
   window.CommsOrchestrator = { start, stop, setAutonomyRunning, _cfg: cfg, _mode: netMode_ };
 })();
-

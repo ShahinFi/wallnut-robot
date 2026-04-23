@@ -15,10 +15,6 @@
   let timer = 0;
   let inFlight = false;
 
-  // Simple moving average for link age (display only).
-  const kMegaAgeWindow = 6;
-  const megaAgeBuf = [];
-
   function parseRgbRefs_(s) {
     const text = String(s || "").trim();
     if (!text.startsWith("REFS:")) return null;
@@ -122,19 +118,6 @@
       const j = await fetchJsonWithTimeout_("/telemetry", 1500);
       if (!j) return;
 
-      const authText = String(j.auth || "DISARMED").toUpperCase();
-      const pending = authText === "PENDING" || !!j.pending;
-      const triesLeft = Number(j.tries_left);
-      const megaAgeMs = Number(j.mega_age_ms);
-
-      const ageOk = Number.isFinite(megaAgeMs) && megaAgeMs !== 0xffffffff;
-      if (ageOk) {
-        megaAgeBuf.push(megaAgeMs);
-        while (megaAgeBuf.length > kMegaAgeWindow) megaAgeBuf.shift();
-      }
-      const megaAgeAvg =
-          megaAgeBuf.length > 0 ? megaAgeBuf.reduce((acc, v) => acc + v, 0) / megaAgeBuf.length : NaN;
-
       const lidar = parseLidarCm_(j.lidar);
       const comp = parseCompass_(j.compass);
       const od = parseOdom_(j.odom);
@@ -143,11 +126,6 @@
       const rgbRefs = parseRgbRefs_(j.rgb_refs);
 
       store.set({
-        auth: { state: authText, triesLeft: Number.isFinite(triesLeft) ? triesLeft : 3, pending },
-        link: {
-          megaAgeMs: Number.isFinite(megaAgeMs) ? megaAgeMs : null,
-          megaAgeMsAvg: Number.isFinite(megaAgeAvg) ? Math.round(megaAgeAvg) : null,
-        },
         telemetry: {
           lidarCm: lidar.cm,
           lidarPacket: lidar.raw,

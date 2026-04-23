@@ -42,37 +42,9 @@ function setControlsEnabled(enabled) {
   });
 }
 
-function setSensorPlaceholdersLocked(locked) {
-  const lidarEl = document.getElementById("lidarValue");
-  const compassEl = document.getElementById("compassWebValue");
-  const colorEl = document.getElementById("colorValue");
-  const swatchEl = document.getElementById("colorSwatch");
-  const encEl = document.getElementById("encCalValue");
-  const turretEl = document.getElementById("turretCalValue");
-  const warnEl = document.getElementById("lidarWarning");
-  if (lidarEl) lidarEl.innerText = locked ? "LOCKED" : "-- cm";
-  if (compassEl) compassEl.innerText = "--";
-  if (colorEl) colorEl.innerText = "--";
-  if (encEl) encEl.innerText = "--";
-  if (turretEl) turretEl.innerText = "--";
-  if (locked) {
-    encCalUiState = CalUiState.Idle;
-  }
-  if (swatchEl) {
-    swatchEl.style.backgroundColor = "transparent";
-    swatchEl.classList.add("is-empty");
-  }
-  if (warnEl) warnEl.classList.add("hidden");
-}
-
 function setAuthStatus(text) {
   const el = document.getElementById("authStatus");
   if (el) el.innerText = text;
-}
-
-function requiresArmDisabled() {
-  const el = document.querySelector("[data-requires-arm='1']");
-  return !!(el && el.disabled);
 }
 
 // Auth/link/telemetry are rendered from window.TelemetryStore (polled via /telemetry).
@@ -94,40 +66,12 @@ async function armRobot() {
   setAuthStatus("ARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetchWithTimeout("/arm", {
+    await fetchWithTimeout("/arm", {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `code=${encodeURIComponent(code)}`,
     });
-    const text = (await res.text()).trim();
-    if (res.status === 202 || text === "PENDING") {
-      setAuthStatus("ARMING...");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(false);
-      return;
-    }
-    if (text === "OK") {
-      setAuthStatus("ARMED");
-      setControlsEnabled(true);
-    } else if (text === "LOCKED") {
-      setAuthStatus("LOCKED (RESET REQUIRED)");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(true);
-    } else if (text.startsWith("FAIL:")) {
-      const tries = text.split(":")[1] || "";
-      setAuthStatus(`WRONG PASSCODE (PASSCODE TRIES LEFT: ${tries})`);
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(false);
-    } else if (text === "NO_REPLY") {
-      setAuthStatus("NO REPLY FROM ROBOT");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(false);
-    } else {
-      setAuthStatus(text || "ARM ERROR");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(false);
-    }
   } catch (e) {
     setAuthStatus("ARM ERROR");
   }
@@ -137,19 +81,7 @@ async function disarmRobot() {
   setAuthStatus("DISARMING...");
   setControlsEnabled(false);
   try {
-    const res = await fetchWithTimeout("/disarm", { method: "POST", cache: "no-store" });
-    const text = (await res.text()).trim();
-    if (res.status === 202 || text === "PENDING") {
-      setAuthStatus("DISARMING...");
-      setControlsEnabled(false);
-      return;
-    }
-    if (text === "LOCKED") {
-      setAuthStatus("LOCKED (RESET REQUIRED)");
-      setSensorPlaceholdersLocked(true);
-    } else if (text === "NO_REPLY") {
-      setAuthStatus("NO REPLY FROM ROBOT");
-    }
+    await fetchWithTimeout("/disarm", { method: "POST", cache: "no-store" });
   } catch (e) {}
 }
 
@@ -241,19 +173,19 @@ function renderFromStore_() {
   if (pending) {
     setAuthStatus("PENDING...");
     setControlsEnabled(false);
-    setSensorPlaceholdersLocked(false);
+    encCalUiState = CalUiState.Idle;
   } else if (auth === "ARMED") {
     setAuthStatus("ARMED");
     setControlsEnabled(true);
   } else if (auth === "LOCKED") {
     setAuthStatus("LOCKED (RESET REQUIRED)");
     setControlsEnabled(false);
-    setSensorPlaceholdersLocked(true);
+    encCalUiState = CalUiState.Idle;
   } else {
     const tries = Number.isFinite(triesLeft) ? triesLeft : 3;
     setAuthStatus(`DISARMED (PASSCODE TRIES LEFT: ${tries})`);
     setControlsEnabled(false);
-    setSensorPlaceholdersLocked(false);
+    encCalUiState = CalUiState.Idle;
   }
 
   // Link status.
@@ -346,6 +278,9 @@ function renderFromStore_() {
 }
 
 // Start centralized comms and render on store updates.
+try {
+  if (window.AuthManager) window.AuthManager.start();
+} catch {}
 try {
   if (window.CommsOrchestrator) window.CommsOrchestrator.start();
 } catch {}

@@ -67,5 +67,30 @@
     return () => subs.delete(cb);
   }
 
-  window.TelemetryStore = { get: () => state, set, subscribe, _snap: snap };
+  function clearTelemetry() {
+    state.telemetry = {
+      lidarCm: NaN,
+      lidarPacket: "",
+      compassDeg: NaN,
+      compassLabel: "",
+      compassRaw: "",
+      odomEast: NaN,
+      odomNorth: NaN,
+      odomRaw: "",
+      rgb: { r: null, g: null, b: null },
+      rgbRaw: "",
+      rgbClass: 0,
+      rgbRefs: null,
+      encCal: "--",
+      turretCal: "--",
+    };
+    version++;
+    for (const cb of subs) {
+      try {
+        cb(snap());
+      } catch {}
+    }
+  }
+
+  window.TelemetryStore = { get: () => state, set, subscribe, clearTelemetry, _snap: snap };
 })();

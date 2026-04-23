@@ -22,6 +22,13 @@ static Ctx g;
 static bool isArmed_() { return g.state && g.state->isArmed(); }
 static void rejectNotArmed_() { g.server->send(403, "text/plain", "NOT_ARMED"); }
 
+static const char* authStateText_(const EspState& s) {
+  if (s.authPending) return "PENDING";
+  if (s.authState == EspState::AuthState::Armed) return "ARMED";
+  if (s.authState == EspState::AuthState::Locked) return "LOCKED";
+  return "DISARMED";
+}
+
 static void sendJsonStringContent_(ESP8266WebServer& server, const char* s) {
   server.sendContent("\"");
   if (!s) {
@@ -108,10 +115,7 @@ static void handleEncCal_() {
     return;
   }
 
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "--");
-    return;
-  }
+  if (!isArmed_()) return rejectNotArmed_();
   g.server->send(200, "text/plain", g.state->encCalPacket);
 }
 
@@ -195,16 +199,33 @@ static void handleDisarm_() {
   g.server->send(202, "text/plain", "PENDING");
 }
 
+static void handleAuthState_() {
+  // Minimal public endpoint: auth status + link health only.
+  const uint32_t now = millis();
+  const uint32_t ageMs = g.state->hasMegaRx ? (now - g.state->lastMegaRxMs) : 0xFFFFFFFFUL;
+  const char* auth = authStateText_(*g.state);
+
+  g.server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g.server->sendHeader("Cache-Control", "no-store");
+  g.server->send(200, "application/json", "");
+
+  g.server->sendContent("{\"auth\":");
+  sendJsonStringContent_(*g.server, auth);
+  g.server->sendContent(",\"tries_left\":");
+  g.server->sendContent(String((unsigned)g.state->triesLeft));
+  g.server->sendContent(",\"mega_age_ms\":");
+  g.server->sendContent(String((unsigned long)ageMs));
+  g.server->sendContent("}");
+}
+
 static void handleTelemetry_() {
+  if (!isArmed_()) return rejectNotArmed_();
   // Single snapshot endpoint for UI polling.
   // Uses cached ESP-side state only (no Mega round-trip).
   const uint32_t now = millis();
   const uint32_t ageMs = g.state->hasMegaRx ? (now - g.state->lastMegaRxMs) : 0xFFFFFFFFUL;
 
-  const char* auth = "DISARMED";
-  if (g.state->authPending) auth = "PENDING";
-  else if (g.state->authState == EspState::AuthState::Armed) auth = "ARMED";
-  else if (g.state->authState == EspState::AuthState::Locked) auth = "LOCKED";
+  const char* auth = authStateText_(*g.state);
 
   g.server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   g.server->sendHeader("Cache-Control", "no-store");
@@ -338,6 +359,7 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/maze", HTTP_GET, []() { esp_static_files::serveFile(*g.server, "/esp/maze.html", "text/html"); });
   server.on("/arm", HTTP_POST, handleArm_);
   server.on("/disarm", HTTP_POST, handleDisarm_);
+  server.on("/auth_state", HTTP_GET, handleAuthState_);
   server.on("/enc_cal", handleEncCal_);
   server.on("/turret_zero", HTTP_POST, handleTurretZero_);
   server.on("/turret_tpr", HTTP_POST, handleTurretTpr_);
