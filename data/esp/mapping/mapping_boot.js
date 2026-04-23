@@ -383,62 +383,18 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     redraw();
   }
 
-  async function fetchTextWithTimeout_(path, timeoutMs) {
-    const ms = Number(timeoutMs);
-    const t = Number.isFinite(ms) && ms > 0 ? ms : 300;
-
-    // Robust across browsers: prefer AbortController when available, but fall back
-    // to a simple timeout race so pose polling can never deadlock.
-    if (typeof AbortController === "function") {
-      const ac = new AbortController();
-      const to = setTimeout(() => {
-        try { ac.abort(); } catch {}
-      }, t);
-      try {
-        const res = await fetch(path, { cache: "no-store", signal: ac.signal });
-        if (!res.ok) return null;
-        return String(await res.text());
-      } catch {
-        return null;
-      } finally {
-        clearTimeout(to);
-      }
-    }
-
-    // Fallback: race with a timeout; ignore late responses.
-    const fetchP = (async () => {
-      try {
-        const res = await fetch(path, { cache: "no-store" });
-        if (!res.ok) return null;
-        return String(await res.text());
-      } catch {
-        return null;
-      }
-    })();
-    const timeoutP = new Promise((resolve) => setTimeout(() => resolve(null), t));
-    return await Promise.race([fetchP, timeoutP]);
-  }
-
   async function fetchCompassDeg() {
-    // /compassdata returns "123,N" (or "--")
-    const raw = await fetchTextWithTimeout_("/compassdata", 300);
-    const text = String(raw || "").trim();
-    if (!text || text === "--") return null;
-    const parts = text.split(",");
-    const deg = Number(parts[0]);
+    // Centralized telemetry: read from TelemetryStore (polled via /telemetry).
+    const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
+    const deg = Number(st?.telemetry?.compassDeg);
     return Number.isFinite(deg) ? deg : null;
   }
 
   async function fetchOdomEN() {
-    // /odom returns "ODOM:e,n" or "ODOM:--"
-    const raw = await fetchTextWithTimeout_("/odom", 300);
-    const text = String(raw || "").trim();
-    if (!text.startsWith("ODOM:")) return null;
-    const payload = text.substring(5);
-    if (payload === "--") return null;
-    const parts = payload.split(",");
-    const e = Number(parts[0]);
-    const n = Number(parts[1]);
+    // Centralized telemetry: read from TelemetryStore (polled via /telemetry).
+    const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
+    const e = Number(st?.telemetry?.odomEast);
+    const n = Number(st?.telemetry?.odomNorth);
     if (!Number.isFinite(e) || !Number.isFinite(n)) return null;
     return { e, n };
   }

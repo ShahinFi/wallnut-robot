@@ -22,6 +22,43 @@ static Ctx g;
 static bool isArmed_() { return g.state && g.state->isArmed(); }
 static void rejectNotArmed_() { g.server->send(403, "text/plain", "NOT_ARMED"); }
 
+static void sendJsonStringContent_(ESP8266WebServer& server, const char* s) {
+  server.sendContent("\"");
+  if (!s) {
+    server.sendContent("\"");
+    return;
+  }
+  String chunk;
+  chunk.reserve(64);
+  for (const char* p = s; *p; p++) {
+    const char c = *p;
+    if (c == '\"' || c == '\\') {
+      chunk += '\\';
+      chunk += c;
+    } else if (c == '\n') {
+      chunk += "\\n";
+    } else if (c == '\r') {
+      chunk += "\\r";
+    } else if (c == '\t') {
+      chunk += "\\t";
+    } else if ((uint8_t)c < 0x20) {
+      // Drop other control characters (should not appear in our line-based packets).
+    } else {
+      chunk += c;
+    }
+    if (chunk.length() >= 96) {
+      server.sendContent(chunk);
+      chunk = "";
+    }
+  }
+  if (chunk.length()) server.sendContent(chunk);
+  server.sendContent("\"");
+}
+
+static void sendJsonStringContent_(ESP8266WebServer& server, const String& s) {
+  sendJsonStringContent_(server, s.c_str());
+}
+
 static void handleNotFound_() {
   const String uri = g.server->uri();
   if (esp_static_files::tryServeStaticUri(*g.server, uri)) return;
@@ -63,46 +100,6 @@ static void handleSetNorth_() {
   g.server->send(200, "text/plain", "SetNorth OK");
 }
 
-static void handleLidar_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "LIDAR:--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->lidarPacket);
-}
-
-static void handleCompassData_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->compassData);
-}
-
-static void handleRgb_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "RGB:--,--,--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->rgbPacket);
-}
-
-static void handleRgbClass_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "CLASS:0");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->rgbClassPacket);
-}
-
-static void handleRgbRefs_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "REFS:--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->rgbRefsPacket);
-}
-
 static void handleEncCal_() {
   if (g.server->method() == HTTP_POST) {
     if (!isArmed_()) return rejectNotArmed_();
@@ -116,14 +113,6 @@ static void handleEncCal_() {
     return;
   }
   g.server->send(200, "text/plain", g.state->encCalPacket);
-}
-
-static void handleTurretCal_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->turretCalPacket);
 }
 
 static void handleTurretZero_() {
@@ -206,23 +195,9 @@ static void handleDisarm_() {
   g.server->send(202, "text/plain", "PENDING");
 }
 
-static void handleAuth_() {
-  if (g.state->authPending) {
-    g.server->send(200, "text/plain", "PENDING");
-    return;
-  }
-  if (g.state->authState == EspState::AuthState::Armed) {
-    g.server->send(200, "text/plain", "ARMED");
-    return;
-  }
-  if (g.state->authState == EspState::AuthState::Locked) {
-    g.server->send(200, "text/plain", "LOCKED");
-    return;
-  }
-  g.server->send(200, "text/plain", String("DISARMED:") + String(g.state->triesLeft));
-}
-
-static void handleStatus_() {
+static void handleTelemetry_() {
+  // Single snapshot endpoint for UI polling.
+  // Uses cached ESP-side state only (no Mega round-trip).
   const uint32_t now = millis();
   const uint32_t ageMs = g.state->hasMegaRx ? (now - g.state->lastMegaRxMs) : 0xFFFFFFFFUL;
 
@@ -231,29 +206,34 @@ static void handleStatus_() {
   else if (g.state->authState == EspState::AuthState::Armed) auth = "ARMED";
   else if (g.state->authState == EspState::AuthState::Locked) auth = "LOCKED";
 
-  const IPAddress ip = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+  g.server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g.server->sendHeader("Cache-Control", "no-store");
+  g.server->send(200, "application/json", "");
 
-  String out;
-  out.reserve(180);
-  out += "{";
-  out += "\"auth\":\"";
-  out += auth;
-  out += "\",";
-  out += "\"tries_left\":";
-  out += String((unsigned)g.state->triesLeft);
-  out += ",";
-  out += "\"mega_age_ms\":";
-  out += String((unsigned long)ageMs);
-  out += ",";
-  out += "\"ip\":\"";
-  out += ip.toString();
-  out += "\",";
-  out += "\"mode\":\"";
-  out += (WiFi.getMode() & WIFI_AP) ? "ap" : "sta";
-  out += "\"";
-  out += "}";
+  g.server->sendContent("{\"auth\":");
+  sendJsonStringContent_(*g.server, auth);
+  g.server->sendContent(",\"tries_left\":");
+  g.server->sendContent(String((unsigned)g.state->triesLeft));
+  g.server->sendContent(",\"mega_age_ms\":");
+  g.server->sendContent(String((unsigned long)ageMs));
 
-  g.server->send(200, "application/json", out);
+  g.server->sendContent(",\"lidar\":");
+  sendJsonStringContent_(*g.server, g.state->lidarPacket);
+  g.server->sendContent(",\"compass\":");
+  sendJsonStringContent_(*g.server, g.state->compassData);
+  g.server->sendContent(",\"odom\":");
+  sendJsonStringContent_(*g.server, g.state->odomPacket);
+  g.server->sendContent(",\"rgb\":");
+  sendJsonStringContent_(*g.server, g.state->rgbPacket);
+  g.server->sendContent(",\"rgb_class\":");
+  sendJsonStringContent_(*g.server, g.state->rgbClassPacket);
+  g.server->sendContent(",\"rgb_refs\":");
+  sendJsonStringContent_(*g.server, g.state->rgbRefsPacket);
+  g.server->sendContent(",\"enc_cal\":");
+  sendJsonStringContent_(*g.server, g.state->encCalPacket);
+  g.server->sendContent(",\"turret_cal\":");
+  sendJsonStringContent_(*g.server, g.state->turretCalPacket);
+  g.server->sendContent("}");
 }
 
 static void handleEvents_() {
@@ -268,14 +248,6 @@ static void handleAlerts_() {
   uint32_t from = 0;
   if (g.server->hasArg("from")) from = (uint32_t)g.server->arg("from").toInt();
   g.alerts->serveHttp(*g.server, from);
-}
-
-static void handleOdom_() {
-  if (!isArmed_()) {
-    g.server->send(200, "text/plain", "ODOM:--");
-    return;
-  }
-  g.server->send(200, "text/plain", g.state->odomPacket);
 }
 
 static void handleMoveCm_() {
@@ -354,8 +326,6 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/", []() { esp_static_files::serveFile(*g.server, "/esp/index.html", "text/html"); });
   server.on("/index.html", []() { esp_static_files::serveFile(*g.server, "/esp/index.html", "text/html"); });
   server.on("/style.css", []() { esp_static_files::serveFile(*g.server, "/esp/style.css", "text/css"); });
-  server.on("/script.js", []() { esp_static_files::serveFile(*g.server, "/esp/script.js", "application/javascript"); });
-  server.on("/maze.js", []() { esp_static_files::serveFile(*g.server, "/esp/maze.js", "application/javascript"); });
   server.on("/favicon.ico", []() { esp_static_files::serveFile(*g.server, "/esp/favicon.png", "image/png"); });
 
   server.on("/forwards5", []() { handleMove_(5); });
@@ -366,16 +336,9 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/north", []() { handleNorth_(); });
   server.on("/setnorth", []() { handleSetNorth_(); });
   server.on("/maze", HTTP_GET, []() { esp_static_files::serveFile(*g.server, "/esp/maze.html", "text/html"); });
-  server.on("/lidar", handleLidar_);
-  server.on("/compassdata", handleCompassData_);
-  server.on("/rgb", handleRgb_);
-  server.on("/rgb_class", handleRgbClass_);
-  server.on("/rgb_refs", handleRgbRefs_);
   server.on("/arm", HTTP_POST, handleArm_);
   server.on("/disarm", HTTP_POST, handleDisarm_);
-  server.on("/auth", handleAuth_);
   server.on("/enc_cal", handleEncCal_);
-  server.on("/turret_cal", handleTurretCal_);
   server.on("/turret_zero", HTTP_POST, handleTurretZero_);
   server.on("/turret_tpr", HTTP_POST, handleTurretTpr_);
   server.on("/turret_tpr", HTTP_GET, handleTurretTpr_);
@@ -384,11 +347,10 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel_);
   server.on("/events", HTTP_GET, handleEvents_);
   server.on("/alerts", HTTP_GET, handleAlerts_);
-  server.on("/odom", HTTP_GET, handleOdom_);
   server.on("/set_pose", HTTP_POST, handleSetPose_);
   server.on("/move", HTTP_POST, handleMoveCm_);
   server.on("/turn", HTTP_POST, handleTurnDeg_);
-  server.on("/status", handleStatus_);
+  server.on("/telemetry", HTTP_GET, handleTelemetry_);
 
   server.onNotFound(handleNotFound_);
 }

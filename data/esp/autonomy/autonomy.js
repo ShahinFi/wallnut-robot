@@ -29,7 +29,7 @@ if (!elStart || !elStop || !elStatus) {
   let goal = { x_cm: NaN, y_cm: NaN, tolCells: 0, cell: null };
 
   let alertFromSeq = 0;
-  let alertTimer = 0;
+  let alertsUnsub = null;
 
   let pendingCmd = null; // { resolve, reject, t0, label }
   let reflex = null; // { kind: "red"|"front", x_cm, y_cm }
@@ -638,68 +638,53 @@ if (!elStart || !elStop || !elStatus) {
     api.setPlannedPath(pts);
   }
 
-  async function pollAlertsOnce() {
+  function handleAlertRow_(row) {
     const api = mappingApi();
     if (!api) return;
     if (!running) return;
     if (api.state.scanActive) return; // preserve scan bandwidth
-    if (window.NetGate && !window.NetGate.allow("alerts")) return;
 
-    let res;
-    try {
-      res = await fetch(`/alerts?from=${encodeURIComponent(String(alertFromSeq))}`, { cache: "no-store" });
-    } catch {
-      return;
-    }
-    if (!res.ok) {
-      if (res.status === 403) setStatus("NOT ARMED");
-      return;
-    }
-    const text = await res.text();
-    if (window.DebugLog && text.trim()) window.DebugLog.push("alerts", text.trim().split("\n").length + " lines");
-    const rows = String(text || "").split("\n");
-    for (const row of rows) {
-      if (!row) continue;
-      const bar = row.indexOf("|");
-      if (bar <= 0) continue;
-      const seq = Number(row.substring(0, bar));
-      const line = row.substring(bar + 1);
-      if (Number.isFinite(seq)) alertFromSeq = Math.max(alertFromSeq, seq);
+    const seq = Number(row && row.seq);
+    const line = String(row && row.line ? row.line : "").trim();
+    if (!line) return;
+    if (Number.isFinite(seq)) alertFromSeq = Math.max(alertFromSeq, seq);
 
-      const evt = parseEvt(line);
-      if (!evt) continue;
-      if (window.DebugLog) window.DebugLog.push("evt", line.trim());
-      if (window.StatusBus) window.StatusBus.set("autonomy", { lastEvt: evt.tag, lastAlertSeq: alertFromSeq });
+    const evt = parseEvt(line);
+    if (!evt) return;
+    if (window.DebugLog) window.DebugLog.push("evt", line.trim());
+    if (window.StatusBus) window.StatusBus.set("autonomy", { lastEvt: evt.tag, lastAlertSeq: alertFromSeq });
 
-      if (evt.tag === "RED") {
-        reflex = { kind: "red", x_cm: evt.x_cm, y_cm: evt.y_cm };
-      } else if (evt.tag === "FRONTSTOP") {
-        reflex = { kind: "front", x_cm: evt.x_cm, y_cm: evt.y_cm };
-      } else if (evt.tag === "CMDOK" || evt.tag === "CMDFAIL" || evt.tag === "CMDCANCEL") {
-        if (pendingCmd) {
-          const pc = pendingCmd;
-          pendingCmd = null;
-          if (window.NetGate) window.NetGate.exitCmd();
-          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
-          const ok = evt.tag === "CMDOK";
-          if (window.DebugLog) window.DebugLog.push("cmd", `end ${pc.label} (${evt.tag})`);
-          pc.resolve({ ok, status: evt.tag, pose: { x_cm: evt.x_cm, y_cm: evt.y_cm, h: evt.headingDeg } });
-        }
+    if (evt.tag === "RED") {
+      reflex = { kind: "red", x_cm: evt.x_cm, y_cm: evt.y_cm };
+    } else if (evt.tag === "FRONTSTOP") {
+      reflex = { kind: "front", x_cm: evt.x_cm, y_cm: evt.y_cm };
+    } else if (evt.tag === "CMDOK" || evt.tag === "CMDFAIL" || evt.tag === "CMDCANCEL") {
+      if (pendingCmd) {
+        const pc = pendingCmd;
+        pendingCmd = null;
+        if (window.NetGate) window.NetGate.exitCmd();
+        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+        const ok = evt.tag === "CMDOK";
+        if (window.DebugLog) window.DebugLog.push("cmd", `end ${pc.label} (${evt.tag})`);
+        pc.resolve({ ok, status: evt.tag, pose: { x_cm: evt.x_cm, y_cm: evt.y_cm, h: evt.headingDeg } });
       }
     }
   }
 
-  function startAlertPolling() {
-    if (alertTimer) return;
-    alertTimer = setInterval(() => {
-      pollAlertsOnce().catch(() => {});
-    }, kPollAlertsMs);
+  function startAlertStream_() {
+    if (alertsUnsub) return;
+    const am = window.AlertsManager;
+    if (!am || !am.subscribe) return;
+    try { am.resetCursor && am.resetCursor(); } catch {}
+    alertsUnsub = am.subscribe(handleAlertRow_);
+    try { am.start && am.start(); } catch {}
   }
 
-  function stopAlertPolling() {
-    if (!alertTimer) return;
-    clearInterval(alertTimer);
-    alertTimer = 0;
+  function stopAlertStream_() {
+    if (alertsUnsub) {
+      try { alertsUnsub(); } catch {}
+      alertsUnsub = null;
+    }
   }
 
   async function ensureInitialLocalization(api) {
@@ -886,7 +871,7 @@ if (!elStart || !elStop || !elStatus) {
 
     running = false;
     stopRequested = false;
-    stopAlertPolling();
+    stopAlertStream_();
     if (api?.setPlannedPath) api.setPlannedPath([]);
     if (pendingCmd) {
       const pc = pendingCmd;
@@ -898,6 +883,7 @@ if (!elStart || !elStop || !elStatus) {
     if (window.StatusBus) window.StatusBus.set("autonomy", { running: false });
     if (elStart) elStart.disabled = false;
     setStatus("idle");
+    try { window.CommsOrchestrator && window.CommsOrchestrator.setAutonomyRunning(false); } catch {}
   }
 
   elStart.addEventListener("click", () => {
@@ -911,7 +897,8 @@ if (!elStart || !elStop || !elStatus) {
     stopRequested = false;
     alertFromSeq = 0;
     reflex = null;
-    startAlertPolling();
+    startAlertStream_();
+    try { window.CommsOrchestrator && window.CommsOrchestrator.setAutonomyRunning(true); } catch {}
     elStart.disabled = true;
     runLoop().catch(() => {
       running = false;

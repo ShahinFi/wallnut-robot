@@ -71,16 +71,30 @@
     if (enabled) return;
     enabled = true;
     push("dbg", "enabled");
-    if (timer) clearInterval(timer);
-    timer = setInterval(() => {
-      pollOnce().catch(() => {});
-    }, kPollMs);
+    let inFlight = false;
+    if (timer) clearTimeout(timer);
+    const tick = async () => {
+      if (!enabled) return;
+      if (inFlight) {
+        timer = setTimeout(tick, kPollMs);
+        return;
+      }
+      inFlight = true;
+      try {
+        await pollOnce();
+      } catch {}
+      finally {
+        inFlight = false;
+        if (enabled) timer = setTimeout(tick, kPollMs);
+      }
+    };
+    timer = setTimeout(tick, 0);
   }
 
   function stop() {
     if (!enabled) return;
     enabled = false;
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     timer = 0;
     push("dbg", "disabled");
   }

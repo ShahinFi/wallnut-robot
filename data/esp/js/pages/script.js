@@ -111,60 +111,9 @@ function requiresArmDisabled() {
   return !!(el && el.disabled);
 }
 
-async function refreshAuth() {
-  try {
-    const res = await fetchWithTimeout("/auth", { cache: "no-store" });
-    if (!res.ok) return;
-    const text = (await res.text()).trim();
-    if (text === "PENDING") {
-      setAuthStatus("PENDING...");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(false);
-      return;
-    }
-    if (text === "ARMED") {
-      setAuthStatus("ARMED");
-      setControlsEnabled(true);
-      return;
-    }
-    if (text === "LOCKED") {
-      setAuthStatus("LOCKED (RESET REQUIRED)");
-      setControlsEnabled(false);
-      setSensorPlaceholdersLocked(true);
-      return;
-    }
-    if (text.startsWith("DISARMED:")) {
-      const tries = text.split(":")[1] || "";
-      setAuthStatus(`DISARMED (PASSCODE TRIES LEFT: ${tries})`);
-    } else {
-      setAuthStatus("DISARMED");
-    }
-    setControlsEnabled(false);
-    setSensorPlaceholdersLocked(false);
-  } catch (e) {}
-}
-
 const linkStatusEl = document.getElementById("linkStatus");
 function setLinkStatus(text) {
   if (linkStatusEl) linkStatusEl.innerText = text;
-}
-
-async function refreshStatus() {
-  try {
-    const res = await fetchWithTimeout("/status", { cache: "no-store" });
-    if (!res.ok) return;
-    const s = await res.json();
-    const age = Number(s.mega_age_ms);
-    if (!Number.isFinite(age) || age === 0xffffffff) {
-      setLinkStatus("LINK: NO DATA");
-      return;
-    }
-    if (age > 2000) {
-      setLinkStatus(`LINK: OFFLINE (${age}ms)`);
-      return;
-    }
-    setLinkStatus(`LINK: OK (${age}ms)`);
-  } catch (e) {}
 }
 
 async function armRobot() {
@@ -188,7 +137,6 @@ async function armRobot() {
       setAuthStatus("ARMING...");
       setControlsEnabled(false);
       setSensorPlaceholdersLocked(false);
-      setTimeout(refreshAuth, 200);
       return;
     }
     if (text === "OK") {
@@ -212,8 +160,6 @@ async function armRobot() {
       setControlsEnabled(false);
       setSensorPlaceholdersLocked(false);
     }
-    // Follow up with a real state read (covers FAIL:n, LOCKED, etc.)
-    setTimeout(refreshAuth, 200);
   } catch (e) {
     setAuthStatus("ARM ERROR");
   }
@@ -228,7 +174,6 @@ async function disarmRobot() {
     if (res.status === 202 || text === "PENDING") {
       setAuthStatus("DISARMING...");
       setControlsEnabled(false);
-      setTimeout(refreshAuth, 200);
       return;
     }
     if (text === "LOCKED") {
@@ -238,142 +183,85 @@ async function disarmRobot() {
       setAuthStatus("NO REPLY FROM ROBOT");
     }
   } catch (e) {}
-  refreshAuth();
 }
 
-// Initialize
-setControlsEnabled(false);
-setSensorPlaceholdersLocked(false);
-refreshAuth();
-setInterval(refreshAuth, 1500);
-refreshStatus();
-setInterval(refreshStatus, 1500);
+function renderFromStore_() {
+  const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
+  if (!st) return;
 
-// Lidar polling
-const lidarValueEl = document.getElementById("lidarValue");
-const lidarWarningEl = document.getElementById("lidarWarning");
+  // Auth + UI gating.
+  const a = st.auth || {};
+  const auth = String(a.state || "DISARMED").toUpperCase();
+  const pending = !!a.pending || auth === "PENDING";
+  const triesLeft = Number(a.triesLeft);
 
-async function pollLidar() {
-  if (pollingPaused()) return;
-  if (requiresArmDisabled()) return;
-  try {
-    const res = await fetchWithTimeout("/lidar", { cache: "no-store" });
-    if (!res.ok) return;
-    const text = await res.text();
-    const trimmed = text.trim();
-    // Expected format: LIDAR:<cm>,SEQ:<n>,T:<ms>
-    let display = trimmed;
-    if (trimmed.includes(",")) {
-      const first = trimmed.split(",")[0];
-      if (first.startsWith("LIDAR:")) {
-        display = first.substring(6);
-      }
-    } else if (trimmed.startsWith("LIDAR:")) {
-      display = trimmed.substring(6);
+  if (pending) {
+    setAuthStatus("PENDING...");
+    setControlsEnabled(false);
+    setSensorPlaceholdersLocked(false);
+  } else if (auth === "ARMED") {
+    setAuthStatus("ARMED");
+    setControlsEnabled(true);
+  } else if (auth === "LOCKED") {
+    setAuthStatus("LOCKED (RESET REQUIRED)");
+    setControlsEnabled(false);
+    setSensorPlaceholdersLocked(true);
+  } else {
+    const tries = Number.isFinite(triesLeft) ? triesLeft : 3;
+    setAuthStatus(`DISARMED (PASSCODE TRIES LEFT: ${tries})`);
+    setControlsEnabled(false);
+    setSensorPlaceholdersLocked(false);
+  }
+
+  // Link status.
+  const age = Number(st.link && st.link.megaAgeMs);
+  if (!Number.isFinite(age) || age === 0xffffffff) setLinkStatus("LINK: NO DATA");
+  else if (age > 2000) setLinkStatus(`LINK: OFFLINE (${age}ms)`);
+  else setLinkStatus(`LINK: OK (${age}ms)`);
+
+  const t = st.telemetry || {};
+
+  // Lidar.
+  const lidarEl = document.getElementById("lidarValue");
+  const warnEl = document.getElementById("lidarWarning");
+  if (lidarEl) lidarEl.innerText = Number.isFinite(t.lidarCm) ? `${t.lidarCm.toFixed(1)} cm` : "-- cm";
+  if (warnEl) {
+    if (Number.isFinite(t.lidarCm) && t.lidarCm < 10) warnEl.classList.remove("hidden");
+    else warnEl.classList.add("hidden");
+  }
+
+  // Compass.
+  const compassEl = document.getElementById("compassWebValue");
+  if (compassEl) {
+    if (Number.isFinite(t.compassDeg)) compassEl.innerText = `${t.compassDeg}${DEG} ${t.compassLabel || ""}`.trim();
+    else compassEl.innerText = "--";
+  }
+
+  // RGB live.
+  const colorEl = document.getElementById("colorValue");
+  const swatchEl = document.getElementById("colorSwatch");
+  const r = t.rgb && t.rgb.r;
+  const g = t.rgb && t.rgb.g;
+  const b = t.rgb && t.rgb.b;
+  if (colorEl) {
+    if ([r, g, b].every((v) => Number.isFinite(v))) colorEl.innerText = `RGB ${r}, ${g}, ${b}`;
+    else colorEl.innerText = "--";
+  }
+  if (swatchEl) {
+    if ([r, g, b].every((v) => Number.isFinite(v))) {
+      swatchEl.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+      swatchEl.classList.remove("is-empty");
+    } else {
+      swatchEl.style.backgroundColor = "transparent";
+      swatchEl.classList.add("is-empty");
     }
-    const raw = display.trim();
-    const out = raw.toLowerCase().endsWith("cm") ? raw : `${raw} cm`;
-    if (lidarValueEl) lidarValueEl.innerText = out;
-
-    const dist = parseFloat(display);
-    if (lidarWarningEl) {
-      if (!isNaN(dist) && dist < 10) {
-        lidarWarningEl.classList.remove("hidden");
-      } else {
-        lidarWarningEl.classList.add("hidden");
-      }
-    }
-
-    // Console-only stats
-    if (trimmed.includes("SEQ:") && trimmed.includes("T:")) {
-      const parts = trimmed.split(",");
-      const seqStr = parts[1].split(":")[1];
-      const tStr = parts[2].split(":")[1];
-      const seq = parseInt(seqStr, 10);
-      const t = parseInt(tStr, 10);
-      if (!isNaN(seq)) {
-        if (window._lastSeq !== undefined && seq > window._lastSeq + 1) {
-          window._dropCount = (window._dropCount || 0) + (seq - window._lastSeq - 1);
-        }
-        window._lastSeq = seq;
-      }
-      if (!isNaN(t)) {
-        window._recvCount = (window._recvCount || 0) + 1;
-        window._lastTs = t;
-      }
-    }
-  } catch (e) {
-    // ignore transient errors
   }
 }
 
-setInterval(pollLidar, 400);
-pollLidar();
-
-// Console-only summary every 5s
-setInterval(() => {
-  const recv = window._recvCount || 0;
-  const drop = window._dropCount || 0;
-  const now = Date.now();
-  if (!window._startTs) window._startTs = now;
-  const elapsed = (now - window._startTs) / 1000.0;
-  if (elapsed <= 0) return;
-  const hz = recv / elapsed;
-  const dropsPct = (recv + drop) > 0 ? (drop / (recv + drop)) * 100.0 : 0;
-  console.log(`WEB rate ${hz.toFixed(1)} Hz, drops ${dropsPct.toFixed(1)}%`);
-}, 5000);
-
-// Compass polling
-const compassWebValueEl = document.getElementById("compassWebValue");
-const colorValueEl = document.getElementById("colorValue");
-const colorSwatchEl = document.getElementById("colorSwatch");
-async function pollCompass() {
-  if (pollingPaused()) return;
-  if (requiresArmDisabled()) return;
-  try {
-    const res = await fetchWithTimeout("/compassdata", { cache: "no-store" });
-    if (!res.ok) return;
-    const text = await res.text();
-    if (compassWebValueEl) {
-      const parts = text.trim().split(",");
-      const deg = parts[0] || "--";
-      const label = parts[1] || "";
-      compassWebValueEl.innerText = `${deg}${DEG} ${label}`;
-    }
-  } catch (e) {
-    // ignore transient errors
-  }
-}
-
-setInterval(pollCompass, 400);
-pollCompass();
-
-// RGB polling
-async function pollRgb() {
-  if (pollingPaused()) return;
-  if (requiresArmDisabled()) return;
-  try {
-    const res = await fetchWithTimeout("/rgb", { cache: "no-store" });
-    if (!res.ok) return;
-    const text = await res.text();
-    const trimmed = text.trim();
-    if (!trimmed.startsWith("RGB:")) return;
-    const parts = trimmed.substring(4).split(",");
-    if (parts.length < 3) return;
-    const r = parseInt(parts[0], 10);
-    const g = parseInt(parts[1], 10);
-    const b = parseInt(parts[2], 10);
-    if ([r, g, b].some((v) => isNaN(v))) return;
-
-    if (colorValueEl) colorValueEl.innerText = `RGB ${r}, ${g}, ${b}`;
-    if (colorSwatchEl) {
-      colorSwatchEl.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-      colorSwatchEl.classList.remove("is-empty");
-    }
-  } catch (e) {
-    // ignore transient errors
-  }
-}
-
-setInterval(pollRgb, 400);
-pollRgb();
+// Start centralized comms and render on store updates.
+try {
+  if (window.CommsOrchestrator) window.CommsOrchestrator.start();
+} catch {}
+try {
+  if (window.TelemetryStore && window.TelemetryStore.subscribe) window.TelemetryStore.subscribe(() => renderFromStore_());
+} catch {}
