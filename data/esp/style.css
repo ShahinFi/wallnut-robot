@@ -55,24 +55,24 @@ body::-webkit-scrollbar { width: 0; height: 0; } /* WebKit: hide page scrollbars
 
 /* Maze page: fixed one-screen dashboard (no page scroll). */
 body.page-maze {
-  height: 100dvh;
   min-height: 100svh;
+  height: 100svh;
   overflow: hidden;
 }
 body.page-maze .app {
-  height: 100dvh;
   min-height: 100svh;
+  height: 100svh;
 }
 
 /* Main dashboard page: keep the same one-screen dashboard feel as /maze, but simpler. */
 body.page-dash {
-  height: 100dvh;
   min-height: 100svh;
+  height: 100svh;
   overflow: hidden;
 }
 body.page-dash .app {
-  height: 100dvh;
   min-height: 100svh;
+  height: 100svh;
 }
 
 .app {
