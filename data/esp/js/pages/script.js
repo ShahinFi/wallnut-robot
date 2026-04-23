@@ -215,8 +215,10 @@ function renderFromStore_() {
 
   // Link status.
   const age = Number(st.link && st.link.megaAgeMs);
+  const ageAvg = Number(st.link && st.link.megaAgeMsAvg);
   if (!Number.isFinite(age) || age === 0xffffffff) setLinkStatus("LINK: NO DATA");
   else if (age > 2000) setLinkStatus(`LINK: OFFLINE (${age}ms)`);
+  else if (Number.isFinite(ageAvg)) setLinkStatus(`LINK: OK (avg ${ageAvg}ms)`);
   else setLinkStatus(`LINK: OK (${age}ms)`);
 
   const t = st.telemetry || {};

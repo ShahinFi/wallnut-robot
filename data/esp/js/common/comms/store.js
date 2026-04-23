@@ -7,7 +7,7 @@
   const state = {
     // Auth/link
     auth: { state: "DISARMED", triesLeft: 3, pending: false },
-    link: { megaAgeMs: null },
+    link: { megaAgeMs: null, megaAgeMsAvg: null },
 
     // Telemetry snapshot (normalized where useful)
     telemetry: {
@@ -69,4 +69,3 @@
 
   window.TelemetryStore = { get: () => state, set, subscribe, _snap: snap };
 })();
-

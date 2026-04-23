@@ -14,6 +14,8 @@
   let periodMs = 250;
   let timer = 0;
   let inFlight = false;
+  let emaMegaAgeMs = null;
+  const kMegaAgeEmaAlpha = 0.25;
 
   function parseRgbRefs_(s) {
     const text = String(s || "").trim();
@@ -123,6 +125,12 @@
       const triesLeft = Number(j.tries_left);
       const megaAgeMs = Number(j.mega_age_ms);
 
+      const ageOk = Number.isFinite(megaAgeMs) && megaAgeMs !== 0xffffffff;
+      if (ageOk) {
+        const a = kMegaAgeEmaAlpha;
+        emaMegaAgeMs = Number.isFinite(emaMegaAgeMs) ? (a * megaAgeMs + (1 - a) * emaMegaAgeMs) : megaAgeMs;
+      }
+
       const lidar = parseLidarCm_(j.lidar);
       const comp = parseCompass_(j.compass);
       const od = parseOdom_(j.odom);
@@ -132,7 +140,10 @@
 
       store.set({
         auth: { state: authText, triesLeft: Number.isFinite(triesLeft) ? triesLeft : 3, pending },
-        link: { megaAgeMs: Number.isFinite(megaAgeMs) ? megaAgeMs : null },
+        link: {
+          megaAgeMs: Number.isFinite(megaAgeMs) ? megaAgeMs : null,
+          megaAgeMsAvg: ageOk && Number.isFinite(emaMegaAgeMs) ? Math.round(emaMegaAgeMs) : null,
+        },
         telemetry: {
           lidarCm: lidar.cm,
           lidarPacket: lidar.raw,
