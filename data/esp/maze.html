@@ -41,49 +41,6 @@
       </header>
 
       <main class="maze2">
-        <section class="panel maze2-map">
-          <div class="map-head">
-            <div>
-              <h2>Map</h2>
-              <div class="sub">Live map • Scan matching</div>
-            </div>
-            <div class="map-head-right">
-              <div class="mini-label">STATUS</div>
-              <div id="mapStatus" class="status-pill">idle</div>
-            </div>
-          </div>
-          <div class="map-viewport">
-            <canvas
-              id="mapCanvas"
-              width="760"
-              height="420"
-              data-map-w-cm="80"
-              data-map-h-cm="160"
-              data-cell-cm="5"
-              data-init-ymax-frac="0.4"
-              data-init-heading-span-deg="20"
-              data-init-wall-sigma-cm="1.5"
-              data-track-dx-cm="10"
-              data-track-dy-cm="10"
-              data-track-dheading-deg="20"
-              data-view-margin-cm="6"
-              data-goal-x-cm="10"
-              data-goal-y-cm="150"
-              data-goal-tol-cells="1"
-              data-red-inflate-x-cells="1"
-              data-red-inflate-y-cells="0"
-              data-match-min-dist-cm="2"
-              data-match-max-dist-cm="250"
-              data-match-w-occ-hit="6"
-              data-match-w-free-hit="1"
-              data-match-w-conflict="8"
-              data-match-max-candidates="45000"
-              data-update-free-delta="3"
-              data-update-occ-delta="10"
-            ></canvas>
-          </div>
-        </section>
-
         <section class="panel maze2-auth">
           <div class="deck-head">
             <div class="deck-title">Auth</div>
@@ -110,17 +67,62 @@
           </div>
         </section>
 
-        <section class="panel maze2-run">
-          <div class="deck-head">
-            <div class="deck-title">Run</div>
-          </div>
-          <div class="deck-body">
-            <div class="run-actions">
-              <button class="button button-primary button-small" data-requires-arm="1" id="autoStart">AUTO START</button>
-              <button class="button button-outline button-small" id="autoStop">STOP</button>
+        <div class="maze2-center">
+          <section class="panel maze2-run">
+            <div class="deck-head">
+              <div class="deck-title">Run</div>
+              <div class="deck-head-right">
+                <div class="mini-label">STATUS</div>
+                <div id="mapStatus" class="status-pill">idle</div>
+              </div>
             </div>
-          </div>
-        </section>
+            <div class="deck-body">
+              <div class="run-actions">
+                <button class="button button-primary button-small" data-requires-arm="1" id="autoStart">AUTO START</button>
+                <button class="button button-outline button-small" id="autoStop">STOP</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel maze2-map">
+            <div class="map-head">
+              <div>
+                <h2>Map</h2>
+                <div class="sub">Live map • Scan matching</div>
+              </div>
+            </div>
+            <div class="map-viewport">
+              <canvas
+                id="mapCanvas"
+                width="760"
+                height="420"
+                data-map-w-cm="80"
+                data-map-h-cm="160"
+                data-cell-cm="5"
+                data-init-ymax-frac="0.4"
+                data-init-heading-span-deg="20"
+                data-init-wall-sigma-cm="1.5"
+                data-track-dx-cm="10"
+                data-track-dy-cm="10"
+                data-track-dheading-deg="20"
+                data-view-margin-cm="6"
+                data-goal-x-cm="10"
+                data-goal-y-cm="150"
+                data-goal-tol-cells="1"
+                data-red-inflate-x-cells="1"
+                data-red-inflate-y-cells="0"
+                data-match-min-dist-cm="2"
+                data-match-max-dist-cm="250"
+                data-match-w-occ-hit="6"
+                data-match-w-free-hit="1"
+                data-match-w-conflict="8"
+                data-match-max-candidates="45000"
+                data-update-free-delta="3"
+                data-update-occ-delta="10"
+              ></canvas>
+            </div>
+          </section>
+        </div>
 
         <div class="maze2-stack">
         <div class="maze2-sensors">
