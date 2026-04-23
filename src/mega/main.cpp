@@ -712,12 +712,12 @@ void loop() {
 
   // Allow ESP Disarm/Passcode handling above to work even while these are active.
   if (colorCalTask.active()) {
-    const bool hadCal = colorCalTask.hasCalibration();
     colorCalTask.update(&lastRgb, lastRgbValid);
-    // When calibration finishes and becomes available, publish the refs once so
-    // the web UI can show stable swatches for CLASS.
-    if (!hadCal && colorCalTask.hasCalibration()) sendRgbRefsToEsp_();
-    mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
+    // Publish updated ref swatches immediately after a successful save (even if
+    // we already had a previous calibration).
+    if (colorCalTask.consumeJustSaved()) sendRgbRefsToEsp_();
+    // While color calibration is active, keep the LCD dedicated to the color
+    // calibration UI (do not overwrite it with the maze mission LCD).
     return;
   }
 

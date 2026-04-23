@@ -18,6 +18,7 @@ public:
   bool loadFromEeprom();
   bool hasCalibration() const;
   const ColorRgb* refs() const;
+  bool consumeJustSaved();  // true once after a successful saveToEeprom_()
 
   bool active() const;
   State state() const;
@@ -30,6 +31,7 @@ private:
   State state_;
   ColorRgb refs_[kColorCount];
   bool hasCalibration_;
+  bool justSaved_;
   uint32_t doneStartMs_;
   ColorCalibrationUI ui_;
 };

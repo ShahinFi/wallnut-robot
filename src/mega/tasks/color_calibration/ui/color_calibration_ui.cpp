@@ -63,3 +63,10 @@ void ColorCalibrationUI::showSensorInvalid(uint8_t index, uint8_t total) {
   lcdWrite(2, 0, "Sensor invalid");
   lcdWrite(3, 0, "Try again");
 }
+
+void ColorCalibrationUI::showFailed(const char* reason) {
+  lcdWrite(0, 0, "Color Calib");
+  lcdWrite(1, 0, "FAILED");
+  lcdWrite(2, 0, reason ? reason : "Error");
+  lcdWrite(3, 0, "Try again");
+}

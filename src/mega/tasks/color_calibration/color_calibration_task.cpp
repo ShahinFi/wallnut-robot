@@ -15,6 +15,7 @@ ColorCalibrationTask::ColorCalibrationTask()
 : state_(State::Idle),
   refs_{},
   hasCalibration_(false),
+  justSaved_(false),
   doneStartMs_(0),
   ui_() {}
 
@@ -85,7 +86,13 @@ void ColorCalibrationTask::onButtonPress(const ColorRgb* live, bool liveValid) {
   }
   if (state_ == State::Prompt4) {
     capture_(4, *live);
-    saveToEeprom_();
+    const bool ok = saveToEeprom_();
+    if (!ok) {
+      ui_.showFailed("EEPROM fail");
+      // Stay on prompt 4 so the user can retry saving.
+      setState_(State::Prompt4);
+      return;
+    }
     ui_.showDone(kColorCount);
     doneStartMs_ = millis();
     setState_(State::Done);
@@ -97,6 +104,11 @@ bool ColorCalibrationTask::active() const { return state_ != State::Idle; }
 ColorCalibrationTask::State ColorCalibrationTask::state() const { return state_; }
 bool ColorCalibrationTask::hasCalibration() const { return hasCalibration_; }
 const ColorRgb* ColorCalibrationTask::refs() const { return refs_; }
+bool ColorCalibrationTask::consumeJustSaved() {
+  const bool v = justSaved_;
+  justSaved_ = false;
+  return v;
+}
 
 void ColorCalibrationTask::setState_(State s) { state_ = s; }
 
@@ -108,7 +120,18 @@ void ColorCalibrationTask::capture_(uint8_t index, const ColorRgb& rgb) {
 bool ColorCalibrationTask::saveToEeprom_() {
   EEPROM.put(kEepromAddr, kEepromMagic);
   EEPROM.put(kEepromAddr + sizeof(kEepromMagic), refs_);
+
+  // Verify: read back and compare to avoid "silent" persistence failures.
+  uint16_t magic = 0;
+  ColorRgb check[kColorCount];
+  memset(check, 0, sizeof(check));
+  EEPROM.get(kEepromAddr, magic);
+  EEPROM.get(kEepromAddr + sizeof(kEepromMagic), check);
+  if (magic != kEepromMagic) return false;
+  if (memcmp(check, refs_, sizeof(refs_)) != 0) return false;
+
   hasCalibration_ = true;
+  justSaved_ = true;
   return true;
 }
 

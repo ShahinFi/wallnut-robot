@@ -24,6 +24,10 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Viewport lock (set by js/common/viewport_lock.js). Fallback is normal vh. */
+  --app-h: 100vh;
+  --vh: 1vh;
 }
 
 * {
@@ -56,23 +60,23 @@ body::-webkit-scrollbar { width: 0; height: 0; } /* WebKit: hide page scrollbars
 /* Maze page: fixed one-screen dashboard (no page scroll). */
 body.page-maze {
   min-height: 100svh;
-  height: 100svh;
+  height: var(--app-h);
   overflow: hidden;
 }
 body.page-maze .app {
   min-height: 100svh;
-  height: 100svh;
+  height: var(--app-h);
 }
 
 /* Main dashboard page: keep the same one-screen dashboard feel as /maze, but simpler. */
 body.page-dash {
   min-height: 100svh;
-  height: 100svh;
+  height: var(--app-h);
   overflow: hidden;
 }
 body.page-dash .app {
   min-height: 100svh;
-  height: 100svh;
+  height: var(--app-h);
 }
 
 .app {
@@ -656,6 +660,12 @@ body.page-dash #compassValue {
 
   .app {
     height: auto;
+    width: 100vw;
+    padding:
+      calc(4px + var(--safe-top))
+      calc(4px + var(--safe-right))
+      calc(4px + var(--safe-bottom))
+      calc(4px + var(--safe-left));
   }
 
   .container {
@@ -673,12 +683,12 @@ body.page-dash #compassValue {
 
 @media (max-width: 480px) {
   .app {
-    width: calc(100vw - 10px);
+    width: 100vw;
     padding:
-      calc(6px + var(--safe-top))
-      calc(6px + var(--safe-right))
-      calc(6px + var(--safe-bottom))
-      calc(6px + var(--safe-left));
+      calc(4px + var(--safe-top))
+      calc(4px + var(--safe-right))
+      calc(4px + var(--safe-bottom))
+      calc(4px + var(--safe-left));
   }
 
   .container {
@@ -690,7 +700,7 @@ body.page-dash #compassValue {
     border-radius: 12px;
   }
 
-  .readout {
+  .readout:not(.readout-compact) {
     min-height: 140px;
   }
 }
@@ -1075,8 +1085,8 @@ body.page-maze .maze2-status .debug-log pre {
   /* Prevent the Map panel from overflowing/covering the stack on tablets/phones. */
   body.page-maze .map-viewport {
     flex: 0 0 auto;
-    height: clamp(260px, 55vh, 560px);
-    max-height: 70vh;
+    height: clamp(260px, calc(var(--vh) * 55), 560px);
+    max-height: calc(var(--vh) * 70);
     box-sizing: border-box;
   }
   body.page-maze .maze2-map #mapCanvas {
@@ -1122,8 +1132,8 @@ body.page-maze .maze2-status .debug-log pre {
   body.page-maze .map-viewport {
     flex: 0 0 auto;
     min-height: 320px;
-    max-height: 72vh;
-    height: 60vh;
+    max-height: calc(var(--vh) * 72);
+    height: calc(var(--vh) * 60);
     box-sizing: border-box;
     align-items: center;
     justify-content: center;
@@ -1415,7 +1425,7 @@ body.page-maze .maze2-status .debug-log pre {
   padding: 10px 12px 12px;
   display: grid;
   gap: 12px;
-  max-height: 42vh;
+  max-height: calc(var(--vh) * 42);
   overflow: auto;
 }
 
