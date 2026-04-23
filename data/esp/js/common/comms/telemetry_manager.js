@@ -14,8 +14,10 @@
   let periodMs = 250;
   let timer = 0;
   let inFlight = false;
-  let emaMegaAgeMs = null;
-  const kMegaAgeEmaAlpha = 0.25;
+
+  // Simple moving average for link age (display only).
+  const kMegaAgeWindow = 6;
+  const megaAgeBuf = [];
 
   function parseRgbRefs_(s) {
     const text = String(s || "").trim();
@@ -127,9 +129,11 @@
 
       const ageOk = Number.isFinite(megaAgeMs) && megaAgeMs !== 0xffffffff;
       if (ageOk) {
-        const a = kMegaAgeEmaAlpha;
-        emaMegaAgeMs = Number.isFinite(emaMegaAgeMs) ? (a * megaAgeMs + (1 - a) * emaMegaAgeMs) : megaAgeMs;
+        megaAgeBuf.push(megaAgeMs);
+        while (megaAgeBuf.length > kMegaAgeWindow) megaAgeBuf.shift();
       }
+      const megaAgeAvg =
+          megaAgeBuf.length > 0 ? megaAgeBuf.reduce((acc, v) => acc + v, 0) / megaAgeBuf.length : NaN;
 
       const lidar = parseLidarCm_(j.lidar);
       const comp = parseCompass_(j.compass);
@@ -142,7 +146,7 @@
         auth: { state: authText, triesLeft: Number.isFinite(triesLeft) ? triesLeft : 3, pending },
         link: {
           megaAgeMs: Number.isFinite(megaAgeMs) ? megaAgeMs : null,
-          megaAgeMsAvg: ageOk && Number.isFinite(emaMegaAgeMs) ? Math.round(emaMegaAgeMs) : null,
+          megaAgeMsAvg: Number.isFinite(megaAgeAvg) ? Math.round(megaAgeAvg) : null,
         },
         telemetry: {
           lidarCm: lidar.cm,
