@@ -373,6 +373,26 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   }
 
+  // Transactional scanning: poll only while we are actively scanning.
+  let lastSeq = 0;
+
+  let pollActive = false;
+  let pollDeadlineMs = 0;
+  let scanResolve = null;
+  let scanPromise = null;
+
+  function pushScanStatus_() {
+    if (!window.StatusBus) return;
+    window.StatusBus.set("mapping", {
+      scanActive: state.scanActive,
+      scanDir: state.scanDir,
+      nextScanDir: state.nextScanDir,
+      scanPollActive: pollActive,
+      scanSeq: lastSeq,
+      scanLastEvt: dbg.lastEvent,
+    });
+  }
+
   function setVirtualBlocked(blocked01) {
     renderer.setVirtualBlocked(blocked01 || null);
     redraw();
@@ -564,6 +584,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       state.scanDir = msg.payload.includes("BEGIN,-") ? "-" : "+";
       dbg.lastEvent = "BEGIN";
       setStatus(`scanning ${state.scanDir}`);
+      pushScanStatus_();
       return;
     }
     if (msg.kind === "done") {
@@ -621,6 +642,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
       // Enforce alternating scan direction (flip only on successful DONE).
       state.nextScanDir = (state.scanDir === "+") ? "-" : "+";
+      pushScanStatus_();
 
       if (scanResolve) {
         scanResolve({ ok: true, kind: "done", dir: state.scanDir });
@@ -637,6 +659,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       if (window.DebugLog) window.DebugLog.push("scan", `CANCEL dir=${state.scanDir}`);
       setStatus("scan cancelled");
       redraw();
+      pushScanStatus_();
       // Do not flip direction on cancel.
       if (scanResolve) {
         scanResolve({ ok: false, kind: "cancel", dir: state.scanDir });
@@ -654,32 +677,26 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     dbg.lastEvent = "SAMPLE";
   }
 
-  // Transactional scanning: poll only while we are actively scanning.
-  let lastSeq = 0;
-
-  let pollActive = false;
-  let pollDeadlineMs = 0;
-  let scanResolve = null;
-  let scanPromise = null;
-
   async function pollOnce() {
     const res = await fetch(`/events?from=${lastSeq}`, { cache: "no-store" });
     dbg.lastHttp = String(res.status);
     if (!res.ok) {
       dbg.pollErrors++;
       if (res.status === 403) {
-        dbg.lastEvent = "403";
-        setStatus("NOT ARMED");
-        // If we were in a scan transaction, terminate it cleanly so we don't
-        // leave the UI/network gate stuck in "scan" mode.
-        if (state.scanActive) {
-          state.scanActive = false;
-          state.scanDoneSeen = true;
-          if (window.NetGate) window.NetGate.exitScan();
-          if (scanResolve) {
-            scanResolve({ ok: false, kind: "not_armed", dir: state.scanDir });
-            scanResolve = null;
-            scanPromise = null;
+      dbg.lastEvent = "403";
+      setStatus("NOT ARMED");
+      pushScanStatus_();
+      // If we were in a scan transaction, terminate it cleanly so we don't
+      // leave the UI/network gate stuck in "scan" mode.
+      if (state.scanActive) {
+        state.scanActive = false;
+        state.scanDoneSeen = true;
+        if (window.NetGate) window.NetGate.exitScan();
+        pushScanStatus_();
+        if (scanResolve) {
+          scanResolve({ ok: false, kind: "not_armed", dir: state.scanDir });
+          scanResolve = null;
+          scanPromise = null;
           }
         }
         stopPolling();
@@ -771,6 +788,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       dbg.lastSeq = 0;
       setStatus(`starting ${label}...`);
       lastSeq = 0; // ring is reset on scan start by the ESP
+      pushScanStatus_();
 
       // Create a completion promise for callers (autonomy).
       scanPromise = new Promise((resolve) => { scanResolve = resolve; });
@@ -785,6 +803,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       if (window.NetGate) window.NetGate.exitScan();
       setStatus("scan start failed");
       redraw();
+      pushScanStatus_();
       if (scanResolve) {
         scanResolve({ ok: false, kind: "start_failed", dir: state.scanDir });
         scanResolve = null;

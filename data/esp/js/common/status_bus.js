@@ -41,6 +41,7 @@
   }
 
   function fmtInt(n) {
+    if (n == null) return "--";
     const v = Number(n);
     if (!Number.isFinite(v)) return "--";
     return String(Math.trunc(v));
@@ -115,13 +116,11 @@
     const scanActive = !!m.scanActive;
     const scanParts = [];
     scanParts.push(`SCAN: ${scanActive ? "ACTIVE" : "idle"}`);
-    scanParts.push(`dir ${m.scanDir || "--"}`);
+    if (scanActive) scanParts.push(`dir ${m.scanDir || "--"}`);
     scanParts.push(`next ${m.nextScanDir || "--"}`);
     scanParts.push(`evt ${fmtEvt(m.scanLastEvt)}`);
-    if (s.net === "scan" || scanActive) {
-      scanParts.push(`poll ${m.scanPollActive ? "ON" : "OFF"}`);
-      scanParts.push(`seq ${fmtInt(m.scanSeq)}`);
-    }
+    if (scanActive) scanParts.push(`poll ${m.scanPollActive ? "ON" : "OFF"}`);
+    if (scanActive) scanParts.push(`seq ${fmtInt(m.scanSeq)}`);
     lines.push(scanParts.join(" | "));
 
     // 4) Autonomy / command (always, but compact when off)
