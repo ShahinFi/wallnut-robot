@@ -11,15 +11,13 @@ const float    kTurnSpeed      = 0.6f;
 const uint32_t kStepTimeoutMs  = 300000; // 5 minutes per step
 const uint32_t kMoveRampMs     = 1000;   // 1s accel ramp for straight MoveByDistance
 
-// Obstacle-aware MOVE speed policy (ESP MOVE only, TURN unaffected)
-const float kStopDistanceCm  = 10.0f;
-const float kClearDistanceCm = 12.0f;
+// Obstacle-aware MOVE speed policy (forward MOVE only, TURN unaffected).
+// IMPORTANT: hard safety stop/reflex is handled in main.cpp (FRONTSTOP cancels the step).
+// The executor should not perform autonomous guard-turns, since that causes
+// uncommanded rotations (e.g. cumulative 270°) and makes mission behavior non-deterministic.
 const float kSlowDistanceCm  = 30.0f;
 const float kSlowSpeedScale  = 0.35f;
 const float kFastSpeedScale  = 0.50f; // default forward speed (can be overridden by color latch)
-const float kGuardTurnDeg    = 90.0f;
-const uint8_t kGuardMaxTurns = 4;
-const uint8_t kGuardClearStreakNeeded = 3;
 
 static float computeMoveSpeedScale(float lidarAvgCm, float forwardScale) {
   float fast = forwardScale;
@@ -32,7 +30,6 @@ static float computeMoveSpeedScale(float lidarAvgCm, float forwardScale) {
   //
   // Safety is still enforced by the dedicated reflex stop logic in main.cpp.
   if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return fast;
-  if (lidarAvgCm < kStopDistanceCm) return 0.0f;
   if (lidarAvgCm < kSlowDistanceCm) return (fast < kSlowSpeedScale) ? fast : kSlowSpeedScale;
   return fast;
 }
@@ -57,10 +54,7 @@ SequenceExecutorTask::SequenceExecutorTask()
   alignHeadingDeg_(0.0f),
   forwardSpeedScale_(kFastSpeedScale),
   moveRampStartMs_(0),
-  moveRampActive_(false),
-  moveGuardState_(MoveGuardState::None),
-  moveGuardTurnsDone_(0),
-  moveGuardClearStreak_(0) {
+  moveRampActive_(false) {
   DriveByDistance::Config dcfg = driveBy_.config();
   dcfg.slowDownCm = 0.0f;
   // Allow obstacle-based scaling (30%/70%) instead of clamping to full speed.
@@ -110,9 +104,6 @@ void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) 
   driveActive_ = false;
   moveRampStartMs_ = 0;
   moveRampActive_ = false;
-  moveGuardState_ = MoveGuardState::None;
-  moveGuardTurnsDone_ = 0;
-  moveGuardClearStreak_ = 0;
   stepIndex_ = 0;
   drivenCmAbs_ = 0.0f;
   setState_(State::Running);
@@ -172,11 +163,6 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   const bool inMove = (step.type == SequenceStepType::MoveToDistance ||
                        step.type == SequenceStepType::MoveByDistance);
   if (inMove) drivenCmAbs_ = avgTravelCmAbs;
-  if (inMove) {
-    if (handleMoveGuard_(headingDegContinuous, avgTravelCm, lidarAvgCm)) {
-      return state_ != State::Running;
-    }
-  }
 
   if (step.type == SequenceStepType::MoveToDistance) {
     ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
@@ -242,7 +228,7 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     return false;
   }
 
-  if (step.type == SequenceStepType::TurnDeg) {
+  if (step.type == SequenceStepType::TurnDeg || step.type == SequenceStepType::TurnDegShortest) {
     ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
                     SequenceExecutorUI::StepLabel::Turn);
     const bool done = turn_.update(headingDegContinuous);
@@ -286,9 +272,6 @@ void SequenceExecutorTask::reset() {
   driveActive_ = false;
   moveRampStartMs_ = 0;
   moveRampActive_ = false;
-  moveGuardState_ = MoveGuardState::None;
-  moveGuardTurnsDone_ = 0;
-  moveGuardClearStreak_ = 0;
   ui_.begin();
   ui_.showIdle();
   setState_(State::Idle);
@@ -315,7 +298,7 @@ void SequenceExecutorTask::startStep_(float headingDegContinuous, float avgTrave
   } else if (step.type == SequenceStepType::MoveByDistance) {
     moveByCm_ = step.value;
     startMove_(headingDegContinuous, avgTravelCm);
-  } else if (step.type == SequenceStepType::TurnDeg) {
+  } else if (step.type == SequenceStepType::TurnDeg || step.type == SequenceStepType::TurnDegShortest) {
     startTurn_(headingDegContinuous);
   }
 }
@@ -336,7 +319,12 @@ void SequenceExecutorTask::startMove_(float headingDegContinuous, float avgTrave
 }
 
 void SequenceExecutorTask::startTurn_(float headingDegContinuous) {
-  turn_.begin(headingDegContinuous, steps_[stepIndex_].value, kTurnSpeed);
+  const SequenceStep& step = steps_[stepIndex_];
+  if (step.type == SequenceStepType::TurnDegShortest) {
+    turn_.beginShortestDelta(headingDegContinuous, step.value, kTurnSpeed);
+  } else {
+    turn_.begin(headingDegContinuous, step.value, kTurnSpeed);
+  }
 }
 
 bool SequenceExecutorTask::stepTimedOut_() const {
@@ -348,69 +336,4 @@ float SequenceExecutorTask::wrapDegDiff180_(float targetDeg, float currentDeg) {
   while (d > 180.0f)  d -= 360.0f;
   while (d < -180.0f) d += 360.0f;
   return d;
-}
-
-bool SequenceExecutorTask::handleMoveGuard_(float headingDegContinuous,
-                                            float avgTravelCm,
-                                            float lidarAvgCm) {
-  const SequenceStep& step = steps_[stepIndex_];
-  const bool forwardMoveBy =
-      (step.type == SequenceStepType::MoveByDistance) && (moveByCm_ > 0.0f);
-
-  // Guard-turn behavior is only for forward MoveByDistance commands.
-  if (!forwardMoveBy) return false;
-
-  if (moveGuardState_ == MoveGuardState::None) {
-    // Only guard on valid LiDAR. If LiDAR is invalid, do not stall or turn;
-    // rely on reflex stop once readings resume.
-    if (!isfinite(lidarAvgCm) || lidarAvgCm <= 0.0f) return false;
-    if (lidarAvgCm >= kStopDistanceCm) return false;
-
-    // Preserve remaining distance before entering guard turn.
-    if (forwardMoveBy && driveActive_) {
-      const float remaining = driveBy_.remainingCm();
-      if (isfinite(remaining) && remaining > 0.0f) moveByCm_ = remaining;
-    }
-
-    driveBy_.cancel();
-    driveActive_ = false;
-    moveGuardClearStreak_ = 0;
-    turn_.begin(headingDegContinuous, kGuardTurnDeg, kTurnSpeed);
-    moveGuardState_ = MoveGuardState::Turning;
-    return true;
-  }
-
-  const bool done = turn_.update(headingDegContinuous);
-  if (!done) return true;
-
-  if (turn_.timedOut() || !turn_.succeeded()) {
-    ui_.showFailed("Guard turn fail");
-    setState_(State::Failed);
-    return true;
-  }
-
-  if (lidarAvgCm >= kClearDistanceCm) {
-    if (moveGuardClearStreak_ < 255) moveGuardClearStreak_++;
-    if (moveGuardClearStreak_ >= kGuardClearStreakNeeded) {
-      moveGuardState_ = MoveGuardState::None;
-      moveGuardTurnsDone_ = 0;
-      moveGuardClearStreak_ = 0;
-      startMove_(headingDegContinuous, avgTravelCm);
-      return false;
-    }
-    // Keep checking clear samples without moving.
-    return true;
-  }
-
-  moveGuardClearStreak_ = 0;
-  moveGuardTurnsDone_++;
-  if (moveGuardTurnsDone_ >= kGuardMaxTurns) {
-    ui_.showFailed("Blocked 360");
-    setState_(State::Failed);
-    return true;
-  }
-
-  moveGuardClearStreak_ = 0;
-  turn_.begin(headingDegContinuous, kGuardTurnDeg, kTurnSpeed);
-  return true;
 }

@@ -31,6 +31,11 @@ public:
   // currentHeadingDegContinuous is the latest continuous heading (unwrapped).
   void begin(float currentHeadingDegContinuous, float deltaDeg, float requestedSpeed);
 
+  // Start a turn by deltaDeg, but always take the shortest equivalent delta in [-180, +180].
+  // This preserves the caller's intent for "turn by delta" while avoiding long spins
+  // when deltaDeg was expressed as e.g. 270 instead of -90.
+  void beginShortestDelta(float currentHeadingDegContinuous, float deltaDeg, float requestedSpeed);
+
   // Non-blocking tick. Drives motors.
   // Returns true when finished (Succeeded / TimedOut / Cancelled / Idle).
   bool update(float currentHeadingDegContinuous);

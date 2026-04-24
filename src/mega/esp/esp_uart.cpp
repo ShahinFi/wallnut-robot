@@ -68,6 +68,20 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
+  if (s.startsWith("TurnShort:")) {
+    out.type = EspCommand::Type::TurnShortest;
+    out.value = s.substring(10).toInt();
+    out.value2 = 0;
+    out.text = "";
+    return true;
+  }
+  if (s.startsWith("TurnAbs:")) {
+    out.type = EspCommand::Type::TurnAbs;
+    out.value = s.substring(8).toInt();
+    out.value2 = 0;
+    out.text = "";
+    return true;
+  }
   if (s.equalsIgnoreCase("North")) {
     out.type = EspCommand::Type::North;
     out.value = 0;

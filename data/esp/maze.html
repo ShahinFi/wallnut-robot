@@ -83,6 +83,29 @@
                 <button class="button button-primary button-small" data-requires-arm="1" id="autoStart">AUTO START</button>
                 <button class="button button-outline button-small" id="autoStop">STOP</button>
               </div>
+              <div class="divider"></div>
+              <div class="planner-row" role="group" aria-label="Path planning weights">
+                <div class="planner-title" title="Path planning weights. Higher means stronger preference.">Path planning</div>
+                <div class="planner-controls">
+                  <label class="planner-item" title="Weight for shorter paths. Higher value = stronger preference for a shorter path.">
+                    <span class="planner-label">Shorter path</span>
+                    <input class="planner-input" id="planWLen" type="number" min="0" max="10" step="0.5" value="1" inputmode="decimal" />
+                  </label>
+                  <label class="planner-item" title="Weight for clearance. Higher value = keeps more distance from red tiles and walls.">
+                    <span class="planner-label">Clearance</span>
+                    <input class="planner-input" id="planWRisk" type="number" min="0" max="10" step="0.5" value="6" inputmode="decimal" />
+                  </label>
+                  <label class="planner-item" title="Turn penalty weight. Higher value = fewer turns (this is NOT a turn count).">
+                    <span class="planner-label">Fewer turns</span>
+                    <input class="planner-input" id="planWTurn" type="number" min="0" max="10" step="0.5" value="3" inputmode="decimal" />
+                  </label>
+                  <label class="planner-item" title="Prefer a longer first straight run from the robot. Higher value = avoid tiny first segments.">
+                    <span class="planner-label">Long first run</span>
+                    <input class="planner-input" id="planWFirst" type="number" min="0" max="10" step="0.5" value="0" inputmode="decimal" />
+                  </label>
+                </div>
+              </div>
+              <div class="planner-help">Weight: 0–10. Higher means more important. Not a count.</div>
             </div>
           </section>
 
@@ -98,21 +121,27 @@
                 id="mapCanvas"
                 width="760"
                 height="420"
-                data-map-w-cm="80"
-                data-map-h-cm="160"
+                data-map-w-cm="105"
+                data-map-h-cm="185"
                 data-cell-cm="5"
                 data-init-ymax-frac="0.4"
                 data-init-heading-span-deg="20"
                 data-init-wall-sigma-cm="1.5"
-                data-track-dx-cm="10"
-                data-track-dy-cm="10"
+                data-track-dx-cm="20"
+                data-track-dy-cm="20"
                 data-track-dheading-deg="20"
                 data-view-margin-cm="6"
-                data-goal-x-cm="10"
-                data-goal-y-cm="150"
+                data-goal-x-cm="15"
+                data-goal-y-cm="165"
                 data-goal-tol-cells="1"
                 data-red-inflate-x-cells="1"
                 data-red-inflate-y-cells="0"
+                data-plan-w-len="1"
+                data-plan-w-turn="3"
+                data-plan-w-risk="6"
+                data-plan-w-first="0"
+                data-plan-risk-radius-red-cells="3"
+                data-plan-risk-radius-occ-cells="2"
                 data-match-min-dist-cm="2"
                 data-match-max-dist-cm="250"
                 data-match-w-occ-hit="6"

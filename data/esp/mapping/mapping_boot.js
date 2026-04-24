@@ -242,7 +242,6 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     mapPose0: { x: mapW_cm * 0.5, y: mapH_cm * 0.2, headingDeg: 0 },
     poseLocked: false, // becomes true after initial localization
     poseSentToRobot: false,
-    poseOdomConfirmed: false, // becomes true once /odom matches the posted map pose
 
     scanActive: false,
     scanDoneSeen: false,
@@ -266,7 +265,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     // - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
     //   so we must use it directly (otherwise we'd apply the correction twice).
     const headingDeg = wrap360(state.compassDeg);
-    if (state.poseSentToRobot && state.poseOdomConfirmed && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
+    if (state.poseSentToRobot && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
       return { x: state.odomEast, y: state.odomNorth, headingDeg };
     }
     const dx = state.odomEast - state.odomAnchorEast;
@@ -276,13 +275,19 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   function seedOuterWalls() {
     // Fill map boundary cells as occupied (simple known-rectangle world).
+    // These are immutable: once seeded, they never change value.
+    const WALL = grid.maxLogOdds;
     for (let cx = 0; cx < grid.w; cx++) {
-      grid.setOccupied(cx, 0, 70);
-      grid.setOccupied(cx, grid.h - 1, 70);
+      grid.setOccupied(cx, 0, WALL);
+      grid.lockCell(cx, 0);
+      grid.setOccupied(cx, grid.h - 1, WALL);
+      grid.lockCell(cx, grid.h - 1);
     }
     for (let cy = 0; cy < grid.h; cy++) {
-      grid.setOccupied(0, cy, 70);
-      grid.setOccupied(grid.w - 1, cy, 70);
+      grid.setOccupied(0, cy, WALL);
+      grid.lockCell(0, cy);
+      grid.setOccupied(grid.w - 1, cy, WALL);
+      grid.lockCell(grid.w - 1, cy);
     }
   }
 
@@ -296,7 +301,6 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = false;
     state.poseSentToRobot = false;
-    state.poseOdomConfirmed = false;
     setStatus("cleared (walls seeded, pose unlocked)");
     redraw();
   }
@@ -338,9 +342,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     try {
       const ok = await postPoseToRobot(posePost.pose, { includeHeading: posePost.includeHeading });
       if (ok) {
-        // Only switch to absolute /odom after we observe /odom rebased to this pose.
         state.poseSentToRobot = true;
-        state.poseOdomConfirmed = false;
         posePost.pending = false;
       }
     } finally {
@@ -433,20 +435,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       const od = odR && odR.status === "fulfilled" ? odR.value : null;
       const hdg = hdgR && hdgR.status === "fulfilled" ? hdgR.value : null;
       if (od) {
-        if (state.poseSentToRobot && !state.poseOdomConfirmed) {
-          const dx = od.e - state.mapPose0.x;
-          const dy = od.n - state.mapPose0.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          // Confirm once odom is close to the posted pose, then switch to absolute mode.
-          if (Number.isFinite(dist) && dist <= 8) {
-            state.poseOdomConfirmed = true;
-            state.odomEast = od.e;
-            state.odomNorth = od.n;
-          }
-        } else {
-          state.odomEast = od.e;
-          state.odomNorth = od.n;
-        }
+        // Always update live odom so the arrow moves between scans (including reflex backoffs).
+        state.odomEast = od.e;
+        state.odomNorth = od.n;
       }
       if (hdg != null) state.compassDeg = hdg;
       redraw();

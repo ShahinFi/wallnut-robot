@@ -965,6 +965,97 @@ body.page-maze .status-pill {
   white-space: nowrap;
 }
 
+/* Simple form helpers (shared by /maze and main) */
+body .divider {
+  height: 1px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.10);
+  margin: 10px 0;
+}
+
+body .planner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+body .planner-title {
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+}
+
+body .planner-controls {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+body .planner-help {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  line-height: 1.25;
+}
+
+body .planner-item {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+body .planner-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: none;
+  color: rgba(255, 255, 255, 0.70);
+  white-space: normal;
+  line-height: 1.1;
+}
+
+body .planner-input {
+  width: 64px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 10, 18, 0.55);
+  color: rgba(255, 255, 255, 0.92);
+  outline: none;
+}
+
+body .planner-input:focus {
+  border-color: rgba(130, 95, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(130, 95, 255, 0.18);
+}
+
+@media (max-width: 520px) {
+  body .planner-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  body .planner-controls {
+    grid-auto-flow: row;
+    justify-content: flex-start;
+  }
+  body .planner-item {
+    grid-template-columns: max-content 1fr;
+  }
+  body .planner-input {
+    width: 100%;
+    max-width: 120px;
+  }
+}
+
 body.page-maze .telemetry {
   grid-template-columns: 1fr;
 }

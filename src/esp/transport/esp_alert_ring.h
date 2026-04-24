@@ -11,6 +11,7 @@ class AlertRing {
   void reset();
   void pushFromLine(const String& line);
   void serveHttp(ESP8266WebServer& server, uint32_t from) const;
+  uint32_t newestSeq() const;
 
  private:
   static constexpr uint16_t kRingSize = 256;

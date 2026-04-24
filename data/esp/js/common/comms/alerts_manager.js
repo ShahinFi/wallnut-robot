@@ -109,6 +109,15 @@
     fromSeq = 0;
   }
 
-  window.AlertsManager = { start, stop, setPeriod, pollOnce, subscribe, resetCursor, _state: () => ({ enabled, periodMs, inFlight, fromSeq }) };
-})();
+  function setCursor(seq) {
+    const v = Number(seq);
+    if (!Number.isFinite(v) || v < 0) return;
+    fromSeq = Math.floor(v);
+  }
 
+  function cursor() {
+    return fromSeq;
+  }
+
+  window.AlertsManager = { start, stop, setPeriod, pollOnce, subscribe, resetCursor, setCursor, cursor, _state: () => ({ enabled, periodMs, inFlight, fromSeq }) };
+})();

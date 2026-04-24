@@ -16,26 +16,46 @@ const elStatus = $("autoStatus");
 if (!elStart || !elStop || !elStatus) {
   // Page doesn't include autonomy UI; safe no-op.
 } else {
-  const kPollAlertsMs = 140;
+  // ===== Tunables =====
   const kCmdTimeoutMs = 25000;
 
   const kBackoffAfterReflexCm = -8; // tunable, "middle" value
   const kMaxSegmentCm = 30; // cap single forward command length to reduce drift
 
+  const MissionState = Object.freeze({
+    Iter: "ITER",
+    Scan: "SCAN",
+    Plan: "PLAN",
+    Turn: "TURN",
+    Move: "MOVE",
+  });
+
+  // ===== Mission runtime flags =====
   let running = false;
   let stopRequested = false;
 
+  // ===== Goal configuration (source of truth: #mapCanvas data-*) =====
   // Single source of truth: read goal from `#mapCanvas` data-*.
   let goal = { x_cm: NaN, y_cm: NaN, tolCells: 0, cell: null };
 
+  // ===== Alerts stream cursor =====
   let alertFromSeq = 0;
   let alertsUnsub = null;
 
-  let pendingCmd = null; // { resolve, reject, t0, label }
-  let reflex = null; // { kind: "red"|"front", x_cm, y_cm }
+  // ===== In-flight command tracking (single command owner) =====
+  let pendingCmd = null; // { resolve, reject, t0, label, startSeq }
 
+  // ===== Mailbox (filled by alerts; consumed only by the state machine) =====
+  // Mailbox filled by alert polling; consumed only by the mission state machine.
+  let mailbox = {
+    reflex: null, // { kind: "red"|"front", x_cm, y_cm, headingDeg }
+    lastEvt: null,
+    lastAlertSeq: 0,
+  };
+
+  // ===== Virtual obstacles (red tiles) =====
   let virtualBlocked = null; // Uint8Array grid.w*grid.h (1 => blocked)
-  let redInflate = { xCells: 0, yCells: 0 };
+  let redInflate = { xCells: 0, yCells: 0 }; // inflation radius in cells (UI-configured)
   // Autonomy control flow (with stale live pose):
   // - Always scan BEFORE planning/replanning so pose/heading are fresh.
   // - Never scan just because we turned or the plan changed.
@@ -43,7 +63,25 @@ if (!elStart || !elStop || !elStatus) {
   //   then schedule a scan for the next iteration.
   let pendingScanReason = null; // "segment"|"recover"|"no-path"|...
 
+  // ===== UI (single writer) =====
   let lastAutoStatusRaw = "idle";
+
+  const uiState = {
+    state: "idle",
+    running: false,
+    cmdLabel: null,
+    cmdAgeMs: null,
+    lastEvt: null,
+    lastAlertSeq: 0,
+    goalCx: null,
+    goalCy: null,
+    startCx: null,
+    startCy: null,
+    pathLen: null,
+    segDir: null,
+    segCm: null,
+    turnDeg: null,
+  };
 
   function isArmed_() {
     const authEl = document.getElementById("authStatus");
@@ -54,12 +92,57 @@ if (!elStart || !elStop || !elStatus) {
   function refreshAutoStatusDisplay_() {
     const out = isArmed_() ? String(lastAutoStatusRaw || "") : "Not armed";
     elStatus.textContent = out;
-    if (window.StatusBus) window.StatusBus.set("autonomy", { state: out });
+  }
+
+  function renderUi_() {
+    // Make the UI 100% consistent/atomic:
+    // - While a command is in-flight, the authoritative "what is happening now"
+    //   is the in-flight command label (not the planner's next-intent string).
+    // - "Next segment" information still shows via segDir/segCm/turnDeg.
+    const armed = isArmed_();
+    const inFlightLabel = pendingCmd && pendingCmd.label ? String(pendingCmd.label) : "";
+    const displayState = !armed
+      ? "Not armed"
+      : (inFlightLabel ? `Executing ${inFlightLabel}` : String(uiState.state || ""));
+
+    // Auto status pill text.
+    lastAutoStatusRaw = displayState;
+    refreshAutoStatusDisplay_();
+
+    // Detailed status (single writer).
+    if (window.StatusBus) {
+      window.StatusBus.set("autonomy", {
+        state: displayState,
+        running: !!uiState.running,
+        cmdLabel: uiState.cmdLabel,
+        cmdAgeMs: uiState.cmdAgeMs,
+        lastEvt: uiState.lastEvt,
+        lastAlertSeq: uiState.lastAlertSeq,
+        goalCx: uiState.goalCx,
+        goalCy: uiState.goalCy,
+        startCx: uiState.startCx,
+        startCy: uiState.startCy,
+        pathLen: uiState.pathLen,
+        segDir: uiState.segDir,
+        segCm: uiState.segCm,
+        turnDeg: uiState.turnDeg,
+      });
+    }
+  }
+
+  function setUi_(patch) {
+    Object.assign(uiState, patch || {});
+    renderUi_();
   }
 
   function setStatus(text) {
-    lastAutoStatusRaw = String(text || "");
-    refreshAutoStatusDisplay_();
+    setUi_({ state: String(text || "") });
+  }
+
+  function clearMailbox_() {
+    mailbox.reflex = null;
+    mailbox.lastEvt = null;
+    mailbox.lastAlertSeq = 0;
   }
 
   function mappingApi() {
@@ -80,6 +163,15 @@ if (!elStart || !elStop || !elStatus) {
     return Number.isFinite(n) ? n : 0;
   }
 
+  function currentAlertSeq_() {
+    const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
+    const storeSeq = Number(st?.alerts?.lastSeq);
+    const a = Number.isFinite(storeSeq) ? storeSeq : 0;
+    const b = Number.isFinite(alertFromSeq) ? alertFromSeq : 0;
+    return Math.max(a, b);
+  }
+
+  // ===== HTTP wrappers =====
   async function httpPost(path) {
     if (window.DebugLog) window.DebugLog.push("http", `POST ${path}`);
     const res = await fetch(path, { method: "POST", cache: "no-store" });
@@ -94,9 +186,12 @@ if (!elStart || !elStop || !elStatus) {
 
   async function cmdTurn(deg) {
     const v = roundInt(deg);
-    return await cmdAwait(`/turn?deg=${encodeURIComponent(String(v))}`, `turn ${v}deg`);
+    // Autonomy must always take the shortest-path turn. Use the dedicated endpoint
+    // that normalizes into [-180, 180] and routes to TurnDegShortest on Mega.
+    return await cmdAwait(`/turn_short?deg=${encodeURIComponent(String(v))}`, `turn ${v}deg`);
   }
 
+  // ===== Command await (single outstanding cmd at a time) =====
   function cmdAwait(path, label) {
     if (!running) return Promise.resolve({ ok: false, status: "stopped" });
     if (pendingCmd) return Promise.reject(new Error("CMD_IN_FLIGHT"));
@@ -104,16 +199,17 @@ if (!elStart || !elStop || !elStatus) {
     return new Promise(async (resolve, reject) => {
       if (window.NetGate) window.NetGate.enterCmd();
       const cmdStartMs = Date.now();
+      const startSeq = currentAlertSeq_();
       if (window.DebugLog) window.DebugLog.push("cmd", `begin ${label}`);
-      if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: label, cmdAgeMs: 0 });
-      pendingCmd = { resolve, reject, t0: Date.now(), label };
+      setUi_({ cmdLabel: label, cmdAgeMs: 0 });
+      pendingCmd = { resolve, reject, t0: Date.now(), label, startSeq };
       try {
         const res = await httpPost(path);
         if (!res.ok) {
           if (window.DebugLog) window.DebugLog.push("cmd", `http fail ${label} (${res.status})`);
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+          setUi_({ cmdLabel: null, cmdAgeMs: null });
           resolve({ ok: false, status: `http_${res.status}` });
           return;
         }
@@ -121,19 +217,19 @@ if (!elStart || !elStop || !elStatus) {
         if (window.DebugLog) window.DebugLog.push("cmd", `http error ${label}`);
         pendingCmd = null;
         if (window.NetGate) window.NetGate.exitCmd();
-        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+        setUi_({ cmdLabel: null, cmdAgeMs: null });
         resolve({ ok: false, status: "http_error" });
         return;
       }
 
       const tick = () => {
         if (!pendingCmd) return;
-        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: label, cmdAgeMs: Date.now() - cmdStartMs });
+        setUi_({ cmdLabel: label, cmdAgeMs: Date.now() - cmdStartMs });
         if (!running) {
           const pc = pendingCmd;
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+          setUi_({ cmdLabel: null, cmdAgeMs: null });
           if (window.DebugLog) window.DebugLog.push("cmd", `end ${label} (stopped)`);
           pc.resolve({ ok: false, status: "stopped" });
           return;
@@ -142,7 +238,7 @@ if (!elStart || !elStop || !elStatus) {
           const pc = pendingCmd;
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+          setUi_({ cmdLabel: null, cmdAgeMs: null });
           if (window.DebugLog) window.DebugLog.push("cmd", `timeout ${label}`);
           pc.resolve({ ok: false, status: "timeout" });
           return;
@@ -166,6 +262,7 @@ if (!elStart || !elStop || !elStatus) {
     return { tag, x_cm: x, y_cm: y, headingDeg: h, extra };
   }
 
+  // ===== Virtual obstacle grid helpers =====
   function vbIdx(grid, cx, cy) {
     return cy * grid.w + cx;
   }
@@ -215,203 +312,339 @@ if (!elStart || !elStop || !elStatus) {
     { dx: 0, dy: -1, label: "S" },
   ];
 
-  function bfsDistStepsToGoal_(grid, goalCell) {
+  // ===== Planner configuration (knobs) =====
+  const plannerCfg_ = {
+    wLen: 1.0,   // shortest path weight
+    wTurn: 3.0,  // turn penalty weight
+    wRisk: 6.0,  // obstacle/red proximity penalty weight
+    wFirst: 0.0, // prefer longer first straight run (0 disables)
+    rRed: 3,     // risk radius around virtual red (cells)
+    rOcc: 2,     // risk radius around occupied cells (cells)
+  };
+
+  function readPlannerConfigFromDom_() {
+    const canvas = document.getElementById("mapCanvas");
+    if (!canvas) return plannerCfg_;
+
+    function readNum(id, fallback) {
+      const el = document.getElementById(id);
+      if (!el) return fallback;
+      const v = Number(el.value);
+      return Number.isFinite(v) ? v : fallback;
+    }
+
+    // Allow UI inputs to override, otherwise fall back to data-*.
+    const wLen = readNum("planWLen", Number(canvas.dataset.planWLen));
+    const wTurn = readNum("planWTurn", Number(canvas.dataset.planWTurn));
+    const wRisk = readNum("planWRisk", Number(canvas.dataset.planWRisk));
+    const wFirst = readNum("planWFirst", Number(canvas.dataset.planWFirst));
+
+    const rRed = Number(canvas.dataset.planRiskRadiusRedCells);
+    const rOcc = Number(canvas.dataset.planRiskRadiusOccCells);
+
+    function clamp01_(v, lo, hi) {
+      const x = Number(v);
+      if (!Number.isFinite(x)) return null;
+      if (x < lo) return lo;
+      if (x > hi) return hi;
+      return x;
+    }
+
+    // UI range is 0..10 (weights are relative, not absolute counts).
+    const wl = clamp01_(wLen, 0, 10);
+    const wt = clamp01_(wTurn, 0, 10);
+    const wr = clamp01_(wRisk, 0, 10);
+    const wf = clamp01_(wFirst, 0, 10);
+    if (wl != null) plannerCfg_.wLen = wl;
+    if (wt != null) plannerCfg_.wTurn = wt;
+    if (wr != null) plannerCfg_.wRisk = wr;
+    if (wf != null) plannerCfg_.wFirst = wf;
+    plannerCfg_.rRed = Number.isFinite(rRed) && rRed >= 0 ? Math.floor(rRed) : plannerCfg_.rRed;
+    plannerCfg_.rOcc = Number.isFinite(rOcc) && rOcc >= 0 ? Math.floor(rOcc) : plannerCfg_.rOcc;
+
+    return plannerCfg_;
+  }
+
+  function syncPlannerInputsFromDataset_() {
+    const canvas = document.getElementById("mapCanvas");
+    if (!canvas) return;
+    const wl = Number(canvas.dataset.planWLen);
+    const wt = Number(canvas.dataset.planWTurn);
+    const wr = Number(canvas.dataset.planWRisk);
+    const wf = Number(canvas.dataset.planWFirst);
+    const elWL = document.getElementById("planWLen");
+    const elWT = document.getElementById("planWTurn");
+    const elWR = document.getElementById("planWRisk");
+    const elWF = document.getElementById("planWFirst");
+    if (elWL && Number.isFinite(wl)) elWL.value = String(wl);
+    if (elWT && Number.isFinite(wt)) elWT.value = String(wt);
+    if (elWR && Number.isFinite(wr)) elWR.value = String(wr);
+    if (elWF && Number.isFinite(wf)) elWF.value = String(wf);
+  }
+
+  // ===== Risk precompute (distance transforms) =====
+  function computeDistToSources_(grid, isSource) {
     const w = grid.w;
     const h = grid.h;
-    const dist = new Int32Array(w * h);
+    const n = w * h;
+    const dist = new Int16Array(n);
     dist.fill(-1);
 
-    const order = new Int32Array(w * h);
-    let orderLen = 0;
-
-    if (!goalCell) return { dist, order, orderLen: 0 };
-    if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return { dist, order, orderLen: 0 };
-
-    const q = new Int32Array(w * h + 8);
+    const q = new Int32Array(n + 8);
     let qh = 0;
     let qt = 0;
 
-    const goalIdx = goalCell.cy * w + goalCell.cx;
-    dist[goalIdx] = 0;
-    q[qt++] = goalIdx;
+    for (let cy = 0; cy < h; cy++) {
+      for (let cx = 0; cx < w; cx++) {
+        const idx = cy * w + cx;
+        if (!isSource(cx, cy, idx)) continue;
+        dist[idx] = 0;
+        q[qt++] = idx;
+      }
+    }
 
     while (qh < qt) {
       const cur = q[qh++];
-      order[orderLen++] = cur;
       const cx = cur % w;
       const cy = (cur / w) | 0;
       const base = dist[cur];
+      const nextD = base + 1;
 
       for (let d = 0; d < 4; d++) {
         const nx = cx + DIRS[d].dx;
         const ny = cy + DIRS[d].dy;
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-        if (isCellBlocked(grid, nx, ny)) continue;
         const ni = ny * w + nx;
         if (dist[ni] !== -1) continue;
-        dist[ni] = base + 1;
+        dist[ni] = nextD;
         q[qt++] = ni;
       }
     }
 
-    return { dist, order, orderLen };
+    return dist;
   }
 
-  function computeMinTurnsAlongShortest_(grid, distToGoalSteps, order, orderLen, goalCell) {
+  function riskFromDist_(d, radiusCells) {
+    const r = Number(radiusCells);
+    if (!(r > 0)) return 0.0;
+    const di = Number(d);
+    if (!Number.isFinite(di) || di < 0) return 0.0;
+    if (di > r) return 0.0;
+    const t = (r - di) / r;
+    return t * t;
+  }
+
+  function computeRiskMap_(grid, rRedCells, rOccCells) {
     const w = grid.w;
     const h = grid.h;
-    const INF = 1e9;
+    const n = w * h;
+    const risk = new Float32Array(n);
+    risk.fill(0);
 
-    const dp = new Int32Array(w * h * 4);
-    for (let i = 0; i < dp.length; i++) dp[i] = INF;
+    const distRed = computeDistToSources_(grid, (cx, cy, idx) => (virtualBlocked ? !!virtualBlocked[idx] : false));
+    const distOcc = computeDistToSources_(grid, (cx, cy) => grid.cellState(cx, cy) === "occ");
 
-    const bestNextDir = new Int8Array(w * h * 4);
-    bestNextDir.fill(-1);
-
-    const goalIdx = goalCell.cy * w + goalCell.cx;
-    for (let prevDir = 0; prevDir < 4; prevDir++) {
-      dp[goalIdx * 4 + prevDir] = 0;
+    for (let i = 0; i < n; i++) {
+      const rr = riskFromDist_(distRed[i], rRedCells);
+      const ro = riskFromDist_(distOcc[i], rOccCells);
+      risk[i] = rr + ro;
     }
 
-    // Process cells in non-decreasing distance from goal (BFS order).
-    for (let i = 0; i < orderLen; i++) {
-      const cellIdx = order[i];
-      if (cellIdx === goalIdx) continue;
-      const dHere = distToGoalSteps[cellIdx];
-      if (dHere <= 0) continue;
-      const cx = cellIdx % w;
-      const cy = (cellIdx / w) | 0;
-
-      for (let prevDir = 0; prevDir < 4; prevDir++) {
-        let best = INF;
-        let bestDir = -1;
-
-        for (let nd = 0; nd < 4; nd++) {
-          const nx = cx + DIRS[nd].dx;
-          const ny = cy + DIRS[nd].dy;
-          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-          if (isCellBlocked(grid, nx, ny)) continue;
-          const nidx = ny * w + nx;
-          const dNext = distToGoalSteps[nidx];
-          if (dNext !== dHere - 1) continue; // only consider shortest-path gradient steps
-
-          const turnCost = nd === prevDir ? 0 : 1;
-          const sub = dp[nidx * 4 + nd];
-          if (sub >= INF) continue;
-          const tot = turnCost + sub;
-          if (tot < best) {
-            best = tot;
-            bestDir = nd;
-          }
-        }
-
-        dp[cellIdx * 4 + prevDir] = best;
-        bestNextDir[cellIdx * 4 + prevDir] = bestDir;
-      }
-    }
-
-    return { dp, bestNextDir };
+    return risk;
   }
 
-  function planLexicographic_(grid, startCell, goalCell) {
+  function headingToDirIdx_(headingDeg) {
+    const h = wrapDiff180(Number(headingDeg));
+    if (!Number.isFinite(h)) return 2; // default N
+    // Convert to [0,360)
+    let w = h;
+    while (w < 0) w += 360;
+    while (w >= 360) w -= 360;
+    // N=0, E=90, S=180, W=270
+    const idx = Math.round(w / 90) % 4;
+    // DIRS order is E,W,N,S; map to that:
+    // cardinal idx: 0=N,1=E,2=S,3=W
+    if (idx === 0) return 2; // N
+    if (idx === 1) return 0; // E
+    if (idx === 2) return 3; // S
+    return 1; // W
+  }
+
+  function dirStepsBetween_(a, b) {
+    const da = a | 0;
+    const db = b | 0;
+    const d = Math.abs(da - db) % 4;
+    return d > 2 ? 4 - d : d; // 0..2
+  }
+
+  class MinHeap_ {
+    constructor() { this.ids = []; this.fs = []; }
+    get size() { return this.ids.length; }
+    push(id, f) {
+      const ids = this.ids;
+      const fs = this.fs;
+      let i = ids.length;
+      ids.push(id);
+      fs.push(f);
+      while (i > 0) {
+        const p = ((i - 1) / 2) | 0;
+        if (fs[p] <= f) break;
+        ids[i] = ids[p]; fs[i] = fs[p];
+        i = p;
+      }
+      ids[i] = id; fs[i] = f;
+    }
+    pop() {
+      const ids = this.ids;
+      const fs = this.fs;
+      const n = ids.length;
+      if (n === 0) return null;
+      const outId = ids[0];
+      const outF = fs[0];
+      const lastId = ids.pop();
+      const lastF = fs.pop();
+      if (n > 1) {
+        let i = 0;
+        while (true) {
+          const l = i * 2 + 1;
+          const r = l + 1;
+          if (l >= ids.length) break;
+          let s = l;
+          if (r < ids.length && fs[r] < fs[l]) s = r;
+          if (fs[s] >= lastF) break;
+          ids[i] = ids[s]; fs[i] = fs[s];
+          i = s;
+        }
+        ids[i] = lastId; fs[i] = lastF;
+      }
+      return { id: outId, f: outF };
+    }
+  }
+
+  function planWeightedAStar_(grid, startCell, goalCell, robotDirIdx, cfg, riskMap) {
     const w = grid.w;
     const h = grid.h;
     if (!startCell || !goalCell) return null;
     if (isCellBlocked(grid, startCell.cx, startCell.cy)) return null;
     if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return null;
-
     if (startCell.cx === goalCell.cx && startCell.cy === goalCell.cy) {
       return [{ cx: startCell.cx, cy: startCell.cy }];
     }
 
-    // Primary objective: minimize total path length (cells).
-    const bfs = bfsDistStepsToGoal_(grid, goalCell);
-    const distSteps = bfs.dist;
-    const startIdx = startCell.cy * w + startCell.cx;
-    const minLenSteps = distSteps[startIdx];
-    if (!Number.isFinite(minLenSteps) || minLenSteps < 0) return null;
-    if (minLenSteps === 0) return [{ cx: startCell.cx, cy: startCell.cy }];
+    // State: (cell, moveDir, firstDir, leftFirst)
+    // - moveDir is the direction of the last step (used for turn cost).
+    // - firstDir is the direction of the first straight run we want to maximize.
+    // - leftFirst is true once we take a step not equal to firstDir.
+    const nStates = w * h * 4 * 4 * 2;
+    const gScore = new Float64Array(nStates);
+    const came = new Int32Array(nStates);
+    gScore.fill(Infinity);
+    came.fill(-1);
 
-    // Tertiary tie-breaker data: among shortest paths, minimize turns.
-    const turns = computeMinTurnsAlongShortest_(grid, distSteps, bfs.order, bfs.orderLen, goalCell);
-
-    // Secondary objective: among shortest paths, maximize the length of the first straight run.
-    const runByDir = new Int32Array(4);
-    runByDir.fill(0);
-    let bestRun = 0;
-
-    for (let d = 0; d < 4; d++) {
-      let cx = startCell.cx;
-      let cy = startCell.cy;
-      let run = 0;
-      for (let r = 1; r <= minLenSteps; r++) {
-        const nx = cx + DIRS[d].dx;
-        const ny = cy + DIRS[d].dy;
-        if (nx < 0 || ny < 0 || nx >= w || ny >= h) break;
-        if (isCellBlocked(grid, nx, ny)) break;
-        const nidx = ny * w + nx;
-        if (distSteps[nidx] !== (minLenSteps - r)) break; // leaving the shortest-path set for this run length
-        cx = nx;
-        cy = ny;
-        run = r;
-      }
-      runByDir[d] = run;
-      if (run > bestRun) bestRun = run;
+    function stateId(cx, cy, moveDir, firstDir, leftFirst) {
+      const cell = (cy * w + cx) >>> 0;
+      const md = (moveDir & 3) >>> 0;
+      const fd = (firstDir & 3) >>> 0;
+      const lf = leftFirst ? 1 : 0;
+      // cell * 32 + firstDir*8 + moveDir*2 + leftFirst
+      return ((cell * 32) + (fd * 8) + (md * 2) + lf) >>> 0;
     }
 
-    if (bestRun <= 0) return null;
+    function decodeState(id) {
+      const lf = id & 1;
+      const md = (id >>> 1) & 3;
+      const fd = (id >>> 3) & 3;
+      const cell = (id / 32) | 0;
+      const cx = cell % w;
+      const cy = (cell / w) | 0;
+      return { cx, cy, moveDir: md, firstDir: fd, leftFirst: !!lf };
+    }
 
-    let bestDir = -1;
-    let bestTurnCount = 1e9;
+    function heuristic(cx, cy) {
+      const dx = Math.abs(cx - goalCell.cx);
+      const dy = Math.abs(cy - goalCell.cy);
+      return cfg.wLen * (dx + dy);
+    }
 
-    for (let d = 0; d < 4; d++) {
-      if (runByDir[d] !== bestRun) continue;
-      const endCx = startCell.cx + DIRS[d].dx * bestRun;
-      const endCy = startCell.cy + DIRS[d].dy * bestRun;
-      if (endCx < 0 || endCy < 0 || endCx >= w || endCy >= h) continue;
-      if (isCellBlocked(grid, endCx, endCy)) continue;
-      const endIdx = endCy * w + endCx;
-      if (distSteps[endIdx] !== (minLenSteps - bestRun)) continue;
-
-      const tc = turns.dp[endIdx * 4 + d];
-      if (tc < bestTurnCount) {
-        bestTurnCount = tc;
-        bestDir = d;
+    const open = new MinHeap_();
+    // Seed: choose firstDir, paying the initial turn from robot heading into that firstDir.
+    for (let firstDir = 0; firstDir < 4; firstDir++) {
+      const initialTurnSteps = dirStepsBetween_(robotDirIdx, firstDir);
+      const initCost = cfg.wTurn * initialTurnSteps;
+      const sid = stateId(startCell.cx, startCell.cy, firstDir, firstDir, false);
+      if (initCost < gScore[sid]) {
+        gScore[sid] = initCost;
+        open.push(sid, initCost + heuristic(startCell.cx, startCell.cy));
       }
     }
 
-    if (bestDir < 0) return null;
+    const goalIdx = goalCell.cy * w + goalCell.cx;
+    let goalState = -1;
 
-    // Build forced prefix.
-    const prefix = [{ cx: startCell.cx, cy: startCell.cy }];
-    let cx = startCell.cx;
-    let cy = startCell.cy;
-    for (let i = 0; i < bestRun; i++) {
-      cx += DIRS[bestDir].dx;
-      cy += DIRS[bestDir].dy;
-      prefix.push({ cx, cy });
+    while (open.size) {
+      const cur = open.pop();
+      if (!cur) break;
+      const id = cur.id;
+      const baseG = gScore[id];
+      if (!Number.isFinite(baseG)) continue;
+
+      const st = decodeState(id);
+      const cx = st.cx;
+      const cy = st.cy;
+
+      const cellIdx = cy * w + cx;
+      if (cellIdx === goalIdx) {
+        goalState = id;
+        break;
+      }
+
+      for (let nd = 0; nd < 4; nd++) {
+        const nx = cx + DIRS[nd].dx;
+        const ny = cy + DIRS[nd].dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        if (isCellBlocked(grid, nx, ny)) continue;
+
+        const nCellIdx = ny * w + nx;
+        const nextLeft = st.leftFirst || (nd !== st.firstDir);
+        const nId = stateId(nx, ny, nd, st.firstDir, nextLeft);
+
+        const turnSteps = dirStepsBetween_(st.moveDir, nd);
+        const riskCost = cfg.wRisk * (riskMap ? riskMap[nCellIdx] : 0.0);
+        const afterFirstPenalty = (cfg.wFirst > 0 && nextLeft) ? cfg.wFirst : 0.0;
+        const stepCost = cfg.wLen + (cfg.wTurn * turnSteps) + riskCost + afterFirstPenalty;
+        const ng = baseG + stepCost;
+        if (ng >= gScore[nId]) continue;
+
+        gScore[nId] = ng;
+        came[nId] = id;
+        const nf = ng + heuristic(nx, ny);
+        open.push(nId, nf);
+      }
     }
 
-    const endIdx = cy * w + cx;
-    if (endIdx === goalCell.cy * w + goalCell.cx) return prefix;
+    if (goalState < 0) return null;
 
-    // Reconstruct a shortest-path suffix from the end of the prefix, minimizing turns.
-    const suffix = [{ cx, cy }];
-    let prevDir = bestDir;
-    for (;;) {
-      const curIdx = cy * w + cx;
-      if (curIdx === goalCell.cy * w + goalCell.cx) break;
-      const nd = turns.bestNextDir[curIdx * 4 + prevDir];
-      if (nd < 0) return null;
-      cx += DIRS[nd].dx;
-      cy += DIRS[nd].dy;
-      suffix.push({ cx, cy });
-      prevDir = nd;
-      // Safety: if something goes wrong, don't loop forever.
-      if (suffix.length > minLenSteps + 8) return null;
+    // Reconstruct state path.
+    const revCells = [];
+    let curId = goalState;
+    while (curId >= 0) {
+      const st = decodeState(curId);
+      revCells.push({ cx: st.cx, cy: st.cy });
+      const p = came[curId];
+      if (p < 0) break;
+      curId = p;
+      if (revCells.length > w * h + 16) break;
     }
+    revCells.reverse();
 
-    return prefix.concat(suffix.slice(1));
+    // Deduplicate consecutive same-cell entries (defensive).
+    const out = [];
+    for (const c of revCells) {
+      const prev = out.length ? out[out.length - 1] : null;
+      if (prev && prev.cx === c.cx && prev.cy === c.cy) continue;
+      out.push(c);
+    }
+    return out;
   }
 
   function pathToSegments(path) {
@@ -460,6 +693,7 @@ if (!elStart || !elStop || !elStatus) {
     return 0;
   }
 
+  // ===== UI configuration reads =====
   function configureGoalFromDom(api) {
     const canvas = document.getElementById("mapCanvas");
     if (!canvas) return false;
@@ -525,18 +759,22 @@ if (!elStart || !elStop || !elStatus) {
     const evt = parseEvt(line);
     if (!evt) return;
     if (window.DebugLog) window.DebugLog.push("evt", line.trim());
-    if (window.StatusBus) window.StatusBus.set("autonomy", { lastEvt: evt.tag, lastAlertSeq: alertFromSeq });
+
+    mailbox.lastEvt = evt.tag;
+    mailbox.lastAlertSeq = alertFromSeq;
 
     if (evt.tag === "RED") {
-      reflex = { kind: "red", x_cm: evt.x_cm, y_cm: evt.y_cm };
+      mailbox.reflex = { kind: "red", x_cm: evt.x_cm, y_cm: evt.y_cm, headingDeg: evt.headingDeg };
     } else if (evt.tag === "FRONTSTOP") {
-      reflex = { kind: "front", x_cm: evt.x_cm, y_cm: evt.y_cm };
+      mailbox.reflex = { kind: "front", x_cm: evt.x_cm, y_cm: evt.y_cm, headingDeg: evt.headingDeg };
     } else if (evt.tag === "CMDOK" || evt.tag === "CMDFAIL" || evt.tag === "CMDCANCEL") {
       if (pendingCmd) {
+        // Fundamental: ignore stale completions from before this command started.
+        if (Number.isFinite(seq) && seq <= pendingCmd.startSeq) return;
         const pc = pendingCmd;
         pendingCmd = null;
         if (window.NetGate) window.NetGate.exitCmd();
-        if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+        setUi_({ cmdLabel: null, cmdAgeMs: null });
         const ok = evt.tag === "CMDOK";
         if (window.DebugLog) window.DebugLog.push("cmd", `end ${pc.label} (${evt.tag})`);
         pc.resolve({ ok, status: evt.tag, pose: { x_cm: evt.x_cm, y_cm: evt.y_cm, h: evt.headingDeg } });
@@ -544,13 +782,24 @@ if (!elStart || !elStop || !elStatus) {
     }
   }
 
-  function startAlertStream_() {
-    if (alertsUnsub) return;
+  // ===== Alerts stream control =====
+  async function startAlertStream_() {
+    if (alertsUnsub) return true;
     const am = window.AlertsManager;
-    if (!am || !am.subscribe) return;
-    try { am.resetCursor && am.resetCursor(); } catch {}
+    if (!am || !am.subscribe) return false;
+    // Do not replay old alert history: start from the newest seq on the ESP.
+    let tail = 0;
+    try {
+      const res = await fetch("/alerts_tail", { cache: "no-store" });
+      if (res && res.ok) {
+        const t = Number(String(await res.text()).trim());
+        if (Number.isFinite(t) && t >= 0) tail = Math.floor(t);
+      }
+    } catch {}
+    try { am.setCursor && am.setCursor(Math.max(tail, currentAlertSeq_())); } catch {}
     alertsUnsub = am.subscribe(handleAlertRow_);
     try { am.start && am.start(); } catch {}
+    return true;
   }
 
   function stopAlertStream_() {
@@ -578,7 +827,7 @@ if (!elStart || !elStop || !elStatus) {
     // Small deadband to avoid jitter.
     if (Math.abs(dTurn) <= 3) return true;
     setStatus("turn -> N");
-    if (window.StatusBus) window.StatusBus.set("autonomy", { turnDeg: dTurn });
+    setUi_({ segDir: "N", turnDeg: dTurn, segCm: null });
     await cmdTurn(dTurn);
     return true;
   }
@@ -592,28 +841,28 @@ if (!elStart || !elStop || !elStatus) {
   }
 
   async function handleReflex(api) {
-    if (!reflex) return false;
-    const r = reflex;
-    reflex = null;
+    if (!mailbox.reflex) return false;
+    const r = mailbox.reflex;
+    mailbox.reflex = null;
     // Reflex stop already forces a scan; drop any queued scan so we don't scan twice.
     pendingScanReason = null;
 
     if (r.kind === "red") {
-      // For red floor tiles: scan first to get the best corrected pose, then mark
-      // the virtual obstacle at that corrected pose (avoids odom/pose handoff jitter),
-      // then back off. No extra scan after the backoff to avoid scan thrash.
+      // For red floor tiles: scan first to get the corrected pose, then mark the
+      // virtual obstacle at that corrected pose. Backoff is handled by the
+      // general invariant: if the robot is on a red-marked cell, it must back off.
       setStatus("RED stop -> scan");
       await doScan(api, "red");
-      const pose = api.getPose();
-      const c = api.grid.worldToCell(pose.x, pose.y);
+      // Stamp at the scan-matched pose anchor (mapPose0) so the mark aligns with
+      // the scan correction (and thus with the map update).
+      const p0 = api?.state?.mapPose0;
+      const c = api.grid.worldToCell(p0?.x, p0?.y);
       if (c) {
         const rx = redInflate.xCells | 0;
         const ry = redInflate.yCells | 0;
         if (rx > 0 || ry > 0) vbMarkRect_(api.grid, c.cx, c.cy, rx, ry);
         else vbSet(api.grid, c.cx, c.cy, 1);
       }
-      setStatus("RED stop -> backoff");
-      await cmdMove(kBackoffAfterReflexCm);
       return true;
     }
 
@@ -622,6 +871,14 @@ if (!elStart || !elStop || !elStatus) {
     await cmdMove(kBackoffAfterReflexCm);
     await doScan(api, "front");
     return true;
+  }
+
+  function isPoseOnVirtualRed_(api, pose) {
+    if (!api || !pose) return false;
+    if (!virtualBlocked) return false;
+    const c = api.grid.worldToCell(pose.x, pose.y);
+    if (!c) return false;
+    return !!vbGet(api.grid, c.cx, c.cy);
   }
 
   async function runLoop() {
@@ -646,18 +903,18 @@ if (!elStart || !elStop || !elStatus) {
     }
     configureRedInflateFromDom_();
 
-    setStatus(`goal cell=(${goal.cell.cx},${goal.cell.cy})`);
-    if (window.StatusBus) {
-      window.StatusBus.set("autonomy", {
-        running: true,
-        goalCx: goal.cell.cx,
-        goalCy: goal.cell.cy,
-        pathLen: null,
-        segDir: null,
-        segCm: null,
-        turnDeg: null,
-      });
-    }
+    setUi_({
+      running: true,
+      state: `goal cell=(${goal.cell.cx},${goal.cell.cy})`,
+      goalCx: goal.cell.cx,
+      goalCy: goal.cell.cy,
+      pathLen: null,
+      segDir: null,
+      segCm: null,
+      turnDeg: null,
+      lastEvt: null,
+      lastAlertSeq: mailbox.lastAlertSeq || 0,
+    });
 
     // Project convention: robot heading 0 is aligned with map +Y (north).
     // Always turn to north before the initial scan so the first match is stable.
@@ -672,74 +929,135 @@ if (!elStart || !elStop || !elStatus) {
       return;
     }
 
+    // Mission state machine. The invariant:
+    // At any time, autonomy is doing exactly one blocking wait:
+    // scan OR a single motion command OR planning.
+    let state = MissionState.Iter;
+    let nextTurnDeg = null;
+    let nextMoveCm = null;
+    let nextSegDir = null;
+
     while (running && !stopRequested) {
-      await handleReflex(api);
-      if (!running || stopRequested) break;
+      // Sync UI-only fields from mailbox (single writer).
+      setUi_({
+        lastEvt: mailbox.lastEvt,
+        lastAlertSeq: mailbox.lastAlertSeq || 0,
+      });
 
-      // If a scan is pending, do it as the only primitive for this iteration,
-      // then replan on the next iteration.
-      if (pendingScanReason) {
-        const reason = pendingScanReason;
-        pendingScanReason = null;
-        await doScan(api, reason);
+      // Reflex has priority over everything else.
+      if (mailbox.reflex) {
+        await handleReflex(api);
+        state = MissionState.Iter;
         continue;
       }
 
-      const pose = api.getPose();
-      if (isAtGoal(api, pose)) {
-        setStatus("GOAL REACHED");
-        break;
-      }
-
-      const startCell = api.grid.worldToCell(pose.x, pose.y);
-      if (!startCell) {
-        // If pose drifts out of bounds, force a scan to pull it back.
-        await doScan(api, "recover");
-        continue;
-      }
-      if (window.StatusBus) window.StatusBus.set("autonomy", { startCx: startCell.cx, startCy: startCell.cy });
-
-      const path = planLexicographic_(api.grid, startCell, goal.cell);
-      if (!path) {
-        setStatus("NO PATH");
-        setPlannedPathOverlay_(api, null);
-        if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: null });
-        await doScan(api, "no-path");
+      // Fundamental invariant: if map-matching places the robot on a virtual red cell,
+      // back off immediately (do not scan-thrash or try to plan from a blocked start).
+      // This applies both after a true sensor RED hit and after any localization drift.
+      const poseNow = api.getPose();
+      if (isPoseOnVirtualRed_(api, poseNow)) {
+        pendingScanReason = null; // do not scan here; just back off
+        setStatus("on red -> backoff");
+        setUi_({ segDir: null, segCm: kBackoffAfterReflexCm, turnDeg: null });
+        await cmdMove(kBackoffAfterReflexCm);
+        state = MissionState.Iter;
         continue;
       }
 
-      setPlannedPathOverlay_(api, path);
-      if (window.StatusBus) window.StatusBus.set("autonomy", { pathLen: path.length });
+      switch (state) {
+        case MissionState.Iter: {
+          // If a scan is pending, do it as the only primitive for this iteration,
+          // then plan on the next iteration.
+          state = pendingScanReason ? MissionState.Scan : MissionState.Plan;
+          break;
+        }
 
-      // Drive along the planned path until the first required turn:
-      // take the first segment direction and move as far as possible in that direction.
-      const segs = pathToSegments(path);
-      if (!segs.length) {
-        setStatus("GOAL CELL");
-        setPlannedPathOverlay_(api, path);
-        break;
+        case MissionState.Scan: {
+          const reason = pendingScanReason || "segment";
+          pendingScanReason = null;
+          await doScan(api, reason);
+          state = MissionState.Plan;
+          break;
+        }
+
+        case MissionState.Plan: {
+          const pose = api.getPose();
+          if (isAtGoal(api, pose)) {
+            setStatus("GOAL REACHED");
+            stopRequested = true;
+            break;
+          }
+
+        const startCell = api.grid.worldToCell(pose.x, pose.y);
+        if (!startCell) {
+          pendingScanReason = "recover";
+          state = MissionState.Scan;
+          break;
+        }
+        setUi_({ startCx: startCell.cx, startCy: startCell.cy });
+
+        const cfg = readPlannerConfigFromDom_();
+        const riskMap = computeRiskMap_(api.grid, cfg.rRed, cfg.rOcc);
+        const robotDirIdx = headingToDirIdx_(pose.headingDeg);
+        const path = planWeightedAStar_(api.grid, startCell, goal.cell, robotDirIdx, cfg, riskMap);
+        if (!path) {
+          setStatus("NO PATH");
+          setPlannedPathOverlay_(api, null);
+          setUi_({ pathLen: null, segDir: null, segCm: null, turnDeg: null });
+          pendingScanReason = "no-path";
+            state = MissionState.Scan;
+            break;
+          }
+
+          setPlannedPathOverlay_(api, path);
+          setUi_({ pathLen: path.length });
+
+          const segs = pathToSegments(path);
+          if (!segs.length) {
+            setStatus("GOAL CELL");
+            stopRequested = true;
+            break;
+          }
+
+          const run = { dir: segs[0].dir, steps: Math.max(1, segs[0].steps | 0) };
+          const targetH = dirToHeadingDeg(run.dir);
+          const curH = Number(pose.headingDeg);
+          const dTurn = wrapDiff180(targetH - curH);
+          nextSegDir = run.dir;
+          nextTurnDeg = Math.abs(dTurn) > 3 ? dTurn : null;
+
+          const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
+          const maxCells = Math.max(1, Math.floor(kMaxSegmentCm / cmPerCell));
+          const cellsToMove = Math.max(1, Math.min(run.steps, maxCells));
+          nextMoveCm = cellsToMove * cmPerCell;
+
+          state = nextTurnDeg !== null ? MissionState.Turn : MissionState.Move;
+          break;
+        }
+
+        case MissionState.Turn: {
+          setStatus(`turn -> ${nextSegDir}`);
+          setUi_({ segDir: nextSegDir, turnDeg: nextTurnDeg, segCm: null });
+          await cmdTurn(nextTurnDeg);
+          state = MissionState.Move;
+          break;
+        }
+
+        case MissionState.Move: {
+          setStatus(`move ${nextMoveCm}cm`);
+          setUi_({ segDir: nextSegDir, segCm: nextMoveCm, turnDeg: null });
+          await cmdMove(nextMoveCm);
+          // Pose is stale between scans: always scan before the next replan iteration.
+          pendingScanReason = "segment";
+          state = MissionState.Iter;
+          break;
+        }
+
+        default: {
+          state = MissionState.Iter;
+          break;
+        }
       }
-      const run = { dir: segs[0].dir, steps: Math.max(1, segs[0].steps | 0) };
-
-      const targetH = dirToHeadingDeg(run.dir);
-      const curH = Number(pose.headingDeg);
-      const dTurn = wrapDiff180(targetH - curH);
-      if (Math.abs(dTurn) > 3) {
-        setStatus(`turn -> ${run.dir}`);
-        if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, turnDeg: dTurn });
-        await cmdTurn(dTurn);
-      }
-
-      const cmPerCell = api.cfg.cell_cm || api.grid.cell_cm || 5;
-      const maxCells = Math.max(1, Math.floor(kMaxSegmentCm / cmPerCell));
-      const cellsToMove = Math.max(1, Math.min(run.steps, maxCells));
-      const moveCm = cellsToMove * cmPerCell;
-      setStatus(`move ${moveCm}cm`);
-      if (window.StatusBus) window.StatusBus.set("autonomy", { segDir: run.dir, segCm: moveCm });
-      await cmdMove(moveCm);
-
-      // Pose is stale between scans: always scan before the next replan iteration.
-      pendingScanReason = "segment";
     }
 
     running = false;
@@ -750,16 +1068,16 @@ if (!elStart || !elStop || !elStatus) {
       const pc = pendingCmd;
       pendingCmd = null;
       if (window.NetGate) window.NetGate.exitCmd();
-      if (window.StatusBus) window.StatusBus.set("autonomy", { cmdLabel: null, cmdAgeMs: null });
+      setUi_({ cmdLabel: null, cmdAgeMs: null });
       pc.resolve({ ok: false, status: "stopped" });
     }
-    if (window.StatusBus) window.StatusBus.set("autonomy", { running: false });
+    setUi_({ running: false, cmdLabel: null, cmdAgeMs: null });
     if (elStart) elStart.disabled = false;
     setStatus("idle");
     try { window.CommsOrchestrator && window.CommsOrchestrator.setAutonomyRunning(false); } catch {}
   }
 
-  elStart.addEventListener("click", () => {
+  elStart.addEventListener("click", async () => {
     if (running) return;
     const api = mappingApi();
     if (!api) {
@@ -769,14 +1087,17 @@ if (!elStart || !elStop || !elStatus) {
     running = true;
     stopRequested = false;
     alertFromSeq = 0;
-    reflex = null;
-    startAlertStream_();
+    clearMailbox_();
+
+    try {
+      await startAlertStream_();
+    } catch {}
     try { window.CommsOrchestrator && window.CommsOrchestrator.setAutonomyRunning(true); } catch {}
     elStart.disabled = true;
     runLoop().catch(() => {
       running = false;
       stopRequested = false;
-      stopAlertPolling();
+      stopAlertStream_();
       if (elStart) elStart.disabled = false;
       setStatus("AUTO ERROR");
     });
@@ -787,7 +1108,11 @@ if (!elStart || !elStop || !elStatus) {
     setStatus("stopping...");
   });
 
-  setStatus("idle");
+  // Initialize planner knobs from the map canvas data-* defaults (so UI reflects
+  // the current configured weights on load).
+  try { syncPlannerInputsFromDataset_(); } catch {}
+
+  setUi_({ running: false, state: "idle" });
 
   // If auth state flips (DISARMED -> ARMED), refresh display-only status text
   // without changing any autonomy behavior.

@@ -37,6 +37,13 @@ void TurnToAngle::begin(float currentHeadingDegContinuous, float deltaDeg, float
   state_ = State::Running;
 }
 
+void TurnToAngle::beginShortestDelta(float currentHeadingDegContinuous, float deltaDeg, float requestedSpeed) {
+  float d = deltaDeg;
+  while (d > 180.0f) d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  begin(currentHeadingDegContinuous, d, requestedSpeed);
+}
+
 bool TurnToAngle::update(float currentHeadingDegContinuous) {
   // “Finished” means caller doesn't need to keep calling.
   if (state_ != State::Running) return true;

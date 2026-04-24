@@ -95,4 +95,10 @@ void AlertRing::serveHttp(ESP8266WebServer& server, uint32_t from) const {
   server.send(200, "text/plain", out);
 }
 
+uint32_t AlertRing::newestSeq() const {
+  if (count_ == 0) return 0;
+  const uint16_t newestIdx = (uint16_t)((head_ + kRingSize - 1) % kRingSize);
+  return ring_[newestIdx].seq;
+}
+
 }  // namespace esp_alert_ring

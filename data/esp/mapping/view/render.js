@@ -133,6 +133,18 @@ export class MapRenderer {
         const st = g.cellState(cx, cy);
         if (st === "unk") continue;
 
+        // Hard walls: always render at maximum obstacle strength.
+        if (g.isLocked && g.isLocked(cx, cy)) {
+          ctx.fillStyle = "rgba(88,243,255,0.95)";
+          const x_cm = cx * g.cell_cm;
+          const y_cm = cy * g.cell_cm;
+          const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
+          const sz = g.cell_cm * s;
+          const inset = Math.min(1.2, sz * 0.08);
+          ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
+          continue;
+        }
+
         // Map confidence to alpha based on magnitude of log-odds.
         const mag = Math.min(maxV, Math.abs(v));
         const t = clamp(mag / maxV, 0, 1);

@@ -8,6 +8,8 @@ export class HitGrid {
     // Log-odds style occupancy grid (browser-side, 3-state: UNKNOWN/FREE/OCC).
     // 0 ~= UNKNOWN, positive ~= OCC, negative ~= FREE.
     this.cells = new Int16Array(this.w * this.h);
+    // Immutable cell mask: 1 => do not modify log-odds (e.g., fixed outer walls).
+    this.locked = new Uint8Array(this.w * this.h);
 
     // Tunable thresholds (kept as properties so tests/experiments can adjust).
     this.occThreshold = 8;
@@ -18,10 +20,21 @@ export class HitGrid {
 
   clear() {
     this.cells.fill(0);
+    this.locked.fill(0);
   }
 
   _idx(cx, cy) {
     return cy * this.w + cx;
+  }
+
+  isLocked(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return false;
+    return this.locked[this._idx(cx, cy)] === 1;
+  }
+
+  lockCell(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return;
+    this.locked[this._idx(cx, cy)] = 1;
   }
 
   worldToCell(x_cm, y_cm) {
@@ -62,12 +75,14 @@ export class HitGrid {
 
   setOccupied(cx, cy, logOdds = 60) {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return;
+    if (this.isLocked(cx, cy)) return;
     const i = this._idx(cx, cy);
     this.cells[i] = Math.max(this.cells[i], Math.min(this.maxLogOdds, Math.trunc(logOdds)));
   }
 
   addOccupied(cx, cy, delta = 12) {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return;
+    if (this.isLocked(cx, cy)) return;
     const i = this._idx(cx, cy);
     const v = this.cells[i] + Math.trunc(delta);
     this.cells[i] = Math.max(this.minLogOdds, Math.min(this.maxLogOdds, v));
@@ -75,6 +90,7 @@ export class HitGrid {
 
   addFree(cx, cy, delta = 4) {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return;
+    if (this.isLocked(cx, cy)) return;
     const i = this._idx(cx, cy);
     const v = this.cells[i] - Math.trunc(delta);
     this.cells[i] = Math.max(this.minLogOdds, Math.min(this.maxLogOdds, v));

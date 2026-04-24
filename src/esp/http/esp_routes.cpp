@@ -271,6 +271,13 @@ static void handleAlerts_() {
   g.alerts->serveHttp(*g.server, from);
 }
 
+static void handleAlertsTail_() {
+  if (!isArmed_()) return rejectNotArmed_();
+  const uint32_t tail = g.alerts ? g.alerts->newestSeq() : 0;
+  g.server->sendHeader("Cache-Control", "no-store");
+  g.server->send(200, "text/plain", String((unsigned long)tail));
+}
+
 static void handleMoveCm_() {
   if (!isArmed_()) return rejectNotArmed_();
   if (!g.server->hasArg("cm")) {
@@ -291,6 +298,22 @@ static void handleTurnDeg_() {
   }
   const int deg = g.server->arg("deg").toInt();
   Serial.print("Turn:");
+  Serial.println(deg);
+  g.server->send(200, "text/plain", "OK");
+}
+
+static void handleTurnDegShortest_() {
+  if (!isArmed_()) return rejectNotArmed_();
+  if (!g.server->hasArg("deg")) {
+    g.server->send(400, "text/plain", "MISSING_DEG");
+    return;
+  }
+  int deg = g.server->arg("deg").toInt();
+  // Normalize into [-180, 180] so we always take the shortest turn.
+  deg %= 360;
+  if (deg > 180) deg -= 360;
+  if (deg < -180) deg += 360;
+  Serial.print("TurnShort:");
   Serial.println(deg);
   g.server->send(200, "text/plain", "OK");
 }
@@ -369,9 +392,11 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/scan_cancel", HTTP_POST, handleTurretScanCancel_);
   server.on("/events", HTTP_GET, handleEvents_);
   server.on("/alerts", HTTP_GET, handleAlerts_);
+  server.on("/alerts_tail", HTTP_GET, handleAlertsTail_);
   server.on("/set_pose", HTTP_POST, handleSetPose_);
   server.on("/move", HTTP_POST, handleMoveCm_);
   server.on("/turn", HTTP_POST, handleTurnDeg_);
+  server.on("/turn_short", HTTP_POST, handleTurnDegShortest_);
   server.on("/telemetry", HTTP_GET, handleTelemetry_);
 
   server.onNotFound(handleNotFound_);

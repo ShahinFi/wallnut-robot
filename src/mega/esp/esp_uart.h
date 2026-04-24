@@ -7,6 +7,8 @@ struct EspCommand {
     None,
     Move,
     Turn,
+    TurnShortest,
+    TurnAbs,
     North,
     SetNorth,
     EncCal,

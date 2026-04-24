@@ -7,7 +7,7 @@
 #include "actions/turn_to_angle.h"
 #include "tasks/sequence_executor/ui/sequence_executor_ui.h"
 
-enum class SequenceStepType : uint8_t { MoveToDistance, MoveByDistance, TurnDeg, End };
+enum class SequenceStepType : uint8_t { MoveToDistance, MoveByDistance, TurnDeg, TurnDegShortest, End };
 
 struct SequenceStep {
   SequenceStepType type;
@@ -46,7 +46,6 @@ private:
   void startTurn_(float headingDegContinuous);
   bool stepTimedOut_() const;
   static float wrapDegDiff180_(float targetDeg, float currentDeg);
-  bool handleMoveGuard_(float headingDegContinuous, float avgTravelCm, float lidarAvgCm);
 
   const SequenceStep* steps_;
   uint16_t stepIndex_;
@@ -75,9 +74,4 @@ private:
   // No ramp on decel/stop; turns are unaffected.
   uint32_t moveRampStartMs_;
   bool     moveRampActive_;
-
-  enum class MoveGuardState : uint8_t { None, Turning };
-  MoveGuardState moveGuardState_;
-  uint8_t moveGuardTurnsDone_;
-  uint8_t moveGuardClearStreak_;
 };

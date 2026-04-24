@@ -457,7 +457,8 @@ void loop() {
   // Reflex safety during browser-driven motion (low latency, no Wi-Fi dependency).
   // Latch once per commanded motion so we don't spam events.
   if (seqExecTask.active()) {
-    const float kFrontStopCm = 9.0f;
+    // Safety invariant: stop immediately when an obstacle is closer than 10 cm.
+    const float kFrontStopCm = 10.0f;
     if (!gReflexLatchedFront && isfinite(lidarFilteredCm) && lidarFilteredCm > 0.0f && lidarFilteredCm < kFrontStopCm) {
       gReflexLatchedFront = true;
       seqExecTask.cancel();
@@ -641,6 +642,24 @@ void loop() {
       return;
     }
 
+    // Motion exclusivity (fundamental safety invariant):
+    // Never start a new motion command while another motion owner is active.
+    //
+    // Do NOT cancel the in-flight motion here, because the browser has no command IDs.
+    // Preempt/cancel would emit completion events that can be mis-attributed to the
+    // new command. Instead: reject the new request immediately and keep the current
+    // motion running.
+    const bool isMotionCmd =
+        (espCmd.type == EspCommand::Type::Move || espCmd.type == EspCommand::Type::Turn ||
+         espCmd.type == EspCommand::Type::TurnShortest || espCmd.type == EspCommand::Type::TurnAbs ||
+         espCmd.type == EspCommand::Type::North || espCmd.type == EspCommand::Type::EncCal);
+    const bool motorBusy =
+        (seqExecTask.active() || driveByDistance.active() || encCalTask.active() || turretSweep.active());
+    if (isMotionCmd && motorBusy) {
+      sendEvtPose_("CMDFAIL", NAN);
+      return;
+    }
+
     // Commands below this point are motion/task-affecting.
     if (driveByDistance.active()) driveByDistance.cancel();
     if (encCalTask.active()) encCalTask.cancel();
@@ -682,6 +701,27 @@ void loop() {
       gReflexLatchedFront = false;
     } else if (espCmd.type == EspCommand::Type::Turn) {
       espSteps[0] = {SequenceStepType::TurnDeg, (float)espCmd.value};
+      espSteps[1] = {SequenceStepType::End, 0.0f};
+      seqExecTask.setSequence(espSteps);
+      seqExecTask.clearAlignHeading();
+      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      gSeqWasActive = true;
+      gReflexLatchedRed = false;
+      gReflexLatchedFront = false;
+    } else if (espCmd.type == EspCommand::Type::TurnShortest) {
+      espSteps[0] = {SequenceStepType::TurnDegShortest, (float)espCmd.value};
+      espSteps[1] = {SequenceStepType::End, 0.0f};
+      seqExecTask.setSequence(espSteps);
+      seqExecTask.clearAlignHeading();
+      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+      gSeqWasActive = true;
+      gReflexLatchedRed = false;
+      gReflexLatchedFront = false;
+    } else if (espCmd.type == EspCommand::Type::TurnAbs) {
+      const float targetWrapped = wrapDeg360_((float)espCmd.value);
+      const float curWrapped = wrapDeg360_(heading.headingDegWrapped);
+      const float delta = wrapDegDiff180(targetWrapped, curWrapped);
+      espSteps[0] = {SequenceStepType::TurnDegShortest, delta};
       espSteps[1] = {SequenceStepType::End, 0.0f};
       seqExecTask.setSequence(espSteps);
       seqExecTask.clearAlignHeading();
