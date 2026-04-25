@@ -119,6 +119,8 @@
     if (scanActive) scanParts.push(`dir ${m.scanDir || "--"}`);
     scanParts.push(`next ${m.nextScanDir || "--"}`);
     scanParts.push(`evt ${fmtEvt(m.scanLastEvt)}`);
+    const poseSyncOn = !!(m.posePostPending || m.posePostInFlight);
+    scanParts.push(`pose ${poseSyncOn ? "SYNC" : "ok"}`);
     if (scanActive) scanParts.push(`poll ${m.scanPollActive ? "ON" : "OFF"}`);
     if (scanActive) scanParts.push(`seq ${fmtInt(m.scanSeq)}`);
     lines.push(scanParts.join(" | "));

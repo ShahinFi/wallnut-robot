@@ -43,7 +43,8 @@ if (!elStart || !elStop || !elStatus) {
   let alertsUnsub = null;
 
   // ===== In-flight command tracking (single command owner) =====
-  let pendingCmd = null; // { resolve, reject, t0, label, startSeq }
+  let pendingCmd = null; // { resolve, reject, t0, label, startSeq, token }
+  let cmdTokenSeq_ = 1;
 
   // ===== Mailbox (filled by alerts; consumed only by the state machine) =====
   // Mailbox filled by alert polling; consumed only by the mission state machine.
@@ -69,8 +70,6 @@ if (!elStart || !elStop || !elStatus) {
   const uiState = {
     state: "idle",
     running: false,
-    cmdLabel: null,
-    cmdAgeMs: null,
     lastEvt: null,
     lastAlertSeq: 0,
     goalCx: null,
@@ -111,11 +110,13 @@ if (!elStart || !elStop || !elStatus) {
 
     // Detailed status (single writer).
     if (window.StatusBus) {
+      const cmdLabel = pendingCmd && pendingCmd.label ? String(pendingCmd.label) : null;
+      const cmdAgeMs = pendingCmd && Number.isFinite(pendingCmd.t0) ? (Date.now() - pendingCmd.t0) : null;
       window.StatusBus.set("autonomy", {
         state: displayState,
         running: !!uiState.running,
-        cmdLabel: uiState.cmdLabel,
-        cmdAgeMs: uiState.cmdAgeMs,
+        cmdLabel,
+        cmdAgeMs,
         lastEvt: uiState.lastEvt,
         lastAlertSeq: uiState.lastAlertSeq,
         goalCx: uiState.goalCx,
@@ -201,15 +202,16 @@ if (!elStart || !elStop || !elStatus) {
       const cmdStartMs = Date.now();
       const startSeq = currentAlertSeq_();
       if (window.DebugLog) window.DebugLog.push("cmd", `begin ${label}`);
-      setUi_({ cmdLabel: label, cmdAgeMs: 0 });
-      pendingCmd = { resolve, reject, t0: Date.now(), label, startSeq };
+      const token = cmdTokenSeq_++;
+      pendingCmd = { resolve, reject, t0: Date.now(), label, startSeq, token };
+      renderUi_();
       try {
         const res = await httpPost(path);
         if (!res.ok) {
           if (window.DebugLog) window.DebugLog.push("cmd", `http fail ${label} (${res.status})`);
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          setUi_({ cmdLabel: null, cmdAgeMs: null });
+          renderUi_();
           resolve({ ok: false, status: `http_${res.status}` });
           return;
         }
@@ -217,19 +219,22 @@ if (!elStart || !elStop || !elStatus) {
         if (window.DebugLog) window.DebugLog.push("cmd", `http error ${label}`);
         pendingCmd = null;
         if (window.NetGate) window.NetGate.exitCmd();
-        setUi_({ cmdLabel: null, cmdAgeMs: null });
+        renderUi_();
         resolve({ ok: false, status: "http_error" });
         return;
       }
 
       const tick = () => {
         if (!pendingCmd) return;
-        setUi_({ cmdLabel: label, cmdAgeMs: Date.now() - cmdStartMs });
+        // Abort stale tickers from previous commands (prevents UI flicker/backtracking).
+        if (pendingCmd.token !== token) return;
+        // Only update UI while THIS command is still in flight.
+        renderUi_();
         if (!running) {
           const pc = pendingCmd;
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          setUi_({ cmdLabel: null, cmdAgeMs: null });
+          renderUi_();
           if (window.DebugLog) window.DebugLog.push("cmd", `end ${label} (stopped)`);
           pc.resolve({ ok: false, status: "stopped" });
           return;
@@ -238,7 +243,7 @@ if (!elStart || !elStop || !elStatus) {
           const pc = pendingCmd;
           pendingCmd = null;
           if (window.NetGate) window.NetGate.exitCmd();
-          setUi_({ cmdLabel: null, cmdAgeMs: null });
+          renderUi_();
           if (window.DebugLog) window.DebugLog.push("cmd", `timeout ${label}`);
           pc.resolve({ ok: false, status: "timeout" });
           return;
@@ -303,6 +308,13 @@ if (!elStart || !elStop || !elStatus) {
     if (st === "occ") return true;
     if (vbGet(grid, cx, cy)) return true;
     return false;
+  }
+
+  function isHardBlocked_(grid, cx, cy) {
+    // "Hard" blocks are physical occupied cells (walls/obstacles).
+    // Virtual red tiles are treated as blocked for planning *except* we must allow
+    // starting inside a red cell (localization jitter) so the robot can escape.
+    return grid.cellState(cx, cy) === "occ";
   }
 
   const DIRS = [
@@ -525,7 +537,7 @@ if (!elStart || !elStop || !elStatus) {
     const w = grid.w;
     const h = grid.h;
     if (!startCell || !goalCell) return null;
-    if (isCellBlocked(grid, startCell.cx, startCell.cy)) return null;
+    if (isHardBlocked_(grid, startCell.cx, startCell.cy)) return null;
     if (isCellBlocked(grid, goalCell.cx, goalCell.cy)) return null;
     if (startCell.cx === goalCell.cx && startCell.cy === goalCell.cy) {
       return [{ cx: startCell.cx, cy: startCell.cy }];
@@ -774,7 +786,7 @@ if (!elStart || !elStop || !elStatus) {
         const pc = pendingCmd;
         pendingCmd = null;
         if (window.NetGate) window.NetGate.exitCmd();
-        setUi_({ cmdLabel: null, cmdAgeMs: null });
+        renderUi_();
         const ok = evt.tag === "CMDOK";
         if (window.DebugLog) window.DebugLog.push("cmd", `end ${pc.label} (${evt.tag})`);
         pc.resolve({ ok, status: evt.tag, pose: { x_cm: evt.x_cm, y_cm: evt.y_cm, h: evt.headingDeg } });
@@ -837,7 +849,24 @@ if (!elStart || !elStop || !elStatus) {
     setStatus(`scan (${reason})...`);
     const r = await api.requestScanAuto();
     if (!r?.ok) return { ok: false, status: r?.kind || "scan_fail" };
+    // After a scan match, mapping queues /set_pose to rebase odom->map on Mega.
+    // Do not plan until that pose sync is complete.
+    await waitPoseSync_(api);
     return { ok: true, status: "scan_done" };
+  }
+
+  async function waitPoseSync_(api) {
+    if (!running) return;
+    if (!api?.state) return;
+    // Show a clear state while waiting.
+    setStatus("pose syncing...");
+    while (running && !stopRequested && (api.state.posePostPending || api.state.posePostInFlight)) {
+      // If something is wrong, keep waiting (user asked for guaranteed sync).
+      // The scan already succeeded; this is just alignment posting.
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    // Restore to a neutral state; caller will set the next status (plan/turn/move).
+    if (running && !stopRequested) setStatus("pose synced");
   }
 
   async function handleReflex(api) {
@@ -849,8 +878,8 @@ if (!elStart || !elStop || !elStatus) {
 
     if (r.kind === "red") {
       // For red floor tiles: scan first to get the corrected pose, then mark the
-      // virtual obstacle at that corrected pose. Backoff is handled by the
-      // general invariant: if the robot is on a red-marked cell, it must back off.
+      // virtual obstacle at that corrected pose, then back off. No scan is needed
+      // after the backoff; we trust odometry for this short reverse move.
       setStatus("RED stop -> scan");
       await doScan(api, "red");
       // Stamp at the scan-matched pose anchor (mapPose0) so the mark aligns with
@@ -863,6 +892,8 @@ if (!elStart || !elStop || !elStatus) {
         if (rx > 0 || ry > 0) vbMarkRect_(api.grid, c.cx, c.cy, rx, ry);
         else vbSet(api.grid, c.cx, c.cy, 1);
       }
+      setStatus("RED stop -> backoff");
+      await cmdMove(kBackoffAfterReflexCm);
       return true;
     }
 
@@ -871,14 +902,6 @@ if (!elStart || !elStop || !elStatus) {
     await cmdMove(kBackoffAfterReflexCm);
     await doScan(api, "front");
     return true;
-  }
-
-  function isPoseOnVirtualRed_(api, pose) {
-    if (!api || !pose) return false;
-    if (!virtualBlocked) return false;
-    const c = api.grid.worldToCell(pose.x, pose.y);
-    if (!c) return false;
-    return !!vbGet(api.grid, c.cx, c.cy);
   }
 
   async function runLoop() {
@@ -947,19 +970,6 @@ if (!elStart || !elStop || !elStatus) {
       // Reflex has priority over everything else.
       if (mailbox.reflex) {
         await handleReflex(api);
-        state = MissionState.Iter;
-        continue;
-      }
-
-      // Fundamental invariant: if map-matching places the robot on a virtual red cell,
-      // back off immediately (do not scan-thrash or try to plan from a blocked start).
-      // This applies both after a true sensor RED hit and after any localization drift.
-      const poseNow = api.getPose();
-      if (isPoseOnVirtualRed_(api, poseNow)) {
-        pendingScanReason = null; // do not scan here; just back off
-        setStatus("on red -> backoff");
-        setUi_({ segDir: null, segCm: kBackoffAfterReflexCm, turnDeg: null });
-        await cmdMove(kBackoffAfterReflexCm);
         state = MissionState.Iter;
         continue;
       }
@@ -1068,10 +1078,10 @@ if (!elStart || !elStop || !elStatus) {
       const pc = pendingCmd;
       pendingCmd = null;
       if (window.NetGate) window.NetGate.exitCmd();
-      setUi_({ cmdLabel: null, cmdAgeMs: null });
+      renderUi_();
       pc.resolve({ ok: false, status: "stopped" });
     }
-    setUi_({ running: false, cmdLabel: null, cmdAgeMs: null });
+    setUi_({ running: false });
     if (elStart) elStart.disabled = false;
     setStatus("idle");
     try { window.CommsOrchestrator && window.CommsOrchestrator.setAutonomyRunning(false); } catch {}

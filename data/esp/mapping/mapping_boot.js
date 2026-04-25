@@ -242,6 +242,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     mapPose0: { x: mapW_cm * 0.5, y: mapH_cm * 0.2, headingDeg: 0 },
     poseLocked: false, // becomes true after initial localization
     poseSentToRobot: false,
+    posePostPending: false,   // /set_pose needs to be sent (after a scan match)
+    posePostInFlight: false,  // /set_pose request currently in flight
+    posePostLastOkMs: 0,      // last successful /set_pose time (Date.now())
 
     scanActive: false,
     scanDoneSeen: false,
@@ -333,20 +336,25 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     posePost.pose = { x: pose.x, y: pose.y, headingDeg: pose.headingDeg };
     posePost.includeHeading = !!includeHeading;
     posePost.pending = true;
+    state.posePostPending = true;
   }
 
   async function tryPostPoseToRobot_() {
     if (!posePost.pending || posePost.inFlight) return;
     if (pollActive || state.scanActive) return;
     posePost.inFlight = true;
+    state.posePostInFlight = true;
     try {
       const ok = await postPoseToRobot(posePost.pose, { includeHeading: posePost.includeHeading });
       if (ok) {
         state.poseSentToRobot = true;
         posePost.pending = false;
+        state.posePostPending = false;
+        state.posePostLastOkMs = Date.now();
       }
     } finally {
       posePost.inFlight = false;
+      state.posePostInFlight = false;
     }
   }
 
@@ -371,6 +379,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         scanPollActive: pollActive,
         scanSeq: lastSeq,
         scanLastEvt: dbg.lastEvent,
+        posePostPending: state.posePostPending,
+        posePostInFlight: state.posePostInFlight,
       });
     }
   }
@@ -392,6 +402,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       scanPollActive: pollActive,
       scanSeq: lastSeq,
       scanLastEvt: dbg.lastEvent,
+      posePostPending: state.posePostPending,
+      posePostInFlight: state.posePostInFlight,
     });
   }
 
@@ -713,6 +725,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   function stopPolling() {
     pollActive = false;
+    // After a scan completes, post the corrected pose immediately (scan polling
+    // previously blocked /set_pose). Fire-and-forget; mapping poller will retry.
+    try { tryPostPoseToRobot_(); } catch {}
   }
 
   function startPollingUntilDone() {
