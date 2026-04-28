@@ -57,7 +57,7 @@ void TurretAngleTracker::update(long ticksAbsNow, float motorCmd) {
   const long dt = ticksAbsNow - prevTicksAbs_;
   prevTicksAbs_ = ticksAbsNow;
 
-  // Handle hard reset / wrap (ticks should be monotonic).
+  // WHY: Handle hard reset / wrap (ticks should be monotonic).
   if (dt < 0) {
     hasPrev_ = true;
     angleDegAcc_ = 0.0f;
@@ -66,9 +66,9 @@ void TurretAngleTracker::update(long ticksAbsNow, float motorCmd) {
   }
   if (dt == 0) return;
 
-  // With single-channel encoder, direction is unknown unless the motor is being driven.
+  // WHY: With single-channel encoder, direction is unknown unless the motor is being driven.
   if (!isfinite(motorCmd) || fabsf(motorCmd) <= cfg_.cmdDeadband) {
-    return;  // ignore manual/unknown-direction motion
+    return;
   }
 
   const int dirSign = (motorCmd > 0.0f) ? 1 : -1;

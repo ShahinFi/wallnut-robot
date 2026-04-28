@@ -37,7 +37,7 @@ void DriveToDistance::begin(float headingDegContinuous, float avgTravelCm,
   speedAbs_ = clamp01(fabsf(speedAbs));
   errorCm_ = 0.0f;
 
-  // Start moving in "continuous" mode; direction is decided each update from LiDAR error.
+  // WHY: Start moving in "continuous" mode; direction is decided each update from LiDAR error.
   drive_.beginContinuous(headingDegContinuous, avgTravelCm, 0.0f);
   drive_.setHeadingHoldDeg(headingDegContinuous);
 

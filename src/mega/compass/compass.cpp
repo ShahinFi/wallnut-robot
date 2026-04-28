@@ -15,7 +15,8 @@ bool Compass::begin(TwoWire& wire) {
   wire_->begin();
 
   resetHeadingContinuous();
-  return zeroHeadingAtCurrent();   // begin == ready + zeroed
+  // CONTRACT: Begin succeeds only after current heading is captured as the zero reference.
+  return zeroHeadingAtCurrent();
 }
 
 bool Compass::read(CompassData& out) {
@@ -24,7 +25,7 @@ bool Compass::read(CompassData& out) {
   return true;
 }
 
-// ---------------- Configuration ----------------
+// SECTION: Configuration
 
 void Compass::setHeadingOffsetDeg(float headingOffsetDeg) {
   headingOffsetDeg_ = headingOffsetDeg;
@@ -35,7 +36,7 @@ float Compass::headingOffsetDeg() const {
 }
 
 
-// ---------------- Wrapped read (ONLY wrapped fields) ----------------
+// SECTION: Wrapped read (ONLY wrapped fields)
 
 bool Compass::readHeadingDegWrapped(CompassData& out) {
   float headingDegRaw = 0.0f;
@@ -55,14 +56,14 @@ bool Compass::readHeadingDegWrapped(CompassData& out) {
 
   out.headingDirLabel = dirLabelFromDeg(out.headingDegRounded);
 
-  // IMPORTANT: do NOT touch out.headingDegContinuous / out.deltaHeadingDeg here.
+  // CONTRACT: wrapped read must not modify continuous fields.
   return true;
 }
 
-// ---------------- Continuous update (ONLY continuous fields) ----------------
+// SECTION: Continuous update (ONLY continuous fields)
 
 void Compass::updateHeadingDegContinuous(CompassData& io) {
-  // Requires io.headingDegWrapped already filled.
+  // WHY: Requires io.headingDegWrapped already filled.
   if (!state_.hasPrev) {
     state_.hasPrev = true;
     state_.prevHeadingDegWrapped = io.headingDegWrapped;
@@ -73,9 +74,9 @@ void Compass::updateHeadingDegContinuous(CompassData& io) {
     const float prev = state_.prevHeadingDegWrapped;
     const float curr = io.headingDegWrapped;
 
-    // Wrap tracking using thresholds:
-    // - if we crossed from high->low, increment wrap count
-    // - if we crossed from low->high, decrement wrap count
+    // WHY: Wrap tracking using thresholds:
+    // WHY: - if we crossed from high->low, increment wrap count
+    // WHY: - if we crossed from low->high, decrement wrap count
     if (prev > 300.0f && curr < 60.0f) {
       state_.wrapCount++;
     } else if (prev < 60.0f && curr > 300.0f) {
@@ -88,12 +89,12 @@ void Compass::updateHeadingDegContinuous(CompassData& io) {
     state_.prevHeadingDegWrapped = curr;
   }
 
-  // Export results into the reading struct (single source of truth for user)
+  // CONTRACT: Export results into the reading struct as the single readout payload.
   io.headingDegContinuous = state_.headingDegContinuous;
   io.deltaHeadingDeg      = state_.deltaHeadingDeg;
 }
 
-// ---------------- Zeroing / state ----------------
+// SECTION: Zeroing / state
 
 bool Compass::zeroHeadingAtCurrent() {
   CompassData data;
@@ -116,7 +117,7 @@ const CompassContinuousState& Compass::continuousState() const {
   return state_;
 }
 
-// ---------------- Hardware read ----------------
+// SECTION: Hardware read
 
 bool Compass::readReg8(uint8_t reg, uint8_t& valOut) {
   if (!wire_) return false;
@@ -139,7 +140,7 @@ bool Compass::readHeadingDegRaw(float& headingDegRawOut, uint8_t& bearing8Out) {
   return true;
 }
 
-// ---------------- Math helpers ----------------
+// SECTION: Math helpers
 
 float Compass::wrapDeg360(float headingDeg) {
   while (headingDeg < 0.0f)   headingDeg += 360.0f;

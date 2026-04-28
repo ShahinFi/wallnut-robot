@@ -1,16 +1,11 @@
-// Shared network polling gate (single source of truth for bandwidth priority).
-//
-// Modes (priority order):
-// - scan: mapping scan transaction (/events) in progress => pause everything else
-// - cmd : waiting for motion completion events (/alerts) => pause nonessential polls
-// - idle: normal polling
-//
-// This file is intentionally a classic script (not a module) so both module and
-// non-module scripts can access `window.NetGate`.
+// SECTION: Shared network polling gate.
+// CONTRACT: Priority order is scan > cmd > idle.
+// WHY: This is a classic script so module and non-module pages share one gate.
 
 (function initNetGate() {
   const state = { scan: 0, cmd: 0 };
 
+  // SECTION: Gate state and mode projection.
   function clampNonNeg(n) {
     return n < 0 ? 0 : n;
   }
@@ -22,18 +17,18 @@
   }
 
   function allow(kind) {
+    // CONTRACT: Gate decisions depend only on current mode and caller kind.
     const m = mode();
     const k = String(kind || "");
     if (m === "scan") {
-      // Only scan transport should run.
+      // CONTRACT: During scan, only scan transport is permitted.
       return k === "scan";
     }
     if (m === "cmd") {
-      // While waiting for command completion, keep alerts responsive and allow
-      // low-rate pose updates (arrow) so UI stays live. Pause heavy telemetry.
+      // WHY: Keep command completion and pose responsive while reducing telemetry load.
       return k === "alerts" || k === "cmd" || k === "pose" || k === "debug";
     }
-    // idle: everything allowed
+    // CONTRACT: Idle mode allows all pollers.
     return true;
   }
 

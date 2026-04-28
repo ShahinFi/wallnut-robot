@@ -32,8 +32,8 @@ void TurretSweepScan360::setConfig(const Config& cfg) {
   if (!isfinite(cfg_.cmdAbs) || cfg_.cmdAbs < 0.0f) cfg_.cmdAbs = 0.0f;
   if (cfg_.cmdAbs > 1.0f) cfg_.cmdAbs = 1.0f;
   if (cfg_.timeoutMs < 1000U) cfg_.timeoutMs = 1000U;
-  // 0 means "auto" (computed from targetSamplesPerRev).
-  // Otherwise it's an explicit tick-domain downsampling factor.
+  // WHY: 0 means "auto" (computed from targetSamplesPerRev).
+  // WHY: Otherwise it's an explicit tick-domain downsampling factor.
   if (cfg_.targetSamplesPerRev == 0) cfg_.targetSamplesPerRev = 1;
 }
 
@@ -63,9 +63,9 @@ void TurretSweepScan360::begin(TurretMotor* motor, TurretAngleTracker* angleTrac
     return;
   }
 
-  // Sampling cadence:
-  // - if explicitly set, use it
-  // - else auto-select ~targetSamplesPerRev per revolution.
+  // WHY: Sampling cadence:
+  // WHY: - if explicitly set, use it
+  // WHY: - else auto-select ~targetSamplesPerRev per revolution.
   if (cfg_.sampleEveryTicks > 0) {
     sampleEveryTicks_ = (uint32_t)cfg_.sampleEveryTicks;
   } else {
@@ -77,7 +77,7 @@ void TurretSweepScan360::begin(TurretMotor* motor, TurretAngleTracker* angleTrac
   startMs_ = nowMs;
   startTicksAbs_ = ticksAbsNow;
   startAngleDegWrapped_ = angle_->angleDegWrapped360();
-  // Force the first update() call to emit a sample immediately with a real LiDAR value.
+  // WHY: Force the first update() call to emit a sample immediately with a real LiDAR value.
   lastSampleTicksAbs_ = ticksAbsNow - (long)sampleEveryTicks_;
   seq_ = 0;
   lidarInFlight_ = false;
@@ -87,7 +87,7 @@ void TurretSweepScan360::begin(TurretMotor* motor, TurretAngleTracker* angleTrac
   lastCmd_ = (float)dirSign_ * cfg_.cmdAbs;
   motor_->setCmd(lastCmd_);
 
-  // Ensure scan owns the LiDAR pipeline (no leftover in-flight measurement from non-scan loop).
+  // WHY: Ensure scan owns the LiDAR pipeline (no leftover in-flight measurement from non-scan loop).
   lidar_->abortRange();
   if (lidar_->startRange()) {
     lidarInFlight_ = true;
@@ -110,7 +110,7 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
 
   const long dt = ticksAbsNow - startTicksAbs_;
   if (dt < 0) {
-    // Absolute ticks should be monotonic; treat as a hard reset event.
+    // WHY: Absolute ticks should be monotonic; treat as a hard reset event.
     stopMotor_();
     state_ = State::Cancelled;
     return true;
@@ -118,7 +118,7 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
 
   const bool reachedRev = ((uint32_t)dt >= ticksPerRev_);
   if (reachedRev && finishGraceStartMs_ == 0) {
-    // Stop rotation at 1 rev; allow a short grace period to collect the in-flight LiDAR sample.
+    // WHY: Stop rotation at 1 rev; allow a short grace period to collect the in-flight LiDAR sample.
     stopMotor_();
     finishGraceStartMs_ = nowMs;
   }
@@ -129,7 +129,7 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
     return true;
   }
 
-  // LiDAR measurement pipeline:
+  // WHY: LiDAR measurement pipeline:
   if (!lidarInFlight_) {
     if (lidar_->startRange()) {
       lidarInFlight_ = true;
@@ -151,8 +151,8 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
   }
 
   if (reachedRev) {
-    // Finish once we're past 1 rev and there's no in-flight measurement,
-    // or after a small grace period.
+    // WHY: Finish once we're past 1 rev and there's no in-flight measurement,
+    // WHY: or after a small grace period.
     const uint32_t kGraceMs = 300;
     if (!lidarInFlight_) {
       state_ = State::Succeeded;
@@ -191,9 +191,9 @@ void TurretSweepScan360::stopMotor_() {
 void TurretSweepScan360::emitSample_(long ticksAbsNow, float lidarDistanceCm, uint32_t nowMs) {
   if (!cb_ || !angle_) return;
 
-  // Convert ticks (midpoint-stamped) to angle using the scan's constant direction model.
-  // We intentionally don't query the tracker "at past ticks" (it can't),
-  // and instead use the same calibrated deg/tick for this scan direction.
+  // WHY: Convert ticks (midpoint-stamped) to angle using the scan's constant direction model.
+  // WHY: We intentionally don't query the tracker "at past ticks" (it can't),
+  // WHY: and instead use the same calibrated deg/tick for this scan direction.
   const uint32_t tpr = angle_->ticksPerRevForDirSign(dirSign_);
   if (tpr == 0) return;
   const float degPerTick = 360.0f / (float)tpr;

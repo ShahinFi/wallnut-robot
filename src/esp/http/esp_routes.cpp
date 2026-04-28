@@ -1,5 +1,5 @@
 #include "esp_routes.h"
-// (Refactor) HTTP module implementation.
+// SECTION: HTTP endpoint implementations.
 
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
@@ -19,6 +19,7 @@ struct Ctx {
 
 static Ctx g;
 
+// CONTRACT: All arm-protected routes must gate through this auth check.
 static bool isArmed_() { return g.state && g.state->isArmed(); }
 static void rejectNotArmed_() { g.server->send(403, "text/plain", "NOT_ARMED"); }
 
@@ -49,7 +50,7 @@ static void sendJsonStringContent_(ESP8266WebServer& server, const char* s) {
     } else if (c == '\t') {
       chunk += "\\t";
     } else if ((uint8_t)c < 0x20) {
-      // Drop other control characters (should not appear in our line-based packets).
+      // CONTRACT: Control characters outside JSON escapes are discarded.
     } else {
       chunk += c;
     }
@@ -157,8 +158,7 @@ static void handleTurretScanCancel_() {
   g.server->send(200, "text/plain", "OK");
 }
 
-// NOTE: Legacy "color maze" mode was removed. The browser-driven /maze mission
-// is served via GET /maze and uses other endpoints (/scan_*, /events, /move, /turn, ...).
+// WHY: /maze owns mission control; route set here provides transport primitives only.
 
 static void handleArm_() {
   if (g.state->authState == EspState::AuthState::Locked) {
@@ -188,7 +188,7 @@ static void handleDisarm_() {
 }
 
 static void handleAuthState_() {
-  // Minimal public endpoint: auth status + link health only.
+  // SECTION: Auth and link state endpoint.
   const uint32_t now = millis();
   const uint32_t ageMs = g.state->hasMegaRx ? (now - g.state->lastMegaRxMs) : 0xFFFFFFFFUL;
   const char* auth = authStateText_(*g.state);
@@ -208,8 +208,7 @@ static void handleAuthState_() {
 
 static void handleTelemetry_() {
   if (!isArmed_()) return rejectNotArmed_();
-  // Single snapshot endpoint for UI polling.
-  // Uses cached ESP-side state only (no Mega round-trip).
+  // CONTRACT: Snapshot endpoint serves cached ESP state only (no blocking round-trip).
   const uint32_t now = millis();
   const uint32_t ageMs = g.state->hasMegaRx ? (now - g.state->lastMegaRxMs) : 0xFFFFFFFFUL;
 
@@ -267,6 +266,7 @@ static void handleAlertsTail_() {
 }
 
 static void handleMoveCm_() {
+  // SECTION: Motion command routes.
   if (!isArmed_()) return rejectNotArmed_();
   if (!g.server->hasArg("cm")) {
     g.server->send(400, "text/plain", "MISSING_CM");
@@ -297,7 +297,7 @@ static void handleTurnDegShortest_() {
     return;
   }
   int deg = g.server->arg("deg").toInt();
-  // Normalize into [-180, 180] so we always take the shortest turn.
+  // CONTRACT: turn_short always issues shortest-arc turns.
   deg %= 360;
   if (deg > 180) deg -= 360;
   if (deg < -180) deg += 360;
@@ -307,6 +307,7 @@ static void handleTurnDegShortest_() {
 }
 
 static void handleSetPose_() {
+  // CONTRACT: `/set_pose` updates Mega map alignment; payload must be finite.
   if (!isArmed_()) return rejectNotArmed_();
 
   if (!g.server->hasArg("x") || !g.server->hasArg("y")) {
@@ -344,12 +345,13 @@ static void handleSetPose_() {
   g.server->send(200, "text/plain", "OK");
 }
 
-}  // namespace
+}
 
 void registerRoutes(ESP8266WebServer& server,
                     EspState& state,
                     esp_scan_events::ScanEvents& scan,
                     esp_alert_ring::AlertRing& alerts) {
+  // SECTION: Route wiring table.
   g.server = &server;
   g.state = &state;
   g.scan = &scan;
@@ -388,4 +390,4 @@ void registerRoutes(ESP8266WebServer& server,
   server.onNotFound(handleNotFound_);
 }
 
-}  // namespace esp_routes
+}

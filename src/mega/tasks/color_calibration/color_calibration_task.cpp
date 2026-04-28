@@ -5,8 +5,8 @@
 
 namespace {
 const uint32_t kDoneHoldMs = 2000;
-// NOTE: bumping magic because calibration payload size changed (3 -> 4 colors).
-// Old EEPROM data will be ignored and needs recalibration.
+// WHY: bumping magic because calibration payload size changed (3 -> 4 colors).
+// WHY: Old EEPROM data will be ignored and needs recalibration.
 const uint16_t kEepromMagic = 0xC0A2;
 const int kEepromAddr = 16;
 }
@@ -89,7 +89,7 @@ void ColorCalibrationTask::onButtonPress(const ColorRgb* live, bool liveValid) {
     const bool ok = saveToEeprom_();
     if (!ok) {
       ui_.showFailed("EEPROM fail");
-      // Stay on prompt 4 so the user can retry saving.
+      // CONTRACT: Stay on prompt 4 so save can be retried without restarting calibration.
       setState_(State::Prompt4);
       return;
     }
@@ -121,7 +121,7 @@ bool ColorCalibrationTask::saveToEeprom_() {
   EEPROM.put(kEepromAddr, kEepromMagic);
   EEPROM.put(kEepromAddr + sizeof(kEepromMagic), refs_);
 
-  // Verify: read back and compare to avoid "silent" persistence failures.
+  // WHY: Verify: read back and compare to avoid "silent" persistence failures.
   uint16_t magic = 0;
   ColorRgb check[kColorCount];
   memset(check, 0, sizeof(check));

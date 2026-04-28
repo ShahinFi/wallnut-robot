@@ -1,10 +1,12 @@
-﻿const compassSlider = document.getElementById("compassSlider"); // Get the compass slider element from the HTML page
+// SECTION: Manual dashboard controls and telemetry rendering.
+const compassSlider = document.getElementById("compassSlider");
 
-// Pause polling while commands are in flight to prioritize control.
+// WHY: Keep nonessential polling behind command traffic to reduce control latency.
 let pendingCommands = 0;
 const DEG = "\u00B0";
 const kFetchTimeoutMs = 1200;
 
+// SECTION: HTTP command helpers.
 function fetchWithTimeout(path, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), kFetchTimeoutMs);
@@ -19,48 +21,49 @@ function sendCommand(path, options = {}) {
     });
 }
 function pollingPaused() {
+  // CONTRACT: Legacy helper reflects only in-flight command count on this page.
   return pendingCommands > 0;
 }
 
-// Check if the compassSlider element exists and reset it to 0
+// SECTION: Compass controls.
 if (compassSlider) {
   const middleValue = 0;
-  compassSlider.value = middleValue; // Set slider to the middle position (0 degrees)
-  updateCompass(middleValue); // Set the compass value to initial value of 0
+  compassSlider.value = middleValue;
+  updateCompass(middleValue);
 }
 
-// Function to update the compass display (show the current compass position)
+// SECTION: Compass display helper.
 function updateCompass(pos) {
-  document.getElementById("compassValue").innerText = `${pos}°`; // Update the text value for compassValue when value is changing on page element with the current position and add "°" for degrees
+  document.getElementById("compassValue").innerText = `${pos}${DEG}`;
 }
 
-// Function to send the current compass value to the server
+// CONTRACT: Compass commands are fire-and-forget from the dashboard.
 function sendCompassValue(pos) {
-  sendCommand(`/compass?value=${pos}`); // Send the compass value to the server using a fetch request
-  console.log("Compass value", pos); // Log the compass value to the console for debugging
+  sendCommand(`/compass?value=${pos}`);
+  console.log("Compass value", pos);
 }
 
-// Functions for moving the motor forward and backward with specific distances
+// SECTION: Discrete movement shortcuts.
 function forwards5() {
   move("forwards", 5);
-} // Calling move function with separated parameters
+}
 function forwards20() {
   move("forwards", 20);
-} // Calling move function with separated parameters
+}
 function backwards5() {
   move("backwards", 5);
-} // Calling move function with separated parameters
+}
 function backwards20() {
   move("backwards", 20);
-} // Calling move function with separated parameters
-
-// This is a general-purpose function that can handle different combinations of direction and distance
-function move(dir, dis) {
-  sendCommand(`/${dir}${dis}`); // Sends a request to the server with a URL constructed from the received direction and distance (e.g., /forwards5)
-  console.log("Drive", dir, dis); // Log the movement command to the console for debugging
 }
 
-// Open the dedicated maze solver page (separate from color maze).
+// SECTION: Drive command helper.
+function move(dir, dis) {
+  sendCommand(`/${dir}${dis}`);
+  console.log("Drive", dir, dis);
+}
+
+// SECTION: Page navigation.
 function openMazeSolver() {
   window.location.href = "/maze";
 }
@@ -84,6 +87,7 @@ function setLinkStatus(text) {
 }
 
 async function armRobot() {
+  // SECTION: Auth command handlers.
   const input = document.getElementById("passcodeInput");
   const code = input ? String(input.value || "").trim() : "";
   if (!code) {
@@ -113,10 +117,11 @@ async function disarmRobot() {
 }
 
 function renderFromStore_() {
+  // SECTION: Store-to-UI projection.
   const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
   if (!st) return;
 
-  // Auth + UI gating.
+  // CONTRACT: Motion controls remain disabled unless auth is ARMED.
   const a = st.auth || {};
   const auth = String(a.state || "DISARMED").toUpperCase();
   const pending = !!a.pending || auth === "PENDING";
@@ -137,7 +142,7 @@ function renderFromStore_() {
     setControlsEnabled(false);
   }
 
-  // Link status.
+  // SECTION: Link status.
   const age = Number(st.link && st.link.megaAgeMs);
   const ageAvg = Number(st.link && st.link.megaAgeMsAvg);
   if (!Number.isFinite(age) || age === 0xffffffff) setLinkStatus("LINK: NO DATA");
@@ -147,7 +152,7 @@ function renderFromStore_() {
 
   const t = st.telemetry || {};
 
-  // Lidar.
+  // SECTION: LiDAR.
   const lidarEl = document.getElementById("lidarValue");
   const warnEl = document.getElementById("lidarWarning");
   if (lidarEl) lidarEl.innerText = Number.isFinite(t.lidarCm) ? `${t.lidarCm.toFixed(1)} cm` : "-- cm";
@@ -156,14 +161,14 @@ function renderFromStore_() {
     else warnEl.classList.add("hidden");
   }
 
-  // Compass.
+  // SECTION: Compass telemetry.
   const compassEl = document.getElementById("compassWebValue");
   if (compassEl) {
     if (Number.isFinite(t.compassDeg)) compassEl.innerText = `${t.compassDeg}${DEG} ${t.compassLabel || ""}`.trim();
     else compassEl.innerText = "--";
   }
 
-  // RGB live.
+  // SECTION: Live RGB.
   const colorEl = document.getElementById("colorValue");
   const swatchEl = document.getElementById("colorSwatch");
   const r = t.rgb && t.rgb.r;
@@ -184,7 +189,7 @@ function renderFromStore_() {
   }
 }
 
-// Start centralized comms and render on store updates.
+// SECTION: Comms startup.
 try {
   if (window.AuthManager) window.AuthManager.start();
 } catch {}
@@ -194,3 +199,5 @@ try {
 try {
   if (window.TelemetryStore && window.TelemetryStore.subscribe) window.TelemetryStore.subscribe(() => renderFromStore_());
 } catch {}
+
+

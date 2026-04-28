@@ -6,10 +6,12 @@
 #include "protocol_helpers.h"
 
 static bool hasValidEspIp(const RuntimeState& rt) {
+  // CONTRACT: "0.0.0.0" is the unresolved placeholder.
   return strncmp(rt.espIpStr, "0.0.0.0", 7) != 0;
 }
 
 void maybeRequestEspIp(RuntimeState& rt, uint32_t nowMs) {
+  // CONTRACT: Throttle IPREQ to avoid UART spam.
   if (hasValidEspIp(rt)) return;
   if (rt.lastIpReqMs != 0 && (nowMs - rt.lastIpReqMs) < 1500) return;
   rt.lastIpReqMs = nowMs;
@@ -17,6 +19,7 @@ void maybeRequestEspIp(RuntimeState& rt, uint32_t nowMs) {
 }
 
 void updateMazeLcd(RuntimeState& rt, const CompassData& heading, float lidarFilteredCm) {
+  // SECTION: Dashboard projection to LCD.
   maze_lcd::setIp(rt.espIpStr);
   const maze_lcd::AuthState auth = rt.espLocked ? maze_lcd::AuthState::Locked
                                                 : (rt.espArmed ? maze_lcd::AuthState::Armed : maze_lcd::AuthState::Disarmed);

@@ -1,5 +1,5 @@
 #include "esp_alert_ring.h"
-// (Refactor) Transport module implementation.
+// SECTION: Alert ring buffer transport implementation.
 
 #include <math.h>
 
@@ -12,11 +12,12 @@ void AlertRing::reset() {
 }
 
 void AlertRing::pushFromLine(const String& line) {
-  // Expected: "EVT:TAG,x,y,h[,extra]"
+  // CONTRACT: Input format is "EVT:TAG,x,y,h[,extra]".
   const String s = line;
   if (!s.startsWith("EVT:")) return;
 
-  const int p0 = 4;  // after "EVT:"
+  // WHY: Payload starts immediately after "EVT:" prefix.
+  const int p0 = 4;
   const int c1 = s.indexOf(',', p0);
   if (c1 < 0) return;
   const int c2 = s.indexOf(',', c1 + 1);
@@ -101,4 +102,4 @@ uint32_t AlertRing::newestSeq() const {
   return ring_[newestIdx].seq;
 }
 
-}  // namespace esp_alert_ring
+}

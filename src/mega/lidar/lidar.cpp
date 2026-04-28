@@ -31,7 +31,7 @@ bool Lidar::pollRange(float& distanceCm) {
 
   if (myLIDAR.getBusyFlag()) {
     if (millis() - rangeStartMs > kRangeTimeoutMs) {
-      // Timeout: drop this measurement and allow a fresh start next call.
+      // WHY: Timeout: drop this measurement and allow a fresh start next call.
       measuring = false;
     }
     return false;

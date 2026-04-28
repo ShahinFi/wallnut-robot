@@ -12,18 +12,14 @@
 #include "transport/esp_uart.h"
 #include "http/esp_routes.h"
 
-// Optional local secrets file (gitignored): src/esp/wifi_secrets.h
-// Use this to avoid command-line quoting issues with spaces/& in passwords.
+// SECTION: Optional local Wi-Fi secrets override (gitignored).
 #if defined(__has_include)
 #if __has_include("wifi_secrets.h")
 #include "wifi_secrets.h"
 #endif
 #endif
 
-// ====== Wi-Fi credentials (compile-time, override locally) ======
-// Keep secrets out of source control via `platformio_override.ini`:
-// -DWIFI_SSID="Your2p4GHzSSID"
-// -DWIFI_PASSWORD="YourPassword"
+// SECTION: Wi-Fi credentials (compile-time defaults).
 #ifndef WIFI_SSID
 #define WIFI_SSID ""
 #endif
@@ -31,9 +27,9 @@
 #define WIFI_PASSWORD ""
 #endif
 
-// Fallback AP when STA credentials are not provided or STA connect fails.
+// CONTRACT: Fallback AP is enabled when STA is unavailable.
 #ifndef WIFI_AP_SSID
-#define WIFI_AP_SSID "mobile-robot"
+#define WIFI_AP_SSID "WallNut"
 #endif
 #ifndef WIFI_AP_PASSWORD
 #define WIFI_AP_PASSWORD ""
@@ -66,7 +62,7 @@ void setup() {
 
   listAllFiles();
 
-  // Allocate large scan/alert buffers on heap to avoid ESP8266 `.bss` overflow.
+  // WHY: Keep large transport buffers off static .bss on ESP8266.
   (void)gScanEvents.allocOnce();
   gAlertRing.reset();
 
@@ -82,7 +78,8 @@ void setup() {
       delay(500);
       Serial.print(".");
       attempt++;
-      if (attempt >= 30) break;  // ~15s then fall back to AP
+      // WHY: Fall back to AP after ~15 seconds of STA retry attempts.
+      if (attempt >= 30) break;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -90,7 +87,7 @@ void setup() {
       Serial.println("\nWiFi connected (STA).");
       Serial.print("IP address: ");
       Serial.println(WiFi.localIP());
-      // Report to Mega (UART protocol) for LCD display (best-effort).
+      // CONTRACT: ESP reports active IP to Mega for LCD display.
       Serial.print("ESPIP:");
       Serial.println(WiFi.localIP());
     } else {
@@ -111,7 +108,7 @@ void setup() {
     Serial.println(kWifiApSsid);
     Serial.print("AP IP: ");
     Serial.println(WiFi.softAPIP());
-    // Report to Mega (UART protocol) for LCD display (best-effort).
+    // CONTRACT: ESP reports active AP IP to Mega for LCD display.
     Serial.print("ESPIP:");
     Serial.println(WiFi.softAPIP());
   }

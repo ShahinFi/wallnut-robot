@@ -1,5 +1,5 @@
 #pragma once
-// (Refactor) HTTP module: endpoint registration.
+// SECTION: HTTP endpoint registration.
 
 #include <ESP8266WebServer.h>
 
@@ -14,4 +14,4 @@ void registerRoutes(ESP8266WebServer& server,
                     esp_scan_events::ScanEvents& scan,
                     esp_alert_ring::AlertRing& alerts);
 
-}  // namespace esp_routes
+}

@@ -18,7 +18,7 @@ static float wrapDeg180(float deg) {
 }
 
 static bool finite2(float a, float b) { return isfinite(a) && isfinite(b); }
-}  // namespace
+}
 
 void worldOdomReset(WorldOdomState& s) {
   s.hasPrev = false;
@@ -43,15 +43,17 @@ void worldOdomUpdate(WorldOdomState& s, float headingDeg, float avgCmSigned) {
     return;
   }
 
-  const float d = avgCmSigned - s.prevAvgCmSigned;  // signed forward delta (cm)
+  // WHY: Delta is signed forward motion since the previous integration sample.
+  const float d = avgCmSigned - s.prevAvgCmSigned;
 
-  // Midpoint heading using shortest-arc delta (works for wrapped or continuous headings).
+  // WHY: Midpoint heading using shortest-arc delta (works for wrapped or continuous headings).
   const float dh = wrapDeg180(headingDeg - s.prevHeadingDeg);
   const float hMid = s.prevHeadingDeg + 0.5f * dh;
 
-  const float rad = degToRad(wrapDeg360(hMid));  // keep trig argument small
+  // WHY: Keep trig argument wrapped for numeric stability.
+  const float rad = degToRad(wrapDeg360(hMid));
 
-  // World projection (0=N, 90=E):
+  // WHY: World projection (0=N, 90=E):
   s.pos.eastCm  += d * sinf(rad);
   s.pos.northCm += d * cosf(rad);
 

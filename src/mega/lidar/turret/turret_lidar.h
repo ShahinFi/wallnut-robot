@@ -4,18 +4,17 @@
 
 #include "lidar/lidar.h"
 
-// TurretLidar: thin wrapper around the existing LiDAR device class.
-// Exists only for naming consistency with other turret-mounted devices.
+// WHY: Thin wrapper around base LiDAR device for turret subsystem naming consistency.
 class TurretLidar {
 public:
   TurretLidar();
 
   bool begin();
 
-  // Non-blocking update; returns true when a new distance is produced.
+  // WHY: Non-blocking update; returns true when a new distance is produced.
   bool update(float& distanceCm);
 
-  // Direct read (library call-through).
+  // WHY: Direct blocking distance read-through.
   float getDistance();
 
 private:

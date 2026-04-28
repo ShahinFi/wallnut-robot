@@ -11,7 +11,7 @@
 #include "protocol_helpers.h"
 #include "reflex.h"
 
-// Optional local secrets file (gitignored): src/mega/secrets.h
+// SECTION: Optional local secrets override (gitignored).
 #if defined(__has_include)
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -25,6 +25,7 @@
 static const int kEspPasscodeInt = ESP_PASSCODE_INT;
 static const uint8_t kEspMaxFails = 3;
 
+// SECTION: Telemetry serialization helpers.
 static void sendRgbRefsToEsp_(RuntimeState& rt) {
   if (!rt.colorCalTask.hasCalibration()) return;
   const ColorRgb* refs = rt.colorCalTask.refs();
@@ -92,12 +93,15 @@ void sendTelemetrySnapshotToEsp(RuntimeState& rt) {
   }
 }
 
+// SECTION: Command safety helpers.
 static void stopAndCancelMotionOwners_(RuntimeState& rt) {
+  // CONTRACT: Any auth/lockout stop path must stop motors immediately.
   cancelActiveMotion(rt);
   motorDrive(0.0f, 0.0f);
 }
 
 static void startMotionSequence_(RuntimeState& rt, const CompassData& heading, const OdometryData& od) {
+  // CONTRACT: New motion command resets reflex latches for a fresh safety window.
   rt.seqExecTask.clearAlignHeading();
   rt.seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
   rt.seqWasActive = true;
@@ -105,6 +109,7 @@ static void startMotionSequence_(RuntimeState& rt, const CompassData& heading, c
 }
 
 bool handleEspCommand(RuntimeState& rt, const CompassData& heading, float) {
+  // SECTION: ESP command dispatch.
   EspCommand espCmd;
   if (!espPoll(espCmd)) return false;
 
@@ -230,6 +235,7 @@ bool handleEspCommand(RuntimeState& rt, const CompassData& heading, float) {
   const bool isMotionCmd = (espCmd.type == EspCommand::Type::Move || espCmd.type == EspCommand::Type::Turn ||
                             espCmd.type == EspCommand::Type::TurnShortest || espCmd.type == EspCommand::Type::TurnAbs ||
                             espCmd.type == EspCommand::Type::EncCal);
+  // CONTRACT: Movement controllers are single-owner; reject new motion while busy.
   const bool motorBusy = (rt.seqExecTask.active() || rt.encCalTask.active() || rt.turretSweep.active());
   if (isMotionCmd && motorBusy) {
     sendEvtPose_(rt, "CMDFAIL", NAN);
@@ -257,6 +263,7 @@ bool handleEspCommand(RuntimeState& rt, const CompassData& heading, float) {
   }
 
   odomHardResetKeepWorld(heading.headingDegContinuous);
+  // CONTRACT: New motion starts from a fresh local baseline while preserving world continuity.
   const OdometryData od = odomRaw();
 
   if (espCmd.type == EspCommand::Type::Move) {

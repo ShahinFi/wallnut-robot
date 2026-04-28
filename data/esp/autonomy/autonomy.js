@@ -1,9 +1,8 @@
-// Browser-side autonomy for the /maze page.
-// Constraints:
-// - Do not change mapping behavior (we only call MappingApi.requestScanAuto()).
-// - First scan is always '+' and scans must alternate (enforced by mapping_boot.js).
-// - Red floor tile is a 1-cell virtual obstacle (not LiDAR-mapped).
-// - Arduino/Mega reflex stops publish EVT:* lines; browser polls /alerts.
+// SECTION: Browser-side autonomy for /maze.
+// SECTION: Constraints.
+// CONTRACT: Mapping remains owned by MappingApi; autonomy only requests scans and motion commands.
+// CONTRACT: Scan direction alternation and first-scan '+' behavior are enforced by mapping_boot.js.
+// CONTRACT: Reflex events are consumed from `/alerts` and red tiles are handled as virtual obstacles.
 
 function $(id) {
   return document.getElementById(id);
@@ -14,13 +13,15 @@ const elStop = $("autoStop");
 const elStatus = $("autoStatus");
 
 if (!elStart || !elStop || !elStatus) {
-  // Page doesn't include autonomy UI; safe no-op.
+  // WHY: Page doesn't include autonomy UI; safe no-op.
 } else {
-  // ===== Tunables =====
+  // SECTION: Tunables.
   const kCmdTimeoutMs = 25000;
 
-  const kBackoffAfterReflexCm = -15; // tunable, "middle" value
-  const kMaxSegmentCm = 30; // cap single forward command length to reduce drift
+  // WHY: Moderate backoff distance balances clearance recovery and path churn.
+  const kBackoffAfterReflexCm = -15;
+  // WHY: Segment cap limits drift accumulation between scan-based relocalizations.
+  const kMaxSegmentCm = 30;
 
   const MissionState = Object.freeze({
     Iter: "ITER",
@@ -30,41 +31,41 @@ if (!elStart || !elStop || !elStatus) {
     Move: "MOVE",
   });
 
-  // ===== Mission runtime flags =====
+  // SECTION: Mission runtime flags.
   let running = false;
   let stopRequested = false;
 
-  // ===== Goal configuration (source of truth: #mapCanvas data-*) =====
-  // Single source of truth: read goal from `#mapCanvas` data-*.
+  // SECTION: Goal configuration (source of truth: #mapCanvas data-*).
   let goal = { x_cm: NaN, y_cm: NaN, tolCells: 0, cell: null };
 
-  // ===== Alerts stream cursor =====
+  // SECTION: Alerts stream cursor.
   let alertFromSeq = 0;
   let alertsUnsub = null;
 
-  // ===== In-flight command tracking (single command owner) =====
-  let pendingCmd = null; // { resolve, reject, t0, label, startSeq, token }
+  // SECTION: In-flight command tracking (single owner).
+  // CONTRACT: `pendingCmd` is null or `{ resolve, reject, t0, label, startSeq, token }`.
+  let pendingCmd = null;
   let cmdTokenSeq_ = 1;
 
-  // ===== Mailbox (filled by alerts; consumed only by the state machine) =====
-  // Mailbox filled by alert polling; consumed only by the mission state machine.
+  // SECTION: Mailbox (alerts -> mission state machine).
+  // CONTRACT: Mailbox is written by alert polling and consumed only by runLoop state transitions.
   let mailbox = {
-    reflex: null, // { kind: "red"|"front", x_cm, y_cm, headingDeg }
+    // CONTRACT: `reflex` is null or `{ kind, x_cm, y_cm, headingDeg }`.
+    reflex: null,
     lastEvt: null,
     lastAlertSeq: 0,
   };
 
-  // ===== Virtual obstacles (red tiles) =====
-  let virtualBlocked = null; // Uint8Array grid.w*grid.h (1 => blocked)
-  let redInflate = { xCells: 0, yCells: 0 }; // inflation radius in cells (UI-configured)
-  // Autonomy control flow (with stale live pose):
-  // - Always scan BEFORE planning/replanning so pose/heading are fresh.
-  // - Never scan just because we turned or the plan changed.
-  // - Plan once per iteration, then execute (optional turn + one straight move),
-  //   then schedule a scan for the next iteration.
-  let pendingScanReason = null; // "segment"|"recover"|"no-path"|...
+  // SECTION: Virtual obstacles (red tiles).
+  // CONTRACT: `virtualBlocked` is null or Uint8Array sized `grid.w * grid.h`.
+  let virtualBlocked = null;
+  // WHY: Inflation radii are UI-configured in cell units.
+  let redInflate = { xCells: 0, yCells: 0 };
+  // CONTRACT: Control loop is scan -> plan -> optional turn -> one move, then rescan before replanning.
+  // CONTRACT: `pendingScanReason` is null or a symbolic scan-trigger reason.
+  let pendingScanReason = null;
 
-  // ===== UI (single writer) =====
+  // SECTION: UI projection (single writer).
   let lastAutoStatusRaw = "idle";
 
   const uiState = {
@@ -94,21 +95,17 @@ if (!elStart || !elStop || !elStatus) {
   }
 
   function renderUi_() {
-    // Make the UI 100% consistent/atomic:
-    // - While a command is in-flight, the authoritative "what is happening now"
-    //   is the in-flight command label (not the planner's next-intent string).
-    // - "Next segment" information still shows via segDir/segCm/turnDeg.
+    // WHY: While a command is in-flight, status prioritizes command label over planner intent.
     const armed = isArmed_();
     const inFlightLabel = pendingCmd && pendingCmd.label ? String(pendingCmd.label) : "";
     const displayState = !armed
       ? "Not armed"
       : (inFlightLabel ? `Executing ${inFlightLabel}` : String(uiState.state || ""));
 
-    // Auto status pill text.
     lastAutoStatusRaw = displayState;
     refreshAutoStatusDisplay_();
 
-    // Detailed status (single writer).
+    // CONTRACT: StatusBus autonomy payload is emitted only from this UI writer.
     if (window.StatusBus) {
       const cmdLabel = pendingCmd && pendingCmd.label ? String(pendingCmd.label) : null;
       const cmdAgeMs = pendingCmd && Number.isFinite(pendingCmd.t0) ? (Date.now() - pendingCmd.t0) : null;
@@ -172,7 +169,7 @@ if (!elStart || !elStop || !elStatus) {
     return Math.max(a, b);
   }
 
-  // ===== HTTP wrappers =====
+  // SECTION: HTTP wrappers.
   async function httpPost(path) {
     if (window.DebugLog) window.DebugLog.push("http", `POST ${path}`);
     const res = await fetch(path, { method: "POST", cache: "no-store" });
@@ -187,12 +184,12 @@ if (!elStart || !elStop || !elStatus) {
 
   async function cmdTurn(deg) {
     const v = roundInt(deg);
-    // Autonomy must always take the shortest-path turn. Use the dedicated endpoint
-    // that normalizes into [-180, 180] and routes to TurnDegShortest on Mega.
+    // CONTRACT: Autonomy must always take the shortest-path turn. Use the dedicated endpoint
+    // WHY: that normalizes into [-180, 180] and routes to TurnDegShortest on Mega.
     return await cmdAwait(`/turn_short?deg=${encodeURIComponent(String(v))}`, `turn ${v}deg`);
   }
 
-  // ===== Command await (single outstanding cmd at a time) =====
+  // SECTION: Command await (single outstanding command).
   function cmdAwait(path, label) {
     if (!running) return Promise.resolve({ ok: false, status: "stopped" });
     if (pendingCmd) return Promise.reject(new Error("CMD_IN_FLIGHT"));
@@ -226,9 +223,9 @@ if (!elStart || !elStop || !elStatus) {
 
       const tick = () => {
         if (!pendingCmd) return;
-        // Abort stale tickers from previous commands (prevents UI flicker/backtracking).
+        // WHY: Ignore stale tick loops from prior commands.
         if (pendingCmd.token !== token) return;
-        // Only update UI while THIS command is still in flight.
+        // CONTRACT: Only update UI while THIS command is still in flight.
         renderUi_();
         if (!running) {
           const pc = pendingCmd;
@@ -267,7 +264,7 @@ if (!elStart || !elStop || !elStatus) {
     return { tag, x_cm: x, y_cm: y, headingDeg: h, extra };
   }
 
-  // ===== Virtual obstacle grid helpers =====
+  // SECTION: Virtual obstacle grid helpers.
   function vbIdx(grid, cx, cy) {
     return cy * grid.w + cx;
   }
@@ -311,9 +308,7 @@ if (!elStart || !elStop || !elStatus) {
   }
 
   function isHardBlocked_(grid, cx, cy) {
-    // "Hard" blocks are physical occupied cells (walls/obstacles).
-    // Virtual red tiles are treated as blocked for planning *except* we must allow
-    // starting inside a red cell (localization jitter) so the robot can escape.
+    // CONTRACT: Hard block check is physical occupancy only; virtual red is handled separately.
     return grid.cellState(cx, cy) === "occ";
   }
 
@@ -324,20 +319,26 @@ if (!elStart || !elStop || !elStatus) {
     { dx: 0, dy: -1, label: "S" },
   ];
 
-  // ===== Planner configuration (knobs) =====
+  // SECTION: Planner configuration.
   const plannerCfg_ = {
-    wLen: 1.0,   // shortest path weight
-    wTurn: 3.0,  // turn penalty weight
-    wRisk: 6.0,  // obstacle/red proximity penalty weight
-    wFirst: 0.0, // prefer longer first straight run from robot pose
-    rRed: 3,     // risk radius around virtual red (cells)
-    rOcc: 2,     // risk radius around occupied cells (cells)
-    // Code-only calibration gains (UI stays as pure intent sliders).
+    // WHY: Path length weight.
+    wLen: 1.0,
+    // WHY: Heading-change penalty weight.
+    wTurn: 3.0,
+    // WHY: Proximity-to-obstacle penalty weight.
+    wRisk: 6.0,
+    // WHY: Reward for preserving first straight run.
+    wFirst: 0.0,
+    // WHY: Risk radius around virtual red cells (in grid cells).
+    rRed: 3,
+    // WHY: Risk radius around occupied cells (in grid cells).
+    rOcc: 2,
+    // CONTRACT: Code-only calibration gains (UI stays as pure intent sliders).
     kLen: 1.00,
     kTurn: 0.35,
     kRisk: 4.00,
     kFirst: 0.25,
-    // Effective calibrated weights (computed from slider * k*).
+    // WHY: Effective calibrated weights (computed from slider * k*).
     wLenEff: 1.0,
     wTurnEff: 1.0,
     wRiskEff: 1.0,
@@ -355,7 +356,7 @@ if (!elStart || !elStop || !elStatus) {
       return Number.isFinite(v) ? v : fallback;
     }
 
-    // Allow UI inputs to override, otherwise fall back to data-*.
+    // WHY: Sliders override dataset defaults when present.
     const wLen = readNum("planWLen", Number(canvas.dataset.planWLen));
     const wTurn = readNum("planWTurn", Number(canvas.dataset.planWTurn));
     const wRisk = readNum("planWRisk", Number(canvas.dataset.planWRisk));
@@ -372,7 +373,7 @@ if (!elStart || !elStop || !elStatus) {
       return x;
     }
 
-    // Uncapped weights for massive detour scaling
+    // WHY: Large upper cap allows aggressive detour tuning.
     const wl = clamp01_(wLen, 0, 10000);
     const wt = clamp01_(wTurn, 0, 10000);
     const wr = clamp01_(wRisk, 0, 10000);
@@ -433,7 +434,7 @@ if (!elStart || !elStop || !elStatus) {
     updatePlannerSliderValues_();
   }
 
-  // ===== Risk precompute (distance transforms) =====
+  // SECTION: Risk precompute (distance transforms)
   function computeDistToSources_(grid, isSource) {
     const w = grid.w;
     const h = grid.h;
@@ -498,7 +499,7 @@ if (!elStart || !elStop || !elStatus) {
     for (let i = 0; i < n; i++) {
       const rr = riskFromDist_(distRed[i], rRedCells);
       const ro = riskFromDist_(distOcc[i], rOccCells);
-      // Non-explosive merge: repulsion depends on nearest strong source, not source count.
+      // WHY: Non-explosive merge: repulsion depends on nearest strong source, not source count.
       risk[i] = Math.max(rr, ro);
     }
 
@@ -507,26 +508,26 @@ if (!elStart || !elStop || !elStatus) {
 
   function headingToDirIdx_(headingDeg) {
     const h = wrapDiff180(Number(headingDeg));
-    if (!Number.isFinite(h)) return 2; // default N
-    // Convert to [0,360)
+    // CONTRACT: Invalid heading falls back to north-facing index.
+    if (!Number.isFinite(h)) return 2;
+    // WHY: Convert heading into [0,360) cardinal space.
     let w = h;
     while (w < 0) w += 360;
     while (w >= 360) w -= 360;
-    // N=0, E=90, S=180, W=270
     const idx = Math.round(w / 90) % 4;
-    // DIRS order is E,W,N,S; map to that:
-    // cardinal idx: 0=N,1=E,2=S,3=W
-    if (idx === 0) return 2; // N
-    if (idx === 1) return 0; // E
-    if (idx === 2) return 3; // S
-    return 1; // W
+    // CONTRACT: Cardinal heading index maps to DIRS index order E,W,N,S.
+    if (idx === 0) return 2;
+    if (idx === 1) return 0;
+    if (idx === 2) return 3;
+    return 1;
   }
 
   function dirStepsBetween_(a, b) {
     const da = a | 0;
     const db = b | 0;
     const d = Math.abs(da - db) % 4;
-    return d > 2 ? 4 - d : d; // 0..2
+    // CONTRACT: Minimal quarter-turn count is constrained to range [0, 2].
+    return d > 2 ? 4 - d : d;
   }
 
   class MinHeap_ {
@@ -583,10 +584,7 @@ if (!elStart || !elStop || !elStatus) {
       return [{ cx: startCell.cx, cy: startCell.cy }];
     }
 
-    // State: (cell, moveDir, firstDir, leftFirst)
-    // - moveDir is the direction of the last step (used for turn cost).
-    // - firstDir is the direction of the first straight run we want to maximize.
-    // - leftFirst is true once we take a step not equal to firstDir.
+    // SECTION: Search state (cell, moveDir, firstDir, leftFirst).
     const nStates = w * h * 4 * 4 * 2;
     const gScore = new Float64Array(nStates);
     const came = new Int32Array(nStates);
@@ -598,7 +596,7 @@ if (!elStart || !elStop || !elStatus) {
       const md = (moveDir & 3) >>> 0;
       const fd = (firstDir & 3) >>> 0;
       const lf = leftFirst ? 1 : 0;
-      // cell * 32 + firstDir*8 + moveDir*2 + leftFirst
+      // WHY: cell * 32 + firstDir*8 + moveDir*2 + leftFirst
       return ((cell * 32) + (fd * 8) + (md * 2) + lf) >>> 0;
     }
 
@@ -615,14 +613,13 @@ if (!elStart || !elStop || !elStatus) {
     function heuristic(cx, cy) {
       const dx = Math.abs(cx - goalCell.cx);
       const dy = Math.abs(cy - goalCell.cy);
-      // Keep heuristic admissible with first-run reward: use the smallest guaranteed
-      // non-negative per-step floor.
+      // WHY: Use a non-negative step floor to keep heuristic admissible with first-run reward.
       const minStep = Math.max(0.001, cfg.wLenEff - cfg.wFirstEff);
       return minStep * (dx + dy);
     }
 
     const open = new MinHeap_();
-    // Seed: choose firstDir, paying the initial turn from robot heading into that firstDir.
+    // WHY: Seed: choose firstDir, paying the initial turn from robot heading into that firstDir.
     for (let firstDir = 0; firstDir < 4; firstDir++) {
       const initialTurnSteps = dirStepsBetween_(robotDirIdx, firstDir);
       const initCost = cfg.wTurnEff * initialTurnSteps;
@@ -666,8 +663,7 @@ if (!elStart || !elStop || !elStatus) {
         const turnSteps = dirStepsBetween_(st.moveDir, nd);
         const riskCost = cfg.wRiskEff * (riskMap ? riskMap[nCellIdx] : 0.0);
 
-        // First-run preference: reward staying on the initial direction from the
-        // robot side. This is applied only while we are still on the first run.
+        // CONTRACT: First-run reward applies only while still moving along firstDir.
         const onFirstRun = !nextLeft;
         const baseStepCost = cfg.wLenEff + (cfg.wTurnEff * turnSteps) + riskCost;
         const firstRunReward = onFirstRun ? Math.min(cfg.wFirstEff, baseStepCost * 0.8) : 0.0;
@@ -684,7 +680,7 @@ if (!elStart || !elStop || !elStatus) {
 
     if (goalState < 0) return null;
 
-    // Reconstruct state path.
+    // WHY: Reconstruct state path.
     const revCells = [];
     let curId = goalState;
     while (curId >= 0) {
@@ -697,7 +693,7 @@ if (!elStart || !elStop || !elStatus) {
     }
     revCells.reverse();
 
-    // Deduplicate consecutive same-cell entries (defensive).
+    // WHY: Deduplicate consecutive same-cell entries (defensive).
     const out = [];
     for (const c of revCells) {
       const prev = out.length ? out[out.length - 1] : null;
@@ -728,7 +724,8 @@ if (!elStart || !elStop || !elStatus) {
       else if (dx === -1 && dy === 0) dir = "W";
       else if (dx === 0 && dy === 1) dir = "N";
       else if (dx === 0 && dy === -1) dir = "S";
-      else return []; // non-4-neighbor (shouldn't happen)
+      // CONTRACT: Planner path must remain 4-neighbor; otherwise reject path.
+      else return [];
 
       if (curDir === null) {
         curDir = dir;
@@ -753,7 +750,7 @@ if (!elStart || !elStop || !elStatus) {
     return 0;
   }
 
-  // ===== UI configuration reads =====
+  // SECTION: UI configuration reads.
   function configureGoalFromDom(api) {
     const canvas = document.getElementById("mapCanvas");
     if (!canvas) return false;
@@ -809,7 +806,8 @@ if (!elStart || !elStop || !elStatus) {
     const api = mappingApi();
     if (!api) return;
     if (!running) return;
-    if (api.state.scanActive) return; // preserve scan bandwidth
+    // CONTRACT: Alert handling is paused while scan transport is active.
+    if (api.state.scanActive) return;
 
     const seq = Number(row && row.seq);
     const line = String(row && row.line ? row.line : "").trim();
@@ -829,7 +827,7 @@ if (!elStart || !elStop || !elStatus) {
       mailbox.reflex = { kind: "front", x_cm: evt.x_cm, y_cm: evt.y_cm, headingDeg: evt.headingDeg };
     } else if (evt.tag === "CMDOK" || evt.tag === "CMDFAIL" || evt.tag === "CMDCANCEL") {
       if (pendingCmd) {
-        // Fundamental: ignore stale completions from before this command started.
+        // WHY: Fundamental: ignore stale completions from before this command started.
         if (Number.isFinite(seq) && seq <= pendingCmd.startSeq) return;
         const pc = pendingCmd;
         pendingCmd = null;
@@ -842,12 +840,12 @@ if (!elStart || !elStop || !elStatus) {
     }
   }
 
-  // ===== Alerts stream control =====
+  // SECTION: Alerts stream control.
   async function startAlertStream_() {
     if (alertsUnsub) return true;
     const am = window.AlertsManager;
     if (!am || !am.subscribe) return false;
-    // Do not replay old alert history: start from the newest seq on the ESP.
+    // CONTRACT: Do not replay old alert history: start from the newest seq on the ESP.
     let tail = 0;
     try {
       const res = await fetch("/alerts_tail", { cache: "no-store" });
@@ -884,7 +882,7 @@ if (!elStart || !elStop || !elStatus) {
     const curH = Number(pose?.headingDeg);
     if (!Number.isFinite(curH)) return true;
     const dTurn = wrapDiff180(0 - curH);
-    // Small deadband to avoid jitter.
+    // WHY: Small deadband to avoid jitter.
     if (Math.abs(dTurn) <= 3) return true;
     setStatus("turn -> N");
     setUi_({ segDir: "N", turnDeg: dTurn, segCm: null });
@@ -897,8 +895,8 @@ if (!elStart || !elStop || !elStatus) {
     setStatus(`scan (${reason})...`);
     const r = await api.requestScanAuto();
     if (!r?.ok) return { ok: false, status: r?.kind || "scan_fail" };
-    // After a scan match, mapping queues /set_pose to rebase odom->map on Mega.
-    // Do not plan until that pose sync is complete.
+    // WHY: After a scan match, mapping queues /set_pose to rebase odom->map on Mega.
+    // CONTRACT: Do not plan until that pose sync is complete.
     await waitPoseSync_(api);
     return { ok: true, status: "scan_done" };
   }
@@ -906,14 +904,13 @@ if (!elStart || !elStop || !elStatus) {
   async function waitPoseSync_(api) {
     if (!running) return;
     if (!api?.state) return;
-    // Show a clear state while waiting.
+    // WHY: Keep status explicit while waiting on pose synchronization.
     setStatus("pose syncing...");
     while (running && !stopRequested && (api.state.posePostPending || api.state.posePostInFlight)) {
-      // If something is wrong, keep waiting (user asked for guaranteed sync).
-      // The scan already succeeded; this is just alignment posting.
+      // WHY: Scan already succeeded; this wait is only for alignment posting.
       await new Promise((r) => setTimeout(r, 80));
     }
-    // Restore to a neutral state; caller will set the next status (plan/turn/move).
+    // WHY: Caller sets the next actionable status after sync completes.
     if (running && !stopRequested) setStatus("pose synced");
   }
 
@@ -921,17 +918,14 @@ if (!elStart || !elStop || !elStatus) {
     if (!mailbox.reflex) return false;
     const r = mailbox.reflex;
     mailbox.reflex = null;
-    // Reflex stop already forces a scan; drop any queued scan so we don't scan twice.
+    // WHY: Reflex stop already forces a scan; drop any queued scan so we don't scan twice.
     pendingScanReason = null;
 
     if (r.kind === "red") {
-      // For red floor tiles: scan first to get the corrected pose, then mark the
-      // virtual obstacle at that corrected pose, then back off. No scan is needed
-      // after the backoff; we trust odometry for this short reverse move.
+      // WHY: Red reflex flow is scan -> stamp virtual block -> short backoff.
       setStatus("RED stop -> scan");
       await doScan(api, "red");
-      // Stamp at the scan-matched pose anchor (mapPose0) so the mark aligns with
-      // the scan correction (and thus with the map update).
+      // WHY: Stamp at matched anchor so virtual block aligns with corrected map pose.
       const p0 = api?.state?.mapPose0;
       const c = api.grid.worldToCell(p0?.x, p0?.y);
       if (c) {
@@ -945,7 +939,7 @@ if (!elStart || !elStop || !elStatus) {
       return true;
     }
 
-    // For front obstacle stops, back off then rescan to re-localize in case of slip.
+    // WHY: Front-stop reflex backs off, then rescans to recover localization.
     setStatus("FRONT stop -> backoff");
     await cmdMove(kBackoffAfterReflexCm);
     await doScan(api, "front");
@@ -987,8 +981,7 @@ if (!elStart || !elStop || !elStatus) {
       lastAlertSeq: mailbox.lastAlertSeq || 0,
     });
 
-    // Project convention: robot heading 0 is aligned with map +Y (north).
-    // Always turn to north before the initial scan so the first match is stable.
+    // WHY: Turn north before first scan to stabilize initial matching convention.
     await ensureFacingNorth_(api);
     await handleReflex(api);
     if (!running || stopRequested) return;
@@ -1000,22 +993,20 @@ if (!elStart || !elStop || !elStatus) {
       return;
     }
 
-    // Mission state machine. The invariant:
-    // At any time, autonomy is doing exactly one blocking wait:
-    // scan OR a single motion command OR planning.
+    // CONTRACT: Mission state machine has one blocking primitive at a time: scan, command, or plan.
     let state = MissionState.Iter;
     let nextTurnDeg = null;
     let nextMoveCm = null;
     let nextSegDir = null;
 
     while (running && !stopRequested) {
-      // Sync UI-only fields from mailbox (single writer).
+      // CONTRACT: Sync UI-only fields from mailbox (single writer).
       setUi_({
         lastEvt: mailbox.lastEvt,
         lastAlertSeq: mailbox.lastAlertSeq || 0,
       });
 
-      // Reflex has priority over everything else.
+      // WHY: Reflex has priority over everything else.
       if (mailbox.reflex) {
         await handleReflex(api);
         state = MissionState.Iter;
@@ -1024,8 +1015,7 @@ if (!elStart || !elStop || !elStatus) {
 
       switch (state) {
         case MissionState.Iter: {
-          // If a scan is pending, do it as the only primitive for this iteration,
-          // then plan on the next iteration.
+          // CONTRACT: Pending scan owns this iteration; planning resumes next iteration.
           state = pendingScanReason ? MissionState.Scan : MissionState.Plan;
           break;
         }
@@ -1105,7 +1095,7 @@ if (!elStart || !elStop || !elStatus) {
           setStatus(`move ${nextMoveCm}cm`);
           setUi_({ segDir: nextSegDir, segCm: nextMoveCm, turnDeg: null });
           await cmdMove(nextMoveCm);
-          // Pose is stale between scans: always scan before the next replan iteration.
+          // WHY: Pose is stale between scans: always scan before the next replan iteration.
           pendingScanReason = "segment";
           state = MissionState.Iter;
           break;
@@ -1166,15 +1156,13 @@ if (!elStart || !elStop || !elStatus) {
     setStatus("stopping...");
   });
 
-  // Initialize planner knobs from the map canvas data-* defaults (so UI reflects
-  // the current configured weights on load).
+  // WHY: Initialize planner controls from map-canvas dataset defaults.
   try { syncPlannerInputsFromDataset_(); } catch {}
   try { bindPlannerSliders_(); } catch {}
 
   setUi_({ running: false, state: "idle" });
 
-  // If auth state flips (DISARMED -> ARMED), refresh display-only status text
-  // without changing any autonomy behavior.
+  // CONTRACT: Auth status observer updates display text only; it does not alter autonomy behavior.
   try {
     const authEl = document.getElementById("authStatus");
     if (authEl && typeof MutationObserver === "function") {
@@ -1183,3 +1171,5 @@ if (!elStart || !elStop || !elStatus) {
     }
   } catch {}
 }
+
+

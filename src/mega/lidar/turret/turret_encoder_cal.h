@@ -2,43 +2,35 @@
 
 #include <Arduino.h>
 
-// TurretEncoderCal: encoder-only calibration for turret relative angle.
-//
-// Calibration procedure (manual, encoder-only):
-// 1) Start: capture current absolute ticks.
-// 2) Manually rotate turret exactly 360 degrees in any direction.
-// 3) Done: capture ticks again; ticksPerRev = deltaTicks; save to EEPROM.
-//
-// Notes:
-// - This is intentionally direction-agnostic; it yields a monotonic angle that
-//   increases with ticks (single-channel encoder counts up regardless of direction).
-// - A separate "zero" can be set at any time to define where angleDeg=0.
+// WHY: Encoder-only turret calibration stores ticks-per-revolution in EEPROM.
+// CONTRACT: Manual one-turn calibration is direction-agnostic because encoder ticks are monotonic.
 class TurretEncoderCal {
 public:
   TurretEncoderCal();
 
-  // Persistence
+  // WHY: Persistence
   bool loadFromEeprom();
   bool hasCalibration() const;
-  // Manual override + persist to EEPROM.
-  // - setTicksPerRev(): sets BOTH + and - direction calibrations to the same value.
+  // CONTRACT: setTicksPerRev writes the same calibration value for both directions.
   bool setTicksPerRev(uint32_t ticksPerRev);
   bool setTicksPerRevPos(uint32_t ticksPerRevPos);
   bool setTicksPerRevNeg(uint32_t ticksPerRevNeg);
 
-  // Manual calibration session
+  // SECTION: Manual Calibration Session
   void start(long ticksAbsNow);
-  bool finish(long ticksAbsNow);  // returns true if saved successfully
+  // CONTRACT: Returns true only when a valid calibration is persisted.
+  bool finish(long ticksAbsNow);
   bool active() const;
 
-  // Current calibration value
+  // SECTION: Calibration Values
   uint32_t ticksPerRevPos() const;
   uint32_t ticksPerRevNeg() const;
-  uint32_t ticksPerRevForDirSign(int dirSign) const;  // dirSign: +1 / -1
+  // CONTRACT: dirSign < 0 selects negative-direction calibration; otherwise positive.
+  uint32_t ticksPerRevForDirSign(int dirSign) const;
   float    degPerTickPos() const;
   float    degPerTickNeg() const;
 
-  // Zeroing + angle (monotonic, wrap360)
+  // SECTION: Zeroing and Angle Readout
   void  setZeroTicks(long ticksAbsNow);
   long  zeroTicks() const;
   float angleDeg(long ticksAbsNow) const;

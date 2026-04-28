@@ -14,7 +14,7 @@ const float    kDriveSpeed        = 0.4f;
 const uint32_t kDriveTimeoutMs    = 20000;
 const uint16_t kEepromMagic       = 0xCA1B;
 const int      kEepromAddr        = 0;
-}  // namespace
+}
 
 EncoderCalibrationTask::EncoderCalibrationTask()
 : state_(State::Idle),
@@ -41,8 +41,8 @@ void EncoderCalibrationTask::begin(float headingDegContinuous, float avgTravelCm
   ui_.begin();
   ui_.showIdle();
   drive_.reset();
-  // Hard reset is intentional here because we measure raw pulses over a known delta distance.
-  // Use the odometry manager wrapper to keep world-frame odometry consistent.
+  // WHY: Hard reset is intentional here because we measure raw pulses over a known delta distance.
+  // WHY: Use the odometry manager wrapper to keep world-frame odometry consistent.
   odomHardResetKeepWorld(headingDegContinuous);
   startAvgTravelCm_ = avgTravelCm;
   (void)headingDegContinuous;

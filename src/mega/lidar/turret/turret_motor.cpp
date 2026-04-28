@@ -7,7 +7,7 @@ static const int kTurretDirPin = 14;
 static const int kTurretPwmPin = 4;
 static const int kTurretEncAPin = 18;
 
-// Global calibration scale factor (default: 1.0f = no scaling)
+// WHY: Global command scale used to tune turret speed without changing call sites.
 static float gTurretScale = 0.5f;
 
 volatile long gTurretTicksAbs = 0;
@@ -17,7 +17,7 @@ static inline float clampSigned1(float x) {
   if (x >  1.0f) return  1.0f;
   return x;
 }
-}  // namespace
+}
 
 TurretMotor::TurretMotor() : cmdSign_(1), lastCmd_(0.0f) {}
 
@@ -28,7 +28,7 @@ void TurretMotor::begin() {
 
   stop();
 
-  // Encoder: count rising edges on channel A.
+  // WHY: Encoder: count rising edges on channel A.
   attachInterrupt(digitalPinToInterrupt(kTurretEncAPin), TurretMotor::isr_, RISING);
 }
 
@@ -42,7 +42,7 @@ void TurretMotor::setCmd(float cmd) {
   cmd = clampSigned1(cmd);
   lastCmd_ = cmd;
 
-  // Apply the simple global scale here before hardware mapping
+  // WHY: Apply configured scale before mapping to hardware direction/PWM.
   const float scaledCmd = clampSigned1(cmd * gTurretScale);
   const float hwCmd = scaledCmd * (float)cmdSign_;
   const int dir = (hwCmd >= 0.0f) ? HIGH : LOW;

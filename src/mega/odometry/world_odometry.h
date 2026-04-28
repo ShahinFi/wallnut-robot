@@ -2,13 +2,8 @@
 
 #include <stdint.h>
 
-// World-frame odometry integrated from:
-// - signed forward travel (cm) from wheel odometry
-// - compass heading (deg), where 0=N, 90=E
-//
-// Coordinates:
-// - eastCm  (X): +East, -West
-// - northCm (Y): +North, -South
+// WHY: World-frame odometry integrates signed travel with heading (0=N, 90=E).
+// CONTRACT: Coordinates use eastCm (X, +East) and northCm (Y, +North).
 
 struct WorldOdomData {
   float eastCm;
@@ -18,20 +13,17 @@ struct WorldOdomData {
 struct WorldOdomState {
   bool  hasPrev;
   float prevAvgCmSigned;
-  float prevHeadingDeg;  // degrees (any range), used for midpoint integration
+  // WHY: Previous heading can be wrapped or continuous; update uses midpoint integration.
+  float prevHeadingDeg;
   WorldOdomData pos;
 };
 
-// Clears position and internal baselines.
+// WHY: Clears position and internal baselines.
 void worldOdomReset(WorldOdomState& s);
 
-// Re-bases the integrator without changing the accumulated position.
-// Use this after a hard encoder reset (encoder counters jump to zero) so the
-// next update does not interpret the reset as motion.
+// WHY: Re-bases integrator state without changing accumulated world position.
+// CONTRACT: Call after hard encoder resets to prevent false motion injection.
 void worldOdomRebase(WorldOdomState& s, float headingDeg, float avgCmSigned);
 
-// Continuous integration step; call every loop with the latest readings.
-//
-// headingDeg: compass heading (deg), where 0=N, 90=E. Can be wrapped or continuous.
-// avgCmSigned: signed forward/back travel (cm), typically OdometryData.avgCmSigned.
+// CONTRACT: Continuous integration step; call once per loop with latest heading and signed travel.
 void worldOdomUpdate(WorldOdomState& s, float headingDeg, float avgCmSigned);

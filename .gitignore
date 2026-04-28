@@ -2,7 +2,7 @@
 .piohome/
 .vscode/
 *.code-workspace
+scripts/
 platformio_override.ini
 src/esp/wifi_secrets.h
 src/mega/secrets.h
-.codex

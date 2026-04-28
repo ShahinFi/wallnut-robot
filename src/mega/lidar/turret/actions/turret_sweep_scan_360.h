@@ -6,30 +6,23 @@ class TurretMotor;
 class TurretAngleTracker;
 class Lidar;
 
-// TurretSweepScan360: rotate turret by one revolution (based on calibrated ticks/rev)
-// while emitting (angle, distance) samples.
-//
-// Notes:
-// - Uses encoder ticks as the stop condition (not time).
-// - Keeps motor command constant (open-loop), with a safety timeout.
-// - Sampling cadence is tick-based (auto: ~targetSamplesPerRev samples per rev).
+// WHY: Runs a one-revolution turret sweep and emits angle-distance samples.
+// CONTRACT: Sweep completion is tick-based with timeout safety fallback.
 class TurretSweepScan360 {
 public:
   struct Config {
-    float cmdAbs = 0.25f;               // motor command magnitude (0..1)
-    uint32_t timeoutMs = 12000;         // safety stop
-    // Sampling control (tick domain):
-    // - sampleEveryTicks=1 => emit as often as LiDAR results are ready (no extra downsampling)
-    // - sampleEveryTicks=0 => auto-select based on targetSamplesPerRev
+    float cmdAbs = 0.25f;
+    uint32_t timeoutMs = 12000;
+    // CONTRACT: sampleEveryTicks==0 enables auto cadence from targetSamplesPerRev.
     uint16_t sampleEveryTicks = 1;
-    uint16_t targetSamplesPerRev = 360; // used only when sampleEveryTicks==0
+    uint16_t targetSamplesPerRev = 360;
   };
 
   struct Sample {
     uint32_t seq = 0;
     long ticksAbs = 0;
-    float angleDeg = 0.0f;   // turret-to-body angle (wrapped 0..360)
-    float distanceCm = 0.0f; // caller-provided
+    float angleDeg = 0.0f;
+    float distanceCm = 0.0f;
     uint32_t ms = 0;
   };
 
@@ -44,12 +37,11 @@ public:
 
   void setSampleCallback(SampleCallback cb, void* user);
 
-  // Start a 1-rev sweep. dirSign selects direction (+1 or -1).
-  // ticksPerRev is taken from the provided angle tracker.
+  // CONTRACT: Starts one sweep using calibration from the provided angle tracker.
   void begin(TurretMotor* motor, TurretAngleTracker* angleTracker,
              Lidar* lidar, int dirSign, long ticksAbsNow, uint32_t nowMs);
 
-  // Tick with latest sensor values. Returns true when finished (any terminal state).
+  // CONTRACT: Returns true when the sweep reaches any terminal state.
   bool update(long ticksAbsNow, uint32_t nowMs);
 
   void cancel();
@@ -80,7 +72,7 @@ private:
 
   uint32_t startMs_;
 
-  // LiDAR measurement stamping (for latency compensation).
+  // WHY: LiDAR measurement stamping (for latency compensation).
   bool lidarInFlight_;
   long lidarTicksStart_;
   uint32_t finishGraceStartMs_;

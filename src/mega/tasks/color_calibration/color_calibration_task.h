@@ -12,13 +12,15 @@ public:
   ColorCalibrationTask();
 
   void begin();
-  void cancel();  // immediate exit (for serial control / safety)
+  // CONTRACT: Immediately exits calibration flow for serial control and safety paths.
+  void cancel();
   void update(const ColorRgb* live, bool liveValid);
   void onButtonPress(const ColorRgb* live, bool liveValid);
   bool loadFromEeprom();
   bool hasCalibration() const;
   const ColorRgb* refs() const;
-  bool consumeJustSaved();  // true once after a successful saveToEeprom_()
+  // CONTRACT: Returns true exactly once after a successful EEPROM save.
+  bool consumeJustSaved();
 
   bool active() const;
   State state() const;

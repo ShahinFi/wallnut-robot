@@ -14,7 +14,7 @@ public:
 
   bool begin();
 
-  // Reads and returns normalized RGB (0..255). Returns false on failure.
+  // CONTRACT: Output channels are normalized to [0,255]; returns false when normalization is invalid.
   bool read(ColorRgb& out);
 
 private:

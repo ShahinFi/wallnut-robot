@@ -8,16 +8,11 @@ function precomputeRot(headingDeg) {
 
 function bodyDeltaToMap(rot, xb, yb) {
   const { c, s } = rot;
-  // Same as Mega mapping/frame_conventions.h:
-  // East  = s*xb + c*yb
-  // North = c*xb - s*yb
+  // CONTRACT: Transform must match Mega `mapping/frame_conventions.h`.
   return { x: s * xb + c * yb, y: c * xb - s * yb };
 }
 
-// 3-state scan-to-map scoring:
-// - reward OCC/OCC and FREE/FREE
-// - penalize OCC/FREE conflicts (either direction)
-// - UNKNOWN is neutral
+// WHY: 3-state scoring rewards OCC/OCC and FREE/FREE, penalizes OCC/FREE, ignores UNKNOWN.
 function scorePose(pose, rot, scanSamples, grid, cfg) {
   const ox = cfg?.lidarOffset?.x_cm || 0;
   const oy = cfg?.lidarOffset?.y_cm || 0;
@@ -27,7 +22,7 @@ function scorePose(pose, rot, scanSamples, grid, cfg) {
   const minDistCm = cfg?.minDistCm ?? 2;
   const maxDistCm = cfg?.maxDistCm ?? 250;
 
-  // Sensor origin in world frame.
+  // WHY: Sensor origin in world frame.
   const oMap = bodyDeltaToMap(rot, ox, oy);
   const x0 = pose.x + oMap.x;
   const y0 = pose.y + oMap.y;
@@ -48,13 +43,12 @@ function scorePose(pose, rot, scanSamples, grid, cfg) {
     const x1 = pose.x + eMap.x;
     const y1 = pose.y + eMap.y;
 
-    // If endpoint is outside the map, treat this beam as "free until boundary"
-    // (no occupied endpoint evidence).
+    // WHY: Out-of-bounds endpoint contributes only free-space evidence to boundary.
     const clipped = clipEndpointToMap(grid, x0, y0, x1, y1);
     const hasOccEndpoint = clipped.clipped === false;
     const endCell = hasOccEndpoint ? grid.worldToCell(x1, y1) : null;
 
-    // Ray free-space evidence: cells along the ray, excluding the occupied endpoint cell.
+    // WHY: Ray free-space evidence: cells along the ray, excluding the occupied endpoint cell.
     forEachCellOnSegmentWorld(grid, x0, y0, clipped.x, clipped.y, (cx, cy) => {
       if (hasOccEndpoint && endCell && cx === endCell.cx && cy === endCell.cy) return false;
       const st = grid.cellState(cx, cy);
@@ -63,7 +57,7 @@ function scorePose(pose, rot, scanSamples, grid, cfg) {
       return true;
     });
 
-    // Endpoint occupied evidence (only when endpoint is in-bounds).
+    // CONTRACT: Endpoint occupied evidence (only when endpoint is in-bounds).
     if (hasOccEndpoint && endCell) {
       const st = grid.cellState(endCell.cx, endCell.cy);
       if (st === "occ") score += wOccHit;
@@ -90,7 +84,7 @@ export function searchWindow(scanSamples, grid, window, matchCfg) {
 
   let best = { ok: false, pose: { x: 0, y: 0, headingDeg: 0 }, score: -1 };
 
-  // Keep it bounded; initial localization can still be "wide" but must not explode.
+  // CONTRACT: Keep it bounded; initial localization can still be "wide" but must not explode.
   const kMaxCandidates = matchCfg?.maxCandidates ?? 45000;
   let candidates = 0;
 
@@ -99,7 +93,7 @@ export function searchWindow(scanSamples, grid, window, matchCfg) {
     const rot = precomputeRot(headingDeg);
     for (let x = w.xMin; x <= w.xMax + 1e-6; x += stepX) {
       for (let y = w.yMin; y <= w.yMax + 1e-6; y += stepY) {
-          // Fundamentally reject candidates outside the map or inside wall grids
+          // CONTRACT: Reject candidates outside map bounds or inside occupied wall cells.
           if (x < 0 || x >= grid.mapW_cm || y < 0 || y >= grid.mapH_cm) continue;
           const c = grid.worldToCell(x, y);
           if (!c || grid.cellState(c.cx, c.cy) === "occ") continue;
@@ -114,15 +108,8 @@ export function searchWindow(scanSamples, grid, window, matchCfg) {
   return best;
 }
 
-// Rectangle-wall initializer scoring (endpoint-only, distance-based).
-//
-// For initial localization against a known empty rectangle, grid occupancy
-// agreement is brittle (most cells are UNKNOWN). Instead, score how close scan
-// endpoints land to the rectangle perimeter.
-//
-// Score is the average of a Gaussian kernel in [0..1] over valid endpoints:
-//   contrib = exp(-0.5 * (d/sigma)^2)
-// where d is distance-to-closest-wall in cm (works inside or slightly outside).
+// CONTRACT: Rectangle-wall initializer scoring (endpoint-only, distance-based).
+// WHY: Initial localization scores endpoint distance to rectangle walls via Gaussian kernel.
 function scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, cfg) {
   const ox = cfg?.lidarOffset?.x_cm || 0;
   const oy = cfg?.lidarOffset?.y_cm || 0;
@@ -130,7 +117,7 @@ function scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, cfg) {
   const maxDistCm = cfg?.maxDistCm ?? 250;
   const sigmaCm = Math.max(0.1, Number(cfg?.wallSigmaCm ?? 1.5));
 
-  // Sensor origin in world frame.
+  // WHY: Sensor origin in world frame.
   const oMap = bodyDeltaToMap(rot, ox, oy);
   const xBase = pose.x + oMap.x;
   const yBase = pose.y + oMap.y;
@@ -154,9 +141,7 @@ function scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, cfg) {
     const x1 = pose.x + eMap.x;
     const y1 = pose.y + eMap.y;
 
-    // Distance to rectangle boundary, allowing slight overshoot.
-    // For inside points, distance is min to one of the four walls.
-    // For outside points, distance is shortest distance back to the rectangle.
+    // WHY: Boundary distance works for both inside and slight outside overshoot points.
     const xCl = clamp(x1, 0, mapW_cm);
     const yCl = clamp(y1, 0, mapH_cm);
     const outside = (x1 < 0 || x1 > mapW_cm || y1 < 0 || y1 > mapH_cm);
@@ -167,7 +152,7 @@ function scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, cfg) {
       d = Math.min(x1, mapW_cm - x1, y1, mapH_cm - y1);
     }
 
-    // Gaussian reward; 1 at wall, decays smoothly with distance.
+    // WHY: Gaussian reward; 1 at wall, decays smoothly with distance.
     const z = d / sigmaCm;
     const contrib = Math.exp(-0.5 * z * z);
     sum += contrib;
@@ -188,7 +173,7 @@ export function searchWindowRectWalls(scanSamples, grid, window, matchCfg) {
 
   let best = { ok: false, pose: { x: 0, y: 0, headingDeg: 0 }, score: -Infinity };
 
-  // Keep it bounded; initial localization can still be "wide" but must not explode.
+  // CONTRACT: Keep it bounded; initial localization can still be "wide" but must not explode.
   const kMaxCandidates = matchCfg?.maxCandidates ?? 45000;
   let candidates = 0;
 
@@ -197,7 +182,7 @@ export function searchWindowRectWalls(scanSamples, grid, window, matchCfg) {
     const rot = precomputeRot(headingDeg);
     for (let x = w.xMin; x <= w.xMax + 1e-6; x += stepX) {
       for (let y = w.yMin; y <= w.yMax + 1e-6; y += stepY) {
-          // Fundamentally reject candidates outside the map or inside wall grids
+          // CONTRACT: Reject candidates outside map bounds or inside occupied wall cells.
           if (x < 0 || x >= mapW_cm || y < 0 || y >= mapH_cm) continue;
           const c = grid.worldToCell(x, y);
           if (!c || grid.cellState(c.cx, c.cy) === "occ") continue;

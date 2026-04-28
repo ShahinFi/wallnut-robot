@@ -1,4 +1,3 @@
-// actions/drive_by_distance.cpp
 #include "actions/drive_by_distance.h"
 
 #include <math.h>
@@ -44,7 +43,7 @@ void DriveByDistance::beginByDistance(float headingDegContinuous,
 
   startMs_ = millis();
 
-  // Only allow immediate success when we actually have a distance target
+  // WHY: Only allow immediate success when we actually have a distance target
   if (targetTravelCm_ <= cfg_.distanceToleranceCm) {
     state_ = State::Succeeded;
     return;
@@ -81,8 +80,8 @@ bool DriveByDistance::update(float headingDegContinuous, float avgTravelCm) {
     return true;
   }
 
-  // Distance stop condition only when not infinite.
-  // Use ABS traveled so it behaves even if requestedSpeed is negative.
+  // WHY: Distance stop condition only when not infinite.
+  // WHY: Use ABS traveled so it behaves even if requestedSpeed is negative.
   if (!infiniteDistance_) {
     const float traveledCm = fabsf(avgTravelCm - startTravelCm_);
     remainingTravelCm_ = targetTravelCm_ - traveledCm;
@@ -94,11 +93,10 @@ bool DriveByDistance::update(float headingDegContinuous, float avgTravelCm) {
     }
   }
 
-  // HEADING HOLD (continuous/unwrapped):
-  // Do NOT wrap to [-180,180] because that will flip sign after 180° and "lose" heading.
+  // CONTRACT: Heading error uses continuous angle domain (no wrapping).
   headingErrorDeg_ = headingHoldDeg_ - headingDegContinuous;
 
-  // Base forward speed with tapering
+  // WHY: Base forward speed with tapering
   const float speedMag = fabsf(requestedSpeed_);
   float speedCmd = speedMag;
 
@@ -113,7 +111,7 @@ bool DriveByDistance::update(float headingDegContinuous, float avgTravelCm) {
   const float dir = (requestedSpeed_ >= 0.0f) ? 1.0f : -1.0f;
   const float base = speedCmd * dir * cfg_.motorForwardSign;
 
-  // Heading correction (deg -> speed)
+  // WHY: Heading correction (deg -> speed)
   float corr = 0.0f;
   if (fabsf(headingErrorDeg_) > cfg_.headingDeadbandDeg) {
     corr = cfg_.kpHeading * cfg_.headingCorrectionSign * headingErrorDeg_;
@@ -121,11 +119,11 @@ bool DriveByDistance::update(float headingDegContinuous, float avgTravelCm) {
   if (corr >  cfg_.maxCorrection) corr =  cfg_.maxCorrection;
   if (corr < -cfg_.maxCorrection) corr = -cfg_.maxCorrection;
 
-  // Differential steering
+  // WHY: Differential steering
   float leftCmd  = base - corr;
   float rightCmd = base + corr;
 
-  // IMPORTANT: clamp outputs after correction so motorDrive never sees >1 or <-1.
+  // CONTRACT: clamp outputs after correction so motorDrive never sees >1 or <-1.
   leftCmd  = clampSigned1(leftCmd);
   rightCmd = clampSigned1(rightCmd);
 
@@ -182,7 +180,7 @@ float DriveByDistance::computeForwardSpeed(float requestedSpeed, float remaining
   if (cfg_.slowDownCm <= 0.0f) return speed;
   if (remainingCmAbs >= cfg_.slowDownCm) return speed;
 
-  // Taper linearly to minSpeed
+  // WHY: Taper linearly to minSpeed
   const float t = remainingCmAbs / cfg_.slowDownCm; // 0..1
   float tapered = cfg_.minSpeed + t * (speed - cfg_.minSpeed);
 
@@ -191,3 +189,4 @@ float DriveByDistance::computeForwardSpeed(float requestedSpeed, float remaining
 
   return tapered;
 }
+

@@ -1,6 +1,5 @@
-// Lightweight debug timeline:
-// - Shows local browser events (cmd/scan/poll) and optionally ESP-side logs via /debuglog.
-// - Designed to be opt-in (only active when the <details> is open or ?debug=1).
+// SECTION: Optional browser/ESP debug timeline.
+// CONTRACT: Debug logging is opt-in and must not affect robot behavior.
 
 (function initDebugLog() {
   const el = document.getElementById("debugLog");
@@ -17,6 +16,7 @@
   const qs = new URLSearchParams(window.location.search);
   const pollEsp = qs.get("espdebug") === "1" || qs.get("espdebug") === "true";
 
+  // SECTION: Render and append helpers.
   function ts() {
     const d = new Date();
     const hh = String(d.getHours()).padStart(2, "0");
@@ -39,10 +39,11 @@
   }
 
   async function pollOnce() {
+    // SECTION: Optional ESP log stream cycle.
     if (!enabled) return;
     if (!pollEsp) return;
     if (window.NetGate && !window.NetGate.allow("debug")) return;
-    // Never compete with scan transport; scan can be bandwidth-heavy.
+    // CONTRACT: Debug polling must yield to scan transport.
     if (window.NetGate && window.NetGate.mode() === "scan") return;
 
     let res;
@@ -68,6 +69,7 @@
   }
 
   function start() {
+    // CONTRACT: Start is idempotent and creates at most one active poll loop.
     if (enabled) return;
     enabled = true;
     push("dbg", "enabled");
@@ -99,7 +101,7 @@
     push("dbg", "disabled");
   }
 
-  // Export for other modules.
+  // SECTION: Public debug API.
   window.DebugLog = {
     push,
     enabled: () => enabled,
@@ -107,7 +109,7 @@
     disable: stop,
   };
 
-  // Auto-enable via query param or when details is opened.
+  // WHY: Allow quick enable via query param or debug panel toggle.
   const want = qs.get("debug");
   if (want === "1" || want === "true") start();
 

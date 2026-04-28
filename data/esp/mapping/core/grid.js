@@ -1,17 +1,18 @@
 export class HitGrid {
+  // SECTION: Discrete occupancy grid in map/world frame (cm -> cell indices).
   constructor(mapW_cm, mapH_cm, cell_cm) {
     this.mapW_cm = mapW_cm;
     this.mapH_cm = mapH_cm;
     this.cell_cm = cell_cm;
     this.w = Math.ceil(mapW_cm / cell_cm);
     this.h = Math.ceil(mapH_cm / cell_cm);
-    // Log-odds style occupancy grid (browser-side, 3-state: UNKNOWN/FREE/OCC).
-    // 0 ~= UNKNOWN, positive ~= OCC, negative ~= FREE.
+    // WHY: Log-odds style occupancy grid (browser-side, 3-state: UNKNOWN/FREE/OCC).
+    // WHY: 0 ~= UNKNOWN, positive ~= OCC, negative ~= FREE.
     this.cells = new Int16Array(this.w * this.h);
-    // Immutable cell mask: 1 => do not modify log-odds (e.g., fixed outer walls).
+    // CONTRACT: Immutable cell mask: 1 => do not modify log-odds (e.g., fixed outer walls).
     this.locked = new Uint8Array(this.w * this.h);
 
-    // Tunable thresholds (kept as properties so tests/experiments can adjust).
+    // WHY: Tunable thresholds (kept as properties so tests/experiments can adjust).
     this.occThreshold = 8;
     this.freeThreshold = -8;
     this.minLogOdds = -80;
@@ -19,6 +20,7 @@ export class HitGrid {
   }
 
   clear() {
+    // CONTRACT: Clearing also resets lock mask; caller must reseed immutable walls.
     this.cells.fill(0);
     this.locked.fill(0);
   }
@@ -38,6 +40,7 @@ export class HitGrid {
   }
 
   worldToCell(x_cm, y_cm) {
+    // CONTRACT: Out-of-bounds world coordinates map to `null` (never clamped).
     if (!Number.isFinite(x_cm) || !Number.isFinite(y_cm)) return null;
     if (x_cm < 0 || y_cm < 0) return null;
     if (x_cm >= this.mapW_cm || y_cm >= this.mapH_cm) return null;
@@ -57,7 +60,7 @@ export class HitGrid {
   hit(cx, cy) {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return 0;
     const v = this.cells[this._idx(cx, cy)];
-    // Renderer expects a non-negative intensity. Show only occupied strength.
+    // CONTRACT: Renderer expects a non-negative intensity. Show only occupied strength.
     return v > 0 ? v : 0;
   }
 

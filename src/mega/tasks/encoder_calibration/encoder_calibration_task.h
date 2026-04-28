@@ -5,7 +5,7 @@
 #include "actions/drive_by_distance.h"
 #include "tasks/encoder_calibration/ui/encoder_calibration_ui.h"
 
-// EncoderCalibrationTask: calibrate distance per encoder pulse using LiDAR.
+// WHY: EncoderCalibrationTask: calibrate distance per encoder pulse using LiDAR.
 class EncoderCalibrationTask {
 public:
   enum class State : uint8_t { Idle, CheckStart, Driving, Compute, Save, Succeeded, Failed, Cancelled };
@@ -21,7 +21,7 @@ public:
   bool active() const;
   State state() const;
 
-  // Read last calibrated value (cm per pulse)
+  // WHY: Read last calibrated value (cm per pulse)
   float calibratedCmPerPulse() const;
 
 private:

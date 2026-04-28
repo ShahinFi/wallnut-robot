@@ -4,14 +4,14 @@
 #include <math.h>
 #include "odometry/odometry.h"
 
-// --- MOTORS ---
-// H-bridge control: direction pins + PWM pins per wheel
+// SECTION: MOTORS
+// WHY: H-bridge control: direction pins + PWM pins per wheel
 static const int kMotorLeftDirPin  = 15;
 static const int kMotorRightDirPin = 7;
 static const int kMotorLeftPwmPin  = 5;
 static const int kMotorRightPwmPin = 6;
 
-// Per-wheel calibration scale factors (defaults: no scaling)
+// WHY: Per-wheel calibration scale factors (defaults: no scaling)
 static float gLeftScale  = 0.5f;
 static float gRightScale = 0.5f;
 
@@ -37,13 +37,13 @@ void motorInit() {
   pinMode(kMotorLeftPwmPin, OUTPUT);
   pinMode(kMotorRightPwmPin, OUTPUT);
 
-  // Stop motors
+  // WHY: Stop motors
   driveWheel(kMotorLeftDirPin,  kMotorLeftPwmPin,  0.0f);
   driveWheel(kMotorRightDirPin, kMotorRightPwmPin, 0.0f);
 }
 
 void motorSetScale(float leftScale, float rightScale) {
-  // Keep scales sane (avoid reversing here; direction is handled by cmd sign)
+  // WHY: Keep scales sane (avoid reversing here; direction is handled by cmd sign)
   if (!isfinite(leftScale)  || leftScale  < 0.0f) leftScale  = 0.0f;
   if (!isfinite(rightScale) || rightScale < 0.0f) rightScale = 0.0f;
 
@@ -66,7 +66,7 @@ void motorDrive(float leftCmd, float rightCmd) {
 
   odometrySetWheelDirection(lastLeftSign, lastRightSign);
 
-  // Apply wheel compensation scaling, then clamp to [-1..1]
+  // WHY: Apply wheel compensation scaling, then clamp to [-1..1]
   const float left  = clampCmd(leftCmd  * gLeftScale);
   const float right = clampCmd(rightCmd * gRightScale);
 

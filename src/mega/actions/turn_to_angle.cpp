@@ -28,7 +28,7 @@ void TurnToAngle::begin(float currentHeadingDegContinuous, float deltaDeg, float
   remainingDeg_ = deltaDeg;
   startMs_ = millis();
 
-  // If already basically at target, finish immediately
+  // WHY: If already basically at target, finish immediately
   if (fabsf(deltaDeg) <= cfg_.toleranceDeg) {
     state_ = State::Succeeded;
     return;
@@ -45,7 +45,7 @@ void TurnToAngle::beginShortestDelta(float currentHeadingDegContinuous, float de
 }
 
 bool TurnToAngle::update(float currentHeadingDegContinuous) {
-  // “Finished” means caller doesn't need to keep calling.
+  // CONTRACT: Non-running states are terminal for this tick API.
   if (state_ != State::Running) return true;
 
   const uint32_t now = millis();
@@ -67,10 +67,10 @@ bool TurnToAngle::update(float currentHeadingDegContinuous) {
 
   const float speedCmd = computeSpeedCmd(requestedSpeed_, remainingAbs);
 
-  // Spin direction comes from sign of remaining
+  // CONTRACT: Turn direction follows the sign of remaining heading error.
   const float wheelCmd = copysignf(speedCmd, remaining) * cfg_.motorTurnSign;
 
-  // In-place turn
+  // CONTRACT: In-place turn uses equal/opposite wheel commands.
   motorDrive(wheelCmd, -wheelCmd);
 
   return false;
@@ -101,24 +101,25 @@ void TurnToAngle::stopMotors() {
 }
 
 float TurnToAngle::computeSpeedCmd(float requestedSpeed, float remainingAbs) const {
-  // Cap to maxSpeed
+  // SECTION: Speed shaping.
   float speed = requestedSpeed;
   if (speed > cfg_.maxSpeed) speed = cfg_.maxSpeed;
 
-  // If no tapering requested, return capped speed
+  // WHY: No taper configured; use capped requested speed.
   if (cfg_.slowDownDeg <= 0.0f) return speed;
 
-  // Far from target: full capped speed
+  // WHY: Far from target uses full capped speed.
   if (remainingAbs >= cfg_.slowDownDeg) return speed;
 
-  // Near target: taper down toward minSpeed (but never exceed speed)
+  // WHY: Near target tapers speed toward minSpeed for smoother settle.
   const float t = remainingAbs / cfg_.slowDownDeg; // 0..1
   float tapered = cfg_.minSpeed + t * (speed - cfg_.minSpeed);
 
-  // Ensure bounds and don't exceed requested/capped speed
+  // CONTRACT: Tapered output stays within [minSpeed, capped requested speed].
   if (tapered < 0.0f) tapered = 0.0f;
   if (tapered < cfg_.minSpeed) tapered = cfg_.minSpeed;
   if (tapered > speed) tapered = speed;
 
   return tapered;
 }
+

@@ -4,18 +4,19 @@
 #include <math.h>
 
 namespace {
-static const uint16_t kMagicV1 = 0x7ECA;  // Turret Encoder CAl (legacy: single tpr)
-static const uint16_t kMagicV2 = 0x7ECC;  // Turret Encoder CAl (v2: pos+neg)
-static const int kEepromAddr = 64;      // keep distinct from other modules using EEPROM
-static const uint32_t kMinTicksPerRev = 10;      // sanity: must rotate enough to measure
-static const uint32_t kMaxTicksPerRev = 200000;  // sanity: avoid accidental multi-turn save
+// SECTION: EEPROM layout and calibration bounds
+static const uint16_t kMagicV1 = 0x7ECA;
+static const uint16_t kMagicV2 = 0x7ECC;
+static const int kEepromAddr = 64;
+static const uint32_t kMinTicksPerRev = 10;
+static const uint32_t kMaxTicksPerRev = 200000;
 
 static float wrapDeg360(float deg) {
   while (deg < 0.0f) deg += 360.0f;
   while (deg >= 360.0f) deg -= 360.0f;
   return deg;
 }
-}  // namespace
+}
 
 TurretEncoderCal::TurretEncoderCal()
 : hasCalibration_(false),
@@ -30,7 +31,7 @@ bool TurretEncoderCal::loadFromEeprom() {
   EEPROM.get(kEepromAddr, magic);
 
   if (magic == kMagicV1) {
-    // Legacy single-value layout.
+    // WHY: Legacy single-value layout.
     uint32_t tpr = 0;
     EEPROM.get(kEepromAddr + (int)sizeof(magic), tpr);
     if (tpr < kMinTicksPerRev || tpr > kMaxTicksPerRev) {
@@ -77,7 +78,7 @@ bool TurretEncoderCal::loadFromEeprom() {
 bool TurretEncoderCal::hasCalibration() const { return hasCalibration_; }
 
 bool TurretEncoderCal::setTicksPerRev(uint32_t ticksPerRev) {
-  // Manual override + persist (same for both directions).
+  // WHY: Manual override persists one shared value for both directions.
   if (ticksPerRev < kMinTicksPerRev || ticksPerRev > kMaxTicksPerRev) return false;
   active_ = false;
   if (!saveToEeprom_(ticksPerRev, ticksPerRev)) return false;
@@ -124,7 +125,7 @@ bool TurretEncoderCal::finish(long ticksAbsNow) {
   const uint32_t tpr = (uint32_t)dt;
   if (tpr < kMinTicksPerRev || tpr > kMaxTicksPerRev) return false;
 
-  // Manual encoder-only calibration is direction-agnostic.
+  // WHY: Manual encoder-only calibration is direction-agnostic.
   if (!saveToEeprom_(tpr, tpr)) return false;
 
   hasCalibration_ = true;
@@ -159,8 +160,7 @@ void TurretEncoderCal::setZeroTicks(long ticksAbsNow) {
 long TurretEncoderCal::zeroTicks() const { return zeroTicksAbs_; }
 
 float TurretEncoderCal::angleDeg(long ticksAbsNow) const {
-  // This "monotonic angle" is based on absolute ticks only, so direction doesn't apply.
-  // Use + calibration (pos) as a representative deg/tick.
+  // CONTRACT: Monotonic angle uses absolute tick delta and positive-direction calibration.
   if (!hasCalibration_ || ticksPerRevPos_ == 0) return 0.0f;
   const long dt = ticksAbsNow - zeroTicksAbs_;
   const float deg = (float)dt * degPerTickPos();

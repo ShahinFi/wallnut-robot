@@ -1,5 +1,5 @@
 #include "esp_static_files.h"
-// (Refactor) HTTP module implementation.
+// SECTION: Static file serving helpers.
 
 #include <LittleFS.h>
 #include <string.h>
@@ -19,18 +19,16 @@ const char* contentTypeForPath(const String& path) {
 
 void serveFile(ESP8266WebServer& server, const char* path, const char* contentType) {
   File file = LittleFS.open(path, "r");
-  // Support both filesystem layouts:
-  // - older: files stored under /esp/*
-  // - newer/clean uploadfs: files stored at the filesystem root
+  // WHY: Keep backward compatibility with both filesystem layouts.
   if (!file && path && strncmp(path, "/esp/", 5) == 0) {
-    file = LittleFS.open(path + 4, "r");  // strip "/esp"
+    // WHY: Strip "/esp" to support legacy root-level uploaded files.
+    file = LittleFS.open(path + 4, "r");
   }
   if (!file) {
     server.send(404, "text/plain", "File not found");
     return;
   }
-  // Avoid stale UI code during development; ESP caching behavior varies by client.
-  // (If you want caching later, make it explicit with versioned asset URLs.)
+  // CONTRACT: Disable cache to avoid stale UI assets across clients.
   server.sendHeader("Cache-Control", "no-store");
   server.streamFile(file, contentType);
   file.close();
@@ -42,12 +40,12 @@ bool tryServeStaticUri(ESP8266WebServer& server, const String& uri) {
   if (uri == "/events") return false;
   if (uri.indexOf("..") >= 0) return false;
 
-  // If client asks "/foo", treat as "/foo" and also allow "/esp/foo" style.
+  // WHY: Accept both root and legacy /esp-prefixed asset paths.
   const char* ct = contentTypeForPath(uri);
   String pathToServe = uri;
   File f = LittleFS.open(pathToServe, "r");
   if (!f && uri.startsWith("/")) {
-    // also try legacy /esp prefix
+    // WHY: Legacy fallback for older uploaded filesystems.
     pathToServe = String("/esp") + uri;
     f = LittleFS.open(pathToServe, "r");
   }
@@ -58,4 +56,4 @@ bool tryServeStaticUri(ESP8266WebServer& server, const String& uri) {
   return true;
 }
 
-}  // namespace esp_static_files
+}

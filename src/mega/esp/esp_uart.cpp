@@ -14,8 +14,8 @@ static bool parseLine(const String& line, EspCommand& out) {
 
   if (s.startsWith("Passcode:")) {
     out.type = EspCommand::Type::Passcode;
-    // Robust: parse digits without allocating substrings, keep only the last 4 digits.
-    // This avoids fragile String heap behavior and tolerates occasional UART garbage.
+    // WHY: Robust: parse digits without allocating substrings, keep only the last 4 digits.
+    // WHY: This avoids fragile String heap behavior and tolerates occasional UART garbage.
     int acc = 0;
     int digits = 0;
     for (int i = 9; i < s.length(); i++) {
@@ -98,8 +98,8 @@ static bool parseLine(const String& line, EspCommand& out) {
   }
   if (s.startsWith("TurretTpr:")) {
     out.type = EspCommand::Type::TurretTpr;
-    // Expected: "TurretTpr:<pos>,<neg>"
-    // Parse in-place (no substring allocations): digits only, comma separator.
+    // CONTRACT: Parses "TurretTpr:<pos>,<neg>" with digits-only extraction.
+    // WHY: In-place parse avoids substring allocations and reduces heap churn on AVR.
     long pos = 0;
     long neg = 0;
     bool hasPos = false;
@@ -167,7 +167,7 @@ bool espPoll(EspCommand& out) {
       }
     } else {
       if (espInput.length() >= kMaxEspLineLen) {
-        // Drop overly long/noisy lines to avoid unbounded heap growth.
+        // WHY: Drop overly long/noisy lines to avoid unbounded heap growth.
         espInput = "";
         continue;
       }

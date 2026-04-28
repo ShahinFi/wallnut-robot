@@ -1,5 +1,5 @@
-// Telemetry snapshot polling manager (classic script).
-// Polls GET /telemetry and updates window.TelemetryStore.
+// WHY: Telemetry snapshot polling manager (classic script).
+// WHY: Polls GET /telemetry and updates window.TelemetryStore.
 
 (function initTelemetryManager() {
   if (window.TelemetryManager) return;
@@ -15,7 +15,9 @@
   let timer = 0;
   let inFlight = false;
 
+  // SECTION: Telemetry packet parsers.
   function parseRgbRefs_(s) {
+    // SECTION: Parse `REFS:r,g,b;...` calibration snapshot.
     const text = String(s || "").trim();
     if (!text.startsWith("REFS:")) return null;
     const payload = text.substring(5).trim();
@@ -35,6 +37,7 @@
   }
 
   function parseRgbClass_(s) {
+    // SECTION: Parse `CLASS:n` color classifier output.
     const text = String(s || "").trim();
     if (!text.startsWith("CLASS:")) return 0;
     const v = parseInt(text.substring(6), 10);
@@ -42,6 +45,7 @@
   }
 
   function parseRgb_(s) {
+    // SECTION: Parse `RGB:r,g,b` live sensor packet.
     const text = String(s || "").trim();
     if (!text.startsWith("RGB:")) return { r: null, g: null, b: null, raw: text };
     const parts = text.substring(4).split(",");
@@ -54,6 +58,7 @@
   }
 
   function parseCompass_(s) {
+    // SECTION: Parse `deg,label` compact compass packet.
     const text = String(s || "").trim();
     if (!text || text === "--") return { deg: NaN, label: "", raw: text };
     const parts = text.split(",");
@@ -63,6 +68,7 @@
   }
 
   function parseOdom_(s) {
+    // SECTION: Parse `ODOM:east,north` world-frame pose packet.
     const text = String(s || "").trim();
     if (!text.startsWith("ODOM:")) return { e: NaN, n: NaN, raw: text };
     const payload = text.substring(5);
@@ -74,6 +80,7 @@
   }
 
   function parseLidarCm_(s) {
+    // SECTION: Parse `LIDAR:cm,...` packet (first numeric field is distance).
     const text = String(s || "").trim();
     if (!text.startsWith("LIDAR:")) return { cm: NaN, raw: text };
     const first = text.includes(",") ? text.split(",")[0] : text;
@@ -82,6 +89,7 @@
   }
 
   async function fetchJsonWithTimeout_(url, timeoutMs) {
+    // CONTRACT: Network failures and timeouts degrade to `null` without throwing.
     const t = Number(timeoutMs);
     const ms = Number.isFinite(t) && t > 0 ? t : 1500;
     if (typeof AbortController !== "function") {
@@ -105,9 +113,10 @@
   }
 
   async function pollOnce() {
+    // SECTION: One telemetry snapshot cycle.
     if (!enabled) return;
     if (inFlight) return;
-    // Respect scan bandwidth priority (mapping uses NetGate today).
+    // CONTRACT: Yield telemetry polling when scan bandwidth is prioritized.
     if (window.NetGate) {
       const ok = window.NetGate.allow("telemetry") || window.NetGate.allow("pose");
       if (!ok) return;
@@ -125,6 +134,7 @@
       const rgbClass = parseRgbClass_(j.rgb_class);
       const rgbRefs = parseRgbRefs_(j.rgb_refs);
 
+      // CONTRACT: TelemetryStore receives one atomic snapshot per poll cycle.
       store.set({
         telemetry: {
           lidarCm: lidar.cm,
@@ -149,6 +159,7 @@
   }
 
   function scheduleNext_() {
+    // CONTRACT: Poll loop must not overlap; each cycle schedules after completion.
     if (!enabled) return;
     timer = setTimeout(async () => {
       await pollOnce();
@@ -157,6 +168,7 @@
   }
 
   function start() {
+    // CONTRACT: Start is idempotent while timer is active.
     if (timer) return;
     enabled = true;
     scheduleNext_();
@@ -169,6 +181,7 @@
   }
 
   function setPeriod(ms) {
+    // CONTRACT: Poll period is clamped to avoid pathological tight loops.
     const v = Number(ms);
     if (!Number.isFinite(v) || v <= 0) return;
     periodMs = Math.max(50, Math.floor(v));
@@ -176,3 +189,4 @@
 
   window.TelemetryManager = { start, stop, setPeriod, pollOnce, _state: () => ({ enabled, periodMs, inFlight }) };
 })();
+

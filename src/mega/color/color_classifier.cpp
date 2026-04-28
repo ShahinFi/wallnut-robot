@@ -4,6 +4,7 @@
 
 namespace color {
 namespace {
+// SECTION: Normalized RGB distance helpers
 
 static float distSqNormalizedRgb_(const ColorRgb& a, const ColorRgb& b) {
   float ar = (float)a.r, ag = (float)a.g, ab = (float)a.b;
@@ -29,7 +30,7 @@ static float clampNonNeg_(float v) {
   return v;
 }
 
-}  // namespace
+}
 
 ClassifyResult classifyNearest(const ColorRgb& live, const ColorRgb* refs, uint8_t refCount,
                               const ClassifyConfig& cfg) {
@@ -40,7 +41,7 @@ ClassifyResult classifyNearest(const ColorRgb& live, const ColorRgb* refs, uint8
 
   if (!refs || refCount == 0) return out;
 
-  // Find best and runner-up (by squared distance).
+  // WHY: Keep both nearest and runner-up distances for ambiguity gating.
   float best = INFINITY;
   float second = INFINITY;
   int bestIdx = -1;
@@ -62,7 +63,8 @@ ClassifyResult classifyNearest(const ColorRgb& live, const ColorRgb* refs, uint8
 
   if (bestIdx < 0) return out;
   if (!(isfinite(best) && best >= 0.0f)) return out;
-  if (!(isfinite(second) && second > 0.0f)) return out;  // need a runner-up for ratio confidence
+  // CONTRACT: Ratio confidence check requires a valid non-zero runner-up distance.
+  if (!(isfinite(second) && second > 0.0f)) return out;
 
   const float absMaxDist = clampNonNeg_(cfg.absMaxDist);
   const float ratioMax = clampNonNeg_(cfg.bestOverSecondMax);
@@ -77,5 +79,5 @@ ClassifyResult classifyNearest(const ColorRgb& live, const ColorRgb* refs, uint8
   return out;
 }
 
-}  // namespace color
+}
 

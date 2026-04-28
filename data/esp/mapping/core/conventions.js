@@ -1,21 +1,6 @@
-// Single source of truth for mapping conventions (matches Mega code).
-//
-// Map/world frame for drawing:
-// - X: +East  (right on screen)
-// - Y: +North (up on screen)
-//
-// Heading:
-// - 0 deg = North
-// - 90 deg = East
-// - clockwise positive
-//
-// Body frame:
-// - x: +Forward
-// - y: +Right
-//
-// Turret scan:
-// - angleDeg: 0 means forward
-// - positive rotates toward body +Right
+// SECTION: Mapping conventions (matches Mega code).
+// WHY: Map frame is +X east, +Y north, with heading 0=N and clockwise positive.
+// WHY: Body frame is +x forward, +y right; turret scan angle is body-relative.
 
 export function degToRad(deg) {
   return (deg * Math.PI) / 180.0;
@@ -28,15 +13,12 @@ export function wrap360(deg) {
   return d;
 }
 
-// Converts a body-frame point (xb forward, yb right) into map-frame delta (x East, y North)
-// using headingDeg where 0=N, 90=E and clockwise increasing.
+// WHY: Convert body-frame delta (forward/right) into map-frame delta (east/north).
 export function bodyToMap(headingDeg, xb, yb) {
   const h = degToRad(headingDeg);
   const c = Math.cos(h);
   const s = Math.sin(h);
-  // Same as Mega's mapping/frame_conventions.h:
-  // East  = s*xb + c*yb
-  // North = c*xb - s*yb
+  // CONTRACT: Transform must match Mega `mapping/frame_conventions.h`.
   return { x: s * xb + c * yb, y: c * xb - s * yb };
 }
 
@@ -44,4 +26,5 @@ export function polarToBody(angleDeg, r_cm) {
   const a = degToRad(angleDeg);
   return { xb: r_cm * Math.cos(a), yb: r_cm * Math.sin(a) };
 }
+
 

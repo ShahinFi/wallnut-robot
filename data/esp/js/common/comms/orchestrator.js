@@ -1,5 +1,5 @@
-// Top-level comms orchestrator (classic script).
-// Controls TelemetryManager + AlertsManager rates based on NetGate mode and whether autonomy is running.
+// WHY: Top-level comms orchestrator (classic script).
+// WHY: Controls TelemetryManager + AlertsManager rates based on NetGate mode and whether autonomy is running.
 
 (function initCommsOrchestrator() {
   if (window.CommsOrchestrator) return;
@@ -12,13 +12,18 @@
     return;
   }
 
-  // Tunables (ms). Keep them conservative and stable.
+  // SECTION: Polling period tunables (ms).
   const cfg = {
-    telemetryIdleMs: 250,   // ~4 Hz
-    telemetryCmdMs: 500,    // keep UI alive while waiting for CMDOK
-    telemetryScanMs: 2000,  // effectively paused (still alive if scan is long)
-    alertsIdleMs: 500,      // low-rate when running
-    alertsCmdMs: 140,       // responsive for reflex + cmd completion
+    // WHY: Idle telemetry runs near 4 Hz for smooth UI updates.
+    telemetryIdleMs: 250,
+    // WHY: Command mode keeps telemetry alive while awaiting command completion.
+    telemetryCmdMs: 500,
+    // WHY: Scan mode keeps telemetry nearly paused to preserve scan bandwidth.
+    telemetryScanMs: 2000,
+    // WHY: Idle alerts run at a low rate when autonomy is active.
+    alertsIdleMs: 500,
+    // WHY: Command mode alerts run fast for reflex and command completion events.
+    alertsCmdMs: 140,
     alertsOffMs: 9999999,
   };
 
@@ -28,12 +33,14 @@
   let lastKey = "";
   let lastArmed = false;
 
+  // SECTION: Policy projection helpers.
   function netMode_() {
     const g = window.NetGate;
     return g ? g.mode() : "idle";
   }
 
   function apply_() {
+    // CONTRACT: Same policy key should not re-apply timers or poll rates.
     const mode = netMode_();
     const st0 = store.get ? store.get() : null;
     const auth0 = String(st0 && st0.auth && st0.auth.state ? st0.auth.state : "DISARMED").toUpperCase();
@@ -49,6 +56,7 @@
 
     const armed = auth0 === "ARMED";
     if (!armed) {
+      // CONTRACT: Leaving ARMED state clears telemetry once to avoid stale control data.
       if (lastArmed) {
         if (typeof store.clearTelemetry === "function") store.clearTelemetry();
       }
@@ -62,7 +70,7 @@
     if (mode === "scan") {
       tm.setPeriod(cfg.telemetryScanMs);
       tm.start();
-      // During scan we pause alerts to preserve bandwidth (scan is transactional).
+      // CONTRACT: Scan mode pauses alerts to preserve scan bandwidth.
       if (am) am.stop();
       return;
     }
@@ -77,7 +85,7 @@
       return;
     }
 
-    // idle
+    // SECTION: Idle mode policy.
     tm.setPeriod(cfg.telemetryIdleMs);
     tm.start();
     if (autonomyRunning) {
@@ -116,3 +124,4 @@
 
   window.CommsOrchestrator = { start, stop, setAutonomyRunning, _cfg: cfg, _mode: netMode_ };
 })();
+

@@ -19,13 +19,13 @@
   --pad: clamp(10px, 1.2vw, 14px);
   --radius: 18px;
 
-  /* iOS safe areas */
+  /* SECTION: iOS safe areas */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
 
-  /* Viewport lock (set by js/common/viewport_lock.js). Fallback is normal vh. */
+  /* SECTION: Viewport lock (set by js/common/viewport_lock.js). Fallback is normal vh. */
   --app-h: 100vh;
   --vh: 1vh;
 }
@@ -46,18 +46,18 @@ body {
     linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px),
     radial-gradient(circle at top, #2a1244 0%, var(--bg2) 35%, var(--bg1) 100%);
   background-size: 32px 32px, 32px 32px, auto;
-  scrollbar-width: none; /* Firefox: hide page scrollbars */
+  scrollbar-width: none; /* WHY: Firefox: hide page scrollbars */
 }
 
 body {
   overflow-x: hidden;
   min-height: 100svh;
   height: 100dvh;
-  overflow-y: hidden; /* keep one scroll container (main grid) */
+  overflow-y: hidden; /* CONTRACT: keep one scroll container (main grid) */
 }
-body::-webkit-scrollbar { width: 0; height: 0; } /* WebKit: hide page scrollbars */
+body::-webkit-scrollbar { width: 0; height: 0; } /* WHY: WebKit: hide page scrollbars */
 
-/* Maze page: fixed one-screen dashboard (no page scroll). */
+/* SECTION: Maze page fixed one-screen dashboard (no page scroll). */
 body.page-maze {
   min-height: 100svh;
   height: var(--app-h);
@@ -68,7 +68,7 @@ body.page-maze .app {
   height: var(--app-h);
 }
 
-/* Main dashboard page: keep the same one-screen dashboard feel as /maze, but simpler. */
+/* SECTION: Main dashboard one-screen layout. */
 body.page-dash {
   min-height: 100svh;
   height: var(--app-h);
@@ -318,7 +318,7 @@ h2 {
   transform: scale(.98);
 }
 
-/* Short-lived action feedback (used by /maze). */
+/* WHY: Short-lived action feedback (used by /maze). */
 .button.is-flash-ok {
   background: linear-gradient(135deg, rgba(88,243,255,.95), rgba(155,107,255,.75));
   color: #12081f;
@@ -349,15 +349,15 @@ button:disabled,
 .auth-input {
   width: 100%;
   height: 44px;
-  min-width: 0; /* allow grid to shrink on narrow screens (prevents overflow) */
+  min-width: 0; /* CONTRACT: allow grid to shrink on narrow screens (prevents overflow) */
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,.18);
   background: rgba(0,0,0,.20);
   color: var(--text);
   padding: 0 12px;
   outline: none;
-  font-size: 16px; /* iOS: prevent focus zoom */
-  font-weight: 400; /* keep inputs consistent (not bold) */
+  font-size: 16px; /* CONTRACT: iOS: prevent focus zoom */
+  font-weight: 400; /* CONTRACT: keep inputs consistent (not bold) */
 }
 
 .auth-input:focus {
@@ -375,8 +375,8 @@ button:disabled,
   color: var(--text);
   padding: 0 10px;
   outline: none;
-  font-size: 16px; /* iOS: prevent focus zoom */
-  font-weight: 400; /* match passcode input */
+  font-size: 16px; /* CONTRACT: iOS: prevent focus zoom */
+  font-weight: 400; /* WHY: match passcode input */
 }
 
 .tool-input:focus {
@@ -411,7 +411,7 @@ button:disabled,
   box-shadow: 0 0 18px rgba(255,79,216,.22), 0 8px 16px rgba(0,0,0,.28);
 }
 
-/* Main dashboard: keep Movement/Turning controls visually consistent with /maze (less "neon candy"). */
+/* CONTRACT: Main dashboard: keep Movement/Turning controls visually consistent with /maze (less "neon candy"). */
 body.page-dash .fwd {
   background: linear-gradient(135deg, rgba(255,215,106,.22), rgba(255,79,216,.12));
   border: 1px solid rgba(255,215,106,.55);
@@ -646,7 +646,7 @@ body.page-dash #compassValue {
 
 @media (max-width: 680px) {
   body {
-    overflow-y: auto; /* allow natural page scroll on small screens */
+    overflow-y: auto; /* WHY: allow natural page scroll on small screens */
   }
   body.page-maze {
     height: auto;
@@ -718,7 +718,7 @@ body.page-dash #compassValue {
   box-shadow: 0 0 12px rgba(255, 255, 255, 0.2);
 }
 
-/* Utility actions (Maze / Logout) */
+/* SECTION: Utility actions (Maze / Logout) */
 .button-secondary {
   background: linear-gradient(135deg, rgba(155,107,255,.22), rgba(88,243,255,.14));
   border: 1px solid rgba(88, 243, 255, 0.45);
@@ -741,8 +741,8 @@ body.page-dash #compassValue {
   box-shadow: 0 0 16px rgba(255,95,135,.16);
 }
 
-/* Maze page layout */
-/* /maze ground-up dashboard layout (isolated from .grid/.maze-grid rules) */
+/* SECTION: Maze page layout */
+/* SECTION: /maze ground-up dashboard layout (isolated from .grid/.maze-grid rules) */
 body.page-maze .maze-topbar {
   padding: 10px 12px;
   display: grid;
@@ -819,7 +819,7 @@ body.page-maze .maze2-center .maze2-map {
   min-height: 0;
 }
 
-/* RUN should be full middle-column width (same as MAP). Height stays content-sized naturally. */
+/* WHY: RUN should be full middle-column width (same as MAP). Height stays content-sized naturally. */
 body.page-maze .maze2-center .maze2-run {
   width: 100%;
   align-self: stretch;
@@ -840,7 +840,7 @@ body.page-maze .maze2-tools {
   min-height: 0;
 }
 
-/* Wrapper that becomes a scrollable stack on small screens, but is layout-neutral on desktop. */
+/* SECTION: Wrapper that becomes a scrollable stack on small screens, but is layout-neutral on desktop. */
 body.page-maze .maze2-stack {
   display: contents;
 }
@@ -965,7 +965,7 @@ body.page-maze .status-pill {
   white-space: nowrap;
 }
 
-/* Simple form helpers (shared by /maze and main) */
+/* SECTION: Simple form helpers (shared by /maze and main) */
 body .divider {
   height: 1px;
   width: 100%;
@@ -1073,7 +1073,7 @@ body .planner-slider:focus-visible {
   box-shadow: 0 0 0 3px rgba(130, 95, 255, 0.18);
 }
 
-/* Mid-width maze layout: avoid planner label/slider collisions by stacking
+/* CONTRACT: Mid-width maze layout: avoid planner label/slider collisions by stacking
    one control per row while keeping desktop layout elsewhere. */
 @media (min-width: 981px) and (max-width: 1380px) {
   body.page-maze .planner-controls {
@@ -1217,7 +1217,7 @@ body.page-maze .maze2-status .debug-log pre {
   body.page-maze .tele-color {
     grid-column: auto;
   }
-  /* Prevent the Map panel from overflowing/covering the stack on tablets/phones. */
+  /* CONTRACT: Prevent the Map panel from overflowing/covering the stack on tablets/phones. */
   body.page-maze .map-viewport {
     flex: 0 0 auto;
     height: clamp(260px, calc(var(--vh) * 55), 560px);
@@ -1232,7 +1232,7 @@ body.page-maze .maze2-status .debug-log pre {
   }
 }
 
-/* Tablet layout: RUN full-width, then 2-up panels. */
+/* SECTION: Tablet layout: RUN full-width, then 2-up panels. */
 @media (min-width: 721px) and (max-width: 980px) {
   body.page-maze .maze2-stack {
     display: grid;
@@ -1240,7 +1240,7 @@ body.page-maze .maze2-status .debug-log pre {
     gap: 8px;
     align-content: start;
   }
-  /* Flatten wrappers so we get 4 independent boxes: Sensors, Status, Turret, Motor Encoders. */
+  /* WHY: Flatten wrappers so we get 4 independent boxes: Sensors, Status, Turret, Motor Encoders. */
   body.page-maze .maze2-sensors {
     display: contents;
   }
@@ -1249,7 +1249,7 @@ body.page-maze .maze2-status .debug-log pre {
   }
 }
 
-/* Phone layout: avoid any grid height/overflow interactions; use natural flow. */
+/* CONTRACT: Phone layout: avoid any grid height/overflow interactions; use natural flow. */
 @media (max-width: 720px) {
   body.page-maze .maze2 {
     display: flex;
@@ -1417,7 +1417,7 @@ body.page-maze .maze2-status .debug-log pre {
   overflow: auto;
 }
 
-/* Decks (right column) */
+/* SECTION: Decks (right column) */
 .deck {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1530,12 +1530,12 @@ body.page-maze .maze2-status .debug-log pre {
   max-height: 220px;
 }
 
-/* Keep the last deck anchored low when there's room, but allow scrolling when not. */
+/* CONTRACT: Keep the last deck anchored low when there's room, but allow scrolling when not. */
 .deck-logs {
   margin-top: auto;
 }
 
-/* Override old "advanced drawer" styles (no longer used) */
+/* SECTION: Override old "advanced drawer" styles (no longer used) */
 .advanced {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1577,7 +1577,7 @@ body.page-maze .maze2-status .debug-log pre {
   align-items: center;
 }
 
-/* Turret calibration button layout */
+/* SECTION: Turret calibration button layout */
 .turret-actions {
   min-width: 0;
 }
@@ -1612,3 +1612,6 @@ body.page-maze .maze2-status .debug-log pre {
     grid-column: auto;
   }
 }
+
+
+

@@ -21,7 +21,8 @@ struct EspCommand {
     Disarm
   } type;
   int value;
-  int value2;  // optional second integer payload (used by TurretTpr)
+  // WHY: Secondary integer payload used by commands that carry two numbers.
+  int value2;
   String text;
 };
 

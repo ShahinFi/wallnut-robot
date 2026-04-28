@@ -2,38 +2,26 @@
 
 #include <Arduino.h>
 
-// TurretMotor: simple DIR+PWM DC motor with a single-channel encoder (A only).
-//
-// Pins (Arduino Mega 2560):
-// - DIR: 14
-// - PWM: 4
-// - ENC_A: 18 (interrupt-capable)
-//
-// Notes:
-// - Encoder is single-channel, so it cannot infer direction; ticks are absolute
-//   (monotonic) since last hard reset.
-// - Higher-level code can combine ticks with commanded direction if it needs a
-//   signed estimate.
+// WHY: Controls turret DC motor (DIR+PWM) and tracks absolute encoder ticks.
+// CONTRACT: Single-channel encoder reports monotonic ticks and cannot infer direction by itself.
 class TurretMotor {
 public:
   TurretMotor();
 
   void begin();
 
-  // Invert wiring in software:
-  // - cmdSign = +1 (default): positive cmd drives "forward" direction
-  // - cmdSign = -1: swaps directions without changing higher-level logic
+  // WHY: Inverts direction mapping in software to match motor wiring.
   void setCmdSign(int cmdSign);
   int  cmdSign() const;
 
-  // Normalized command in [-1..1]. Sign selects direction; magnitude selects PWM.
+  // CONTRACT: Command is normalized to [-1,1], where sign selects direction and magnitude selects PWM.
   void setCmd(float cmd);
   void stop();
 
-  // Absolute encoder ticks since last ticksResetHard().
+  // WHY: Returns absolute monotonic ticks since last hard reset.
   long ticksAbs() const;
 
-  // Hard reset of tick counter to 0 (rare; intended for calibration/debug).
+  // CONTRACT: Hard-resets encoder tick counter to zero.
   void ticksResetHard();
 
   float lastCmd() const;

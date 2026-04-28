@@ -1,5 +1,5 @@
 #pragma once
-// (Refactor) Transport module: scan event buffer.
+// SECTION: Scan-event transport buffer.
 
 #include <Arduino.h>
 #include <ESP8266WebServer.h>
@@ -32,9 +32,12 @@ class ScanEvents {
   void freeBuf_();
 
   Kind* kind_ = nullptr;
-  int8_t* dir_ = nullptr;            // +1 / -1 for BEGIN, else 0
-  uint16_t* angleCdeg_ = nullptr;    // centi-degrees [0..36000]
-  uint16_t* distMm_ = nullptr;       // millimeters
+  // CONTRACT: `dir_` stores +1 / -1 for BEGIN events, otherwise 0.
+  int8_t* dir_ = nullptr;
+  // CONTRACT: `angleCdeg_` stores centi-degrees in [0..36000].
+  uint16_t* angleCdeg_ = nullptr;
+  // CONTRACT: `distMm_` stores distance in millimeters.
+  uint16_t* distMm_ = nullptr;
   uint16_t cap_ = 0;
 
   uint32_t nextSeq_ = 1;
@@ -43,4 +46,4 @@ class ScanEvents {
   bool overflow_ = false;
 };
 
-}  // namespace esp_scan_events
+}

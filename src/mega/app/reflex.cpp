@@ -7,6 +7,7 @@
 #include "color/color_classifier.h"
 
 static bool isVirtualRed_(RuntimeState& rt, const ColorRgb& live) {
+  // CONTRACT: refs[0] is treated as the virtual red obstacle class.
   if (!rt.colorCalTask.hasCalibration()) return false;
   const ColorRgb* refs = rt.colorCalTask.refs();
   if (!refs) return false;
@@ -41,6 +42,7 @@ void resetReflexLatchesForNewCommand(RuntimeState& rt) {
 }
 
 void applyReflexSafety(RuntimeState& rt, float lidarFilteredCm, const CompassData&) {
+  // CONTRACT: Reflex checks only apply during active sequence motion.
   if (!rt.seqExecTask.active()) return;
 
   const float kFrontStopCm = 10.0f;

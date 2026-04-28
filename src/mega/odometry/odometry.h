@@ -3,18 +3,18 @@
 #include <Arduino.h>
 
 struct OdometryData {
-  // Signed values depend on wheel direction hints coming from the motor layer
-  // (single-channel encoders cannot infer direction on their own).
+  // WHY: Signed values depend on wheel direction hints coming from the motor layer
+  // WHY: (single-channel encoders cannot infer direction on their own).
   long  leftPulsesSigned;
   long  rightPulsesSigned;
   float leftCmSigned;
   float rightCmSigned;
 
-  // Signed forward/backward travel (average of left/right).
+  // WHY: Signed forward/backward travel (average of left/right).
   float avgCmSigned;
 
-  // Absolute travel magnitude (average of abs(left), abs(right)), always >= 0.
-  // Note: despite the historic "total" naming, this is an average, not a sum.
+  // WHY: Absolute travel magnitude (average of abs(left), abs(right)), always >= 0.
+  // WHY: despite the historic "total" naming, this is an average, not a sum.
   float avgCmAbs;
 };
 
@@ -25,10 +25,10 @@ public:
   void  setPulsesPerMeter(float pulsesPerMeter);
   float pulsesPerMeter() const;
 
-  // Reads current encoder counts and returns distances in cm.
+  // WHY: Reads current encoder counts and returns distances in cm.
   OdometryData read() const;
 
-  // Convenience conversions (stateless)
+  // WHY: Convenience conversions (stateless)
   float pulsesToCm(long pulses) const;
   long  cmToPulses(float cm) const;
 
@@ -36,6 +36,6 @@ private:
   float pulsesPerMeter_;
 };
 
-// Provide intended wheel directions when using single-channel encoders.
-// Pass -1, 0, or +1 for each wheel (0 keeps last direction in motor layer).
+// WHY: Provide intended wheel directions when using single-channel encoders.
+// WHY: Pass -1, 0, or +1 for each wheel (0 keeps last direction in motor layer).
 void odometrySetWheelDirection(int leftSign, int rightSign);

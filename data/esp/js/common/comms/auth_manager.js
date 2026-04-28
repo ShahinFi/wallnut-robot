@@ -1,5 +1,5 @@
-// Auth + link polling manager (classic script).
-// Polls GET /auth_state and updates window.TelemetryStore.auth/link.
+// WHY: Auth + link polling manager (classic script).
+// WHY: Polls GET /auth_state and updates window.TelemetryStore.auth/link.
 
 (function initAuthManager() {
   if (window.AuthManager) return;
@@ -15,7 +15,8 @@
   let timer = 0;
   let inFlight = false;
 
-  // Simple moving average for link age (display only).
+  // SECTION: Link-age smoothing state.
+  // WHY: Smoothed link age keeps UI stable while preserving trend.
   const kMegaAgeWindow = 6;
   const megaAgeBuf = [];
 
@@ -43,6 +44,7 @@
   }
 
   function noteAge_(ageMs) {
+    // CONTRACT: Sentinel or non-finite ages collapse to null display values.
     const ok = Number.isFinite(ageMs) && ageMs !== 0xffffffff;
     if (!ok) return { age: null, avg: null };
     megaAgeBuf.push(ageMs);
@@ -53,6 +55,7 @@
   }
 
   async function pollOnce() {
+    // SECTION: One auth/link snapshot cycle.
     if (!enabled) return;
     if (inFlight) return;
     inFlight = true;
@@ -66,6 +69,7 @@
       const age = noteAge_(megaAgeMs);
 
       const pending = authText === "PENDING";
+      // CONTRACT: Auth and link snapshots are written together to keep UI state coherent.
       store.set({
         auth: { state: authText, triesLeft: Number.isFinite(triesLeft) ? triesLeft : 3, pending },
         link: { megaAgeMs: age.age, megaAgeMsAvg: age.avg },
@@ -76,6 +80,7 @@
   }
 
   function scheduleNext_() {
+    // WHY: Timeout loop gives precise control over backpressure and stop semantics.
     if (!enabled) return;
     timer = setTimeout(async () => {
       await pollOnce();
@@ -103,4 +108,5 @@
 
   window.AuthManager = { start, stop, setPeriod, pollOnce, _state: () => ({ enabled, periodMs, inFlight }) };
 })();
+
 

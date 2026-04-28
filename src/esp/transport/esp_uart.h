@@ -1,5 +1,5 @@
 #pragma once
-// (Refactor) Transport module: UART ingestion.
+// SECTION: Mega->ESP UART transport.
 
 #include <Arduino.h>
 
@@ -9,7 +9,7 @@
 
 namespace esp_uart {
 
-// Non-blocking UART poller: reads Mega->ESP lines and updates cached state.
+// CONTRACT: Non-blocking UART poller; updates shared ESP state from Mega lines.
 void poll(EspState& state, esp_scan_events::ScanEvents& scan, esp_alert_ring::AlertRing& alerts);
 
-}  // namespace esp_uart
+}

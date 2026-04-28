@@ -10,10 +10,11 @@ enum class SequenceStepType : uint8_t { MoveToDistance, MoveByDistance, TurnDeg,
 
 struct SequenceStep {
   SequenceStepType type;
-  float value;  // distance cm or turn deg depending on type
+  // CONTRACT: Value is distance in cm for move steps and angle in deg for turn steps.
+  float value;
 };
 
-// SequenceExecutorTask: executes a sequence of move/turn commands.
+// WHY: SequenceExecutorTask: executes a sequence of move/turn commands.
 class SequenceExecutorTask {
 public:
   enum class State : uint8_t { Idle, Running, Succeeded, Failed, Cancelled };
@@ -21,7 +22,7 @@ public:
   SequenceExecutorTask();
 
   void setSequence(const SequenceStep* steps);
-  // Scale applied to forward MOVE commands only (0..1). Latched by color sensor.
+  // WHY: Scale applied to forward MOVE commands only (0..1). Latched by color sensor.
   void setForwardSpeedScale(float scale01);
   void setAlignHeading(float headingDegContinuous);
   void clearAlignHeading();
@@ -33,9 +34,9 @@ public:
 
   bool active() const;
   State state() const;
-  // True only when executing a backward MoveByDistance (e.g. reflex backoff).
-  // This is used by reflex logic to avoid canceling a commanded backoff just
-  // because the color sensor is still over the red tile.
+  // WHY: True only when executing a backward MoveByDistance (e.g. reflex backoff).
+  // WHY: This is used by reflex logic to avoid canceling a commanded backoff just
+  // WHY: because the color sensor is still over the red tile.
   bool reverseMoveActive() const;
 
 private:
@@ -68,8 +69,8 @@ private:
 
   float forwardSpeedScale_;
 
-  // Move acceleration ramp (applied only to straight MoveByDistance steps).
-  // No ramp on decel/stop; turns are unaffected.
+  // WHY: Move acceleration ramp (applied only to straight MoveByDistance steps).
+  // WHY: No ramp on decel/stop; turns are unaffected.
   uint32_t moveRampStartMs_;
   bool     moveRampActive_;
 };

@@ -5,6 +5,7 @@
 
 #include "command_router.h"
 
+// SECTION: Motion completion event helpers.
 static void sendEvtPose_(RuntimeState& rt, const char* tag, float extra) {
   const WorldOdomData w = odomWorldRead();
   Serial2.print("EVT:");
@@ -23,11 +24,13 @@ static void sendEvtPose_(RuntimeState& rt, const char* tag, float extra) {
 }
 
 void cancelActiveMotion(RuntimeState& rt) {
+  // CONTRACT: Shared cancel path must stop active motion owners only.
   if (rt.encCalTask.active()) rt.encCalTask.cancel();
   if (rt.seqExecTask.active()) rt.seqExecTask.cancel();
 }
 
 void tickActiveControllers(RuntimeState& rt, const CompassData& heading, float lidarFilteredCm) {
+  // SECTION: Active controller updates.
   if (rt.seqExecTask.active()) {
     OdometryData od = odomRaw();
     rt.seqExecTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
@@ -46,6 +49,7 @@ void tickActiveControllers(RuntimeState& rt, const CompassData& heading, float l
 }
 
 void emitCommandCompletionEdge(RuntimeState& rt) {
+  // CONTRACT: Emit command completion exactly on Running->terminal edge.
   const bool seqActiveNow = rt.seqExecTask.active();
   if (rt.seqWasActive && !seqActiveNow) {
     const SequenceExecutorTask::State st = rt.seqExecTask.state();

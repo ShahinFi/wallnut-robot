@@ -16,6 +16,7 @@
 #include "tasks/color_calibration/color_calibration_task.h"
 
 struct RuntimeState {
+  // SECTION: Core devices and controllers.
   Compass compass;
   Lidar lidar;
   MovingAverage lidarAvg;
@@ -29,6 +30,7 @@ struct RuntimeState {
   ColorSensor colorSensor;
   ColorCalibrationTask colorCalTask;
 
+  // SECTION: Live sensor cache.
   bool colorSensorOk;
   uint32_t lastRgbMs;
   ColorRgb lastRgb;
@@ -40,6 +42,7 @@ struct RuntimeState {
   bool headingValid;
   CompassData lastHeading;
 
+  // SECTION: Auth and command state.
   bool espArmed;
   uint8_t espFailCount;
   bool espLocked;
@@ -47,13 +50,16 @@ struct RuntimeState {
   SequenceStep espSteps[2];
   SequenceStep seqSteps[4];
 
+  // SECTION: Button/calibration state.
   volatile bool buttonEdge;
   uint32_t lastButtonMs;
 
+  // SECTION: Safety and command completion latches.
   bool reflexLatchedRed;
   bool reflexLatchedFront;
   bool seqWasActive;
 
+  // SECTION: Runtime behavior modifiers.
   float forwardSpeedScale;
   int8_t lastRgbClassSent;
 };

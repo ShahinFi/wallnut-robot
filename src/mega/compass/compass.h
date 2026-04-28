@@ -4,70 +4,69 @@
 #include <Wire.h>
 
 struct CompassData {
-  // Sensor register
-  uint8_t bearing8;               // 0..255
+  // WHY: Raw register bearing value used for diagnostics.
+  uint8_t bearing8;
 
-  // Wrapped heading (UI-friendly)
-  float       headingDegWrapped;  // 0..360 after offset + wrap
-  int         headingDegRounded;  // rounded 0..359
-  const char* headingDirLabel;    // N/NE/E/...
+  // WHY: Wrapped heading fields are for UI and cardinal labeling.
+  float headingDegWrapped;
+  int headingDegRounded;
+  const char* headingDirLabel;
 
-  // Continuous heading (control-friendly)
-  float headingDegContinuous;     // unwrapped (can grow +/-)
-  float deltaHeadingDeg;          // last step (signed)
+  // WHY: Continuous heading fields are for control loops and delta tracking.
+  float headingDegContinuous;
+  float deltaHeadingDeg;
 };
 
 struct CompassContinuousState {
-  bool  hasPrev;
+  bool hasPrev;
   float prevHeadingDegWrapped;
   float headingDegContinuous;
   float deltaHeadingDeg;
-  long  wrapCount;
+  long wrapCount;
 };
 
 class Compass {
 public:
   Compass(uint8_t i2cAddress = 0x60, uint8_t bearingReg = 0x01);
 
-  // Initializes I2C + zeros heading at current + resets continuous.
-  // Returns false if the compass cannot be read.
+  // CONTRACT: Initializes I2C and zeros heading to current orientation; returns false on read failure.
   bool begin(TwoWire& wire = Wire);
 
-  // Main operation (single call in loop):
-  // - reads wrapped heading into out
-  // - updates continuous heading into out
+  // CONTRACT: Reads wrapped heading and updates continuous heading in one call.
   bool read(CompassData& out);
 
-  // Configuration
-  void  setHeadingOffsetDeg(float headingOffsetDeg);
+  // SECTION: Configuration
+  void setHeadingOffsetDeg(float headingOffsetDeg);
   float headingOffsetDeg() const;
 
-  // Modular building blocks (kept public for testing/advanced use)
-  bool readHeadingDegWrapped(CompassData& out);        // fills ONLY wrapped fields
-  void updateHeadingDegContinuous(CompassData& io);    // fills ONLY continuous fields
-  bool zeroHeadingAtCurrent();                         // sets offset so current becomes ~0°
+  // CONTRACT: Wrapped read mutates only wrapped-output fields in CompassData.
+  bool readHeadingDegWrapped(CompassData& out);
+  // CONTRACT: Continuous update mutates only continuous-output fields in CompassData.
+  void updateHeadingDegContinuous(CompassData& io);
+  // CONTRACT: Sets heading offset so current wrapped heading becomes near 0 degrees.
+  bool zeroHeadingAtCurrent();
 
-  // State access
+  // SECTION: State Access
   void resetHeadingContinuous();
   const CompassContinuousState& continuousState() const;
 
 private:
-  // Hardware read
+  // SECTION: Hardware Read
   bool readReg8(uint8_t reg, uint8_t& valOut);
   bool readHeadingDegRaw(float& headingDegRawOut, uint8_t& bearing8Out);
 
-  // Math helpers
+  // SECTION: Math Helpers
   static float wrapDeg360(float headingDeg);
   static const char* dirLabelFromDeg(int headingDeg);
 
-  // Wiring/config
+  // SECTION: Wiring and Config
   TwoWire* wire_;
-  uint8_t  i2cAddress_;
-  uint8_t  bearingReg_;
+  uint8_t i2cAddress_;
+  uint8_t bearingReg_;
 
-  // Parameters
+  // SECTION: Parameters
   float headingOffsetDeg_;
 
-  // Continuous tracking state (history)
+  // SECTION: Continuous Tracking State
   CompassContinuousState state_;
 };

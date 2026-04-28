@@ -6,7 +6,7 @@ namespace {
 Odometry* gOdom = nullptr;
 OdometryData gLast = {};
 
-// Local baseline for "distance since local reset"
+// WHY: Local baseline for "distance since local reset"
 bool gLocalHasBase = false;
 float gLocalBaseAvgCmSigned = 0.0f;
 
@@ -17,7 +17,7 @@ static void refreshLast_() {
   if (!gOdom) return;
   gLast = gOdom->read();
 }
-}  // namespace
+}
 
 void odomManagerInit(Odometry* odom) {
   gOdom = odom;
@@ -29,8 +29,8 @@ void odomManagerInit(Odometry* odom) {
   worldOdomReset(gWorld);
   gWorldInit = true;
 
-  // Prime cached reading/baselines (if the caller updates heading in the first loop,
-  // worldOdomUpdate will rebase correctly).
+  // WHY: Prime cached reading/baselines (if the caller updates heading in the first loop,
+  // WHY: worldOdomUpdate will rebase correctly).
   refreshLast_();
 }
 
@@ -66,7 +66,7 @@ float odomLocalReadCmSigned() {
 void odomWorldReset(float headingDeg) {
   refreshLast_();
   worldOdomReset(gWorld);
-  // Establish a baseline immediately so the next update is clean.
+  // WHY: Establish a baseline immediately so the next update is clean.
   worldOdomRebase(gWorld, headingDeg, gLast.avgCmSigned);
 }
 
@@ -85,12 +85,12 @@ void odomWorldSetPos(float eastCm, float northCm, float headingDeg) {
 }
 
 void odomHardResetKeepWorld(float headingDeg) {
-  // WARNING: this resets the underlying encoder counters to 0.
-  // Prefer odomLocalReset() for task/action baselining.
+  // CONTRACT: This hard-resets underlying encoder counters to zero.
+  // WHY: Prefer odomLocalReset() for routine task/action baselining.
   encoderReset();
-  refreshLast_();  // should now be near-zero
+  refreshLast_();
   worldOdomRebase(gWorld, headingDeg, gLast.avgCmSigned);
-  // Local reset to avoid surprising "negative jump" for local callers.
+  // WHY: Local reset to avoid surprising "negative jump" for local callers.
   gLocalHasBase = true;
   gLocalBaseAvgCmSigned = gLast.avgCmSigned;
 }

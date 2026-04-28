@@ -10,16 +10,14 @@ export class MapRenderer {
     this.showScan = true;
     this.scanPts = [];
     this.pose = { x: 0, y: 0, headingDeg: 0 };
-    // Binary virtual obstacles (e.g., red floor tiles). This is NOT part of the
-    // fuzzy LiDAR occupancy grid; it is a separate hard-block layer for planning.
-    // Expected: Uint8Array(w*h) with 1 => blocked, 0 => free.
+    // WHY: Virtual obstacles are a separate hard-block layer (Uint8Array, 1 blocked / 0 free).
     this.virtualBlocked = null;
-    // Goal marker (cell coords): { cx, cy, tolCells }
+    // CONTRACT: Goal marker shape is `{ cx, cy, tolCells }` in cell coordinates.
     this.goal = null;
-    // Planned path overlay in world coords: [{x,y}, ...]
+    // CONTRACT: Planned path overlay is world-coordinate points `{x,y}`.
     this.plannedPath = [];
-    // Extra world-space margin (cm) rendered around the map boundary so you can
-    // see out-of-bounds scan endpoints. Visual-only; does not change mapping.
+    // WHY: Extra world-space margin keeps out-of-bounds scan endpoints visible.
+    // CONTRACT: Margin is visual-only and does not alter mapping data.
     this.viewMarginCm = 6;
   }
 
@@ -52,14 +50,14 @@ export class MapRenderer {
 
   setPlannedPath(pointsWorld) {
     if (!Array.isArray(pointsWorld)) { this.plannedPath = []; return; }
-    // Shallow-validate; renderer will ignore NaNs.
+    // WHY: Shallow-validate; renderer will ignore NaNs.
     this.plannedPath = pointsWorld;
   }
 
   draw() {
     const ctx = this.ctx;
 
-    // HiDPI-safe resize: draw in CSS pixels but back the canvas with device pixels.
+    // WHY: HiDPI-safe resize: draw in CSS pixels but back the canvas with device pixels.
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     const rect = this.canvas.getBoundingClientRect();
     const cssW = Math.max(1, rect.width || this.canvas.width);
@@ -74,14 +72,14 @@ export class MapRenderer {
     const height = cssH;
     const g = this.grid;
 
-    // Fit map into canvas with padding.
+    // WHY: Fit map into canvas with padding.
     const pad = Math.max(18, Math.floor(Math.min(width, height) * 0.045));
     const mCm = Math.max(0, this.viewMarginCm || 0);
     const viewW_cm = g.mapW_cm + 2 * mCm;
     const viewH_cm = g.mapH_cm + 2 * mCm;
     const sx = (width - 2 * pad) / viewW_cm;
     const sy = (height - 2 * pad) / viewH_cm;
-    // Real scale (uniform): 1 cm maps to s pixels in both axes.
+    // WHY: Real scale (uniform): 1 cm maps to s pixels in both axes.
     const s = Math.min(sx, sy);
 
     const viewWpx = viewW_cm * s;
@@ -90,24 +88,23 @@ export class MapRenderer {
     const oy = pad + (height - 2 * pad - viewHpx) * 0.5;
 
     const toPx = (x_cm, y_cm) => {
-      // world coords: (0,0) at map bottom-left; canvas: y down
-      // Apply margin so we can render beyond the map rectangle.
+    // WHY: Convert world bottom-left coordinates to canvas top-left coordinates.
       return { x: ox + (x_cm + mCm) * s, y: oy + viewHpx - (y_cm + mCm) * s };
     };
 
-    // background
+    // WHY: background
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = "rgba(7,3,15,0.12)";
     ctx.fillRect(0, 0, width, height);
 
-    // map border
+    // WHY: map border
     ctx.strokeStyle = "rgba(203,215,255,0.30)";
     ctx.lineWidth = 2;
-    // Border is the true map extents within the view.
+    // WHY: Border is the true map extents within the view.
     ctx.strokeRect(ox + mCm * s, oy + mCm * s, g.mapW_cm * s, g.mapH_cm * s);
 
-    // subtle major grid (about every 10cm) for orientation (does not affect scale)
-    const majorEvery = Math.max(1, Math.floor(10 / g.cell_cm)); // ~10cm
+    // WHY: Major guide grid is approximately 10 cm.
+    const majorEvery = Math.max(1, Math.floor(10 / g.cell_cm));
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(203,215,255,0.05)";
     for (let cx = 0; cx <= g.w; cx += majorEvery) {
@@ -125,7 +122,7 @@ export class MapRenderer {
       ctx.stroke();
     }
 
-    // hit cells (true squares, uniform scale)
+    // WHY: hit cells (true squares, uniform scale)
     const maxV = 35;
     for (let cy = 0; cy < g.h; cy++) {
       for (let cx = 0; cx < g.w; cx++) {
@@ -133,42 +130,42 @@ export class MapRenderer {
         const st = g.cellState(cx, cy);
         if (st === "unk") continue;
 
-        // Hard walls: always render at maximum obstacle strength.
+        // WHY: Hard walls: always render at maximum obstacle strength.
         if (g.isLocked && g.isLocked(cx, cy)) {
           ctx.fillStyle = "rgba(88,243,255,0.95)";
           const x_cm = cx * g.cell_cm;
           const y_cm = cy * g.cell_cm;
-          const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
+          // CONTRACT: Cell fill uses top-left world corner in canvas projection.
+          const p = toPx(x_cm, y_cm + g.cell_cm);
           const sz = g.cell_cm * s;
           const inset = Math.min(1.2, sz * 0.08);
           ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
           continue;
         }
 
-        // Map confidence to alpha based on magnitude of log-odds.
+        // WHY: Map confidence to alpha based on magnitude of log-odds.
         const mag = Math.min(maxV, Math.abs(v));
         const t = clamp(mag / maxV, 0, 1);
         const alpha = 0.08 + 0.55 * t;
 
-        // Semantically meaningful colors:
-        // - OCC: cyan/teal (hard obstacle)
-        // - FREE: green (safe space)
+        // WHY: OCC uses cyan/teal and FREE uses green for quick semantic reading.
         if (st === "occ") ctx.fillStyle = `rgba(88,243,255,${alpha.toFixed(3)})`;
         else ctx.fillStyle = `rgba(90,255,140,${alpha.toFixed(3)})`;
 
         const x_cm = cx * g.cell_cm;
         const y_cm = cy * g.cell_cm;
-        const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
+        // CONTRACT: Cell fill uses top-left world corner in canvas projection.
+        const p = toPx(x_cm, y_cm + g.cell_cm);
         const sz = g.cell_cm * s;
-        // Slight inset so dense regions look cleaner.
+        // WHY: Slight inset so dense regions look cleaner.
         const inset = Math.min(1.2, sz * 0.08);
         ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
       }
     }
 
-    // virtual obstacles overlay (binary, always drawn strongly)
+    // SECTION: Virtual obstacle overlay.
     if (this.virtualBlocked && this.virtualBlocked.length === g.w * g.h) {
-      // Virtual obstacles (red floor tiles) are hard-blocks for planning; show as strong red.
+      // WHY: Virtual hard-blocks render as strong red for planner/debug visibility.
       ctx.fillStyle = "rgba(255, 70, 70, 0.90)";
       const sz = g.cell_cm * s;
       const inset = Math.min(1.4, sz * 0.10);
@@ -178,13 +175,14 @@ export class MapRenderer {
           if (!this.virtualBlocked[i]) continue;
           const x_cm = cx * g.cell_cm;
           const y_cm = cy * g.cell_cm;
-          const p = toPx(x_cm, y_cm + g.cell_cm); // top-left
+          // CONTRACT: Cell fill uses top-left world corner in canvas projection.
+          const p = toPx(x_cm, y_cm + g.cell_cm);
           ctx.fillRect(p.x + inset, p.y + inset, sz - 2 * inset, sz - 2 * inset);
         }
       }
     }
 
-    // planned path overlay (polyline through cell centers)
+    // SECTION: Planned path overlay.
     if (this.plannedPath && this.plannedPath.length >= 2) {
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.lineWidth = 2;
@@ -200,7 +198,7 @@ export class MapRenderer {
       }
       if (moved) ctx.stroke();
 
-      // small dots to help read the path
+      // WHY: Dots improve readability over dense backgrounds.
       ctx.fillStyle = "rgba(255,255,255,0.55)";
       for (const pt of this.plannedPath) {
         const x = Number(pt?.x);
@@ -211,7 +209,7 @@ export class MapRenderer {
       }
     }
 
-    // goal overlay (nice visible marker)
+    // SECTION: Goal overlay.
     if (this.goal) {
       const { cx, cy, tolCells } = this.goal;
       if (cx >= 0 && cy >= 0 && cx < g.w && cy < g.h) {
@@ -252,7 +250,7 @@ export class MapRenderer {
       }
     }
 
-    // scan overlay
+    // SECTION: Scan-point overlay.
     if (this.showScan && this.scanPts.length) {
       ctx.fillStyle = "rgba(255,95,135,0.85)";
       for (const pt of this.scanPts) {
@@ -261,12 +259,12 @@ export class MapRenderer {
       }
     }
 
-    // robot pose arrow
+    // SECTION: Robot pose arrow.
     const rp = toPx(this.pose.x, this.pose.y);
     ctx.save();
     ctx.translate(rp.x, rp.y);
-    // heading: 0=N (up), 90=E (right), clockwise.
-    const ang = ((this.pose.headingDeg - 90) * Math.PI) / 180; // convert to canvas angle (0=+x)
+    // WHY: Convert north-up heading convention to canvas +X angle convention.
+    const ang = ((this.pose.headingDeg - 90) * Math.PI) / 180;
     ctx.rotate(ang);
     ctx.strokeStyle = "rgba(255,255,255,0.9)";
     ctx.fillStyle = "rgba(255,255,255,0.15)";

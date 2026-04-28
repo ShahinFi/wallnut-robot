@@ -1,9 +1,10 @@
-﻿// Maze page JS: reuses existing telemetry endpoints and the existing /maze command.
-// Note: encoder mm/pulse needs firmware support to populate; stays "--" for now.
+// SECTION: Maze dashboard controls and telemetry rendering.
+
 
 let pendingCommands = 0;
 const kFetchTimeoutMs = 1200;
 
+// SECTION: HTTP command helpers.
 function fetchWithTimeout(path, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), kFetchTimeoutMs);
@@ -18,7 +19,7 @@ function sendCommand(path, options = {}) {
     });
 }
 function pollingPaused() {
-  // Keep legacy helper for command flows; page telemetry is centralized via /telemetry.
+  // WHY: Command flows use this gate while telemetry remains centralized.
   return pendingCommands > 0;
 }
 
@@ -47,7 +48,7 @@ function setAuthStatus(text) {
   if (el) el.innerText = text;
 }
 
-// Auth/link/telemetry are rendered from window.TelemetryStore (polled via /telemetry).
+// SECTION: Auth, link, and telemetry projection from shared store.
 
 const linkStatusEl = document.getElementById("linkStatus");
 function setLinkStatus(text) {
@@ -86,6 +87,7 @@ async function disarmRobot() {
 }
 
 function startEncoderCalibration() {
+  // SECTION: Calibration command handlers.
   sendCommand("/enc_cal", { method: "POST" })
     .then(() => {
       const el = document.getElementById("encCalValue");
@@ -154,17 +156,18 @@ function setTurretTpr() {
     .catch(() => {
       flash("is-flash-fail");
     });
-  // Kick a quicker snapshot so the UI shows updated values promptly.
+  // WHY: Prompt snapshot reduces visible lag after calibration writes.
   setTimeout(() => {
     try { window.TelemetryManager && window.TelemetryManager.pollOnce && window.TelemetryManager.pollOnce(); } catch (e) {}
   }, 250);
 }
 
 function renderFromStore_() {
+  // SECTION: Store-to-UI projection.
   const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
   if (!st) return;
 
-  // Auth + UI gating.
+  // CONTRACT: Motion controls remain disabled unless auth is ARMED.
   const a = st.auth || {};
   const auth = String(a.state || "DISARMED").toUpperCase();
   const pending = !!a.pending || auth === "PENDING";
@@ -188,7 +191,7 @@ function renderFromStore_() {
     encCalUiState = CalUiState.Idle;
   }
 
-  // Link status.
+  // SECTION: Link status.
   const age = Number(st.link && st.link.megaAgeMs);
   const ageAvg = Number(st.link && st.link.megaAgeMsAvg);
   if (!Number.isFinite(age) || age === 0xffffffff) setLinkStatus("LINK: NO DATA");
@@ -198,7 +201,7 @@ function renderFromStore_() {
 
   const t = st.telemetry || {};
 
-  // Lidar.
+  // SECTION: LiDAR.
   const lidarEl = document.getElementById("lidarValue");
   const warnEl = document.getElementById("lidarWarning");
   if (lidarEl) {
@@ -209,14 +212,14 @@ function renderFromStore_() {
     else warnEl.classList.add("hidden");
   }
 
-  // Compass.
+  // SECTION: Compass telemetry.
   const compassEl = document.getElementById("compassWebValue");
   if (compassEl) {
     if (Number.isFinite(t.compassDeg)) compassEl.innerText = `${t.compassDeg}${DEG} ${t.compassLabel || ""}`.trim();
     else compassEl.innerText = "--";
   }
 
-  // Encoder cal.
+  // SECTION: Encoder calibration telemetry.
   const encEl = document.getElementById("encCalValue");
   if (encEl) {
     const pkt = String(t.encCal || "").trim();
@@ -229,7 +232,7 @@ function renderFromStore_() {
     }
   }
 
-  // Turret cal.
+  // SECTION: Turret calibration telemetry.
   const turEl = document.getElementById("turretCalValue");
   if (turEl) {
     const pkt = String(t.turretCal || "").trim();
@@ -239,7 +242,7 @@ function renderFromStore_() {
     else turEl.innerText = payload;
   }
 
-  // RGB live.
+  // SECTION: Live RGB.
   const colorEl = document.getElementById("colorValue");
   const swatchEl = document.getElementById("colorSwatch");
   const r = t.rgb && t.rgb.r;
@@ -259,7 +262,7 @@ function renderFromStore_() {
     }
   }
 
-  // RGB class + swatch.
+  // SECTION: Classified color output.
   const clsEl = document.getElementById("classValue");
   const clsSw = document.getElementById("classSwatch");
   const cls = Number(t.rgbClass);
@@ -277,7 +280,7 @@ function renderFromStore_() {
   }
 }
 
-// Start centralized comms and render on store updates.
+// SECTION: Comms startup.
 try {
   if (window.AuthManager) window.AuthManager.start();
 } catch {}
@@ -287,3 +290,4 @@ try {
 try {
   if (window.TelemetryStore && window.TelemetryStore.subscribe) window.TelemetryStore.subscribe(() => renderFromStore_());
 } catch {}
+

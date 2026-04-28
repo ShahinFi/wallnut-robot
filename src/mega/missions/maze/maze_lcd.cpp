@@ -18,13 +18,11 @@ static uint32_t gStopLatchUntilMs = 0;
 static const uint32_t kStopLatchMs = 2500;
 
 static void writeLine_(uint8_t row, const char* text) {
-  // IMPORTANT:
-  // `lcdWrite()` is globally throttled. It can drop writes if called outside the
-  // allowed burst window. The maze dashboard must never "think it wrote" when
-  // it didn't, otherwise lines can get stuck at the boot placeholder.
-  //
-  // So we do not cache "last line" here; we simply attempt the writes every
-  // update tick and rely on the LCD throttle to limit load.
+  // WHY: `lcdWrite()` is globally throttled. It can drop writes if called outside the
+  // WHY: allowed burst window. The maze dashboard must never "think it wrote" when
+  // WHY: it didn't, otherwise lines can get stuck at the boot placeholder.
+  // WHY: So we do not cache "last line" here; we simply attempt the writes every
+  // WHY: update tick and rely on the LCD throttle to limit load.
   lcdWrite(row, 0, text ? text : "", true);
 }
 
@@ -93,7 +91,7 @@ static void formatIpLine_(char out[21]) {
   (void)pos;
 }
 
-}  // namespace
+}
 
 void init() {
   lcdInit();
@@ -128,7 +126,7 @@ void update(AuthState auth, AutoState autoState, int16_t x_cm, int16_t y_cm, uin
   if (now - gLastUpdateMs < kUpdatePeriodMs) return;
   gLastUpdateMs = now;
 
-  // Keep stack usage near-zero: reuse a single static scratch line.
+  // WHY: Keep stack usage near-zero: reuse a single static scratch line.
   static char line[21] = {0};
 
   formatIpLine_(line);
@@ -172,7 +170,7 @@ void update(AuthState auth, AutoState autoState, int16_t x_cm, int16_t y_cm, uin
       pos = appendChar_(line, pos, 'N');
     } else {
       pos = appendChar_(line, pos, '#');
-      // Expect 1..4; print a single digit, clamp for safety.
+      // WHY: Expect 1..4; print a single digit, clamp for safety.
       uint8_t c = colorClass;
       if (c > 9) c = 9;
       pos = appendChar_(line, pos, (char)('0' + c));
@@ -197,4 +195,4 @@ void showFatal(const char* line2, const char* line3) {
   writeLine_(3, line);
 }
 
-}  // namespace maze_lcd
+}

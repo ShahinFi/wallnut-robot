@@ -5,8 +5,8 @@ import { parseTscanPayload } from "./scan/tscan.js";
 import { MapRenderer } from "./view/render.js";
 import { searchWindowRectWalls } from "./match/matcher.js";
 
-// Browser-side mapping bootstrap for /maze page.
-// Keeps Mega "executor" and browser "brain".
+// SECTION: Browser-side mapping bootstrap for /maze page.
+// WHY: Keep Mega as motion executor while browser handles mapping/orchestration.
 const BUILD = "mapping_boot_v5";
 
 const elCanvas = document.getElementById("mapCanvas");
@@ -16,8 +16,7 @@ const btnMinus = document.getElementById("mapScanMinus");
 const btnClear = document.getElementById("mapClear");
 
 if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
-  // Page doesn't have mapping UI; nothing to do.
-  // (We keep this file safe to include on other pages.)
+  // WHY: Safe no-op when mapping UI is absent (file may be included on other pages).
 } else {
 (() => {
   const dbg = {
@@ -28,8 +27,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     lastStatusRaw: "",
   };
 
-  // Avoid TDZ issues: status formatter can read from this handle once the state
-  // object is initialized (later in this file).
+  // WHY: Initialized later; formatter reads this handle after state construction.
   let st = null;
 
   function fmtDir_(d) {
@@ -44,15 +42,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     let s = String(raw || "").trim();
     if (!s) s = "idle";
 
-    // Strip any accidental debug suffixes like "| build=..." from older versions.
+    // WHY: Strip any accidental debug suffixes like "| build=..." from older versions.
     const bar = s.indexOf("|");
     if (bar >= 0) s = s.substring(0, bar).trim();
 
     const u = s.toUpperCase();
     if (u.startsWith("CONFIG ERROR:")) return s;
 
-    // Match the rest of the UI: when not armed, keep the mapping status simple.
-    // Display-only (does not affect scan/matching behavior).
+    // CONTRACT: Auth gating here is display-only and does not change mapping behavior.
     const authEl = document.getElementById("authStatus");
     const authText = authEl ? String(authEl.textContent || "").trim().toUpperCase() : "";
     const armed = authText.startsWith("ARMED");
@@ -66,18 +63,17 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
     if (scanActive) return `Scanning dir ${scanDir}`;
 
-    // Terminal scan outcomes (humanize).
+    // WHY: Terminal scan outcomes (humanize).
     if (u.startsWith("SCAN TIMEOUT")) return `Scan timeout (dir ${scanDir})`;
     if (u.startsWith("SCAN CANCEL")) return `Scan cancelled (dir ${scanDir}, next ${nextDir})`;
     if (u.startsWith("SCAN START FAILED")) return "Scan start failed";
     if (u.startsWith("STARTING ")) return `Starting scan ${scanDir}…`;
     if (u.startsWith("SCANNING ")) return `Scanning dir ${scanDir}`;
 
-    // Scan done variants.
+    // SECTION: Scan done status variants.
     if (u.startsWith("POSE NOT LOCKED")) return `Scan done (${fmtPoseLock_(false)}, next ${nextDir})`;
     if (u.startsWith("POSE:")) {
-      // Keep the useful part (x/y/h) but remove score/noise, and add next dir.
-      // Example input: "pose: x=12.3 y=45.6 h=78.9 score=0.123"
+      // WHY: Keep concise x/y/h details and suppress noisy score/debug suffixes.
       const m = s.match(/x=([0-9.+-]+)\\s+y=([0-9.+-]+)\\s+h=([0-9.+-]+)/i);
       if (m) return `Scan done (x=${m[1]} y=${m[2]} h=${m[3]}°, next ${nextDir})`;
       return `Scan done (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
@@ -90,7 +86,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       return `Idle (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
     }
 
-    // Default: keep it short and append lock/next context.
+    // WHY: Default: keep it short and append lock/next context.
     return `${s} (${fmtPoseLock_(poseLocked)}, next ${nextDir})`;
   }
 
@@ -99,8 +95,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     elStatus.textContent = formatMapStatus_(dbg.lastStatusRaw);
   }
 
-  // If auth state flips (DISARMED -> ARMED), refresh display-only map status
-  // without changing mapping behavior.
+  // CONTRACT: Auth observer refreshes display text only; mapping logic is unchanged.
   try {
     const authEl = document.getElementById("authStatus");
     if (authEl && typeof MutationObserver === "function") {
@@ -111,8 +106,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   } catch {}
 
-  // Single source of truth for all tunables: `data/esp/maze.html` <canvas id="mapCanvas" data-...>.
-  // No JS fallbacks for core config (prevents silent drift between files).
+  // CONTRACT: All tunables come from `#mapCanvas` dataset to avoid cross-file drift.
   function reqNum_(prop, { min = null, max = null } = {}) {
     const raw = elCanvas.dataset[prop];
     const v = Number(raw);
@@ -152,7 +146,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     btnPlus.disabled = true;
     btnMinus.disabled = true;
     btnClear.disabled = true;
-    // Stop here: avoid running with silent defaults.
+    // WHY: Stop here: avoid running with silent defaults.
     return;
   }
 
@@ -160,20 +154,19 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   btnMinus.disabled = false;
   btnClear.disabled = false;
 
-  // Dimensions follow our agreed convention: width (X/East) is smaller, height (Y/North) is larger.
+  // WHY: Dimensions follow our agreed convention: width (X/East) is smaller, height (Y/North) is larger.
   const mapW_cm = rMapW.v;
   const mapH_cm = rMapH.v;
   const cell_cm = rCell.v;
 
-  // Keep canvas aspect ratio consistent with the configured map.
+  // WHY: Keep canvas aspect ratio consistent with the configured map.
   elCanvas.style.aspectRatio = `${mapW_cm} / ${mapH_cm}`;
 
   const grid = new HitGrid(mapW_cm, mapH_cm, cell_cm);
   const renderer = new MapRenderer(elCanvas, grid);
   renderer.setViewMarginCm(rMargin.v);
 
-  // Goal marker (optional but expected on /maze): read from the single source of truth (#mapCanvas data-*).
-  // Goal lives in map/world cm coordinates (X=east, Y=north).
+  // WHY: Goal marker comes from map-canvas dataset in world cm (X=east, Y=north).
   {
     const gx = Number(elCanvas.dataset.goalXCm);
     const gy = Number(elCanvas.dataset.goalYCm);
@@ -190,24 +183,24 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     cell_cm,
     lidarOffset: { x_cm: 0.0, y_cm: 0.0 },
     match: {
-      // Scan validity
+      // WHY: Scan validity
       minDistCm: rMinDist.v,
       maxDistCm: rMaxDist.v,
-      // Scoring weights (3-state: OCC/FREE/UNK)
+      // WHY: Scoring weights (3-state: OCC/FREE/UNK)
       wOccHit: rWOcc.v,
       wFreeHit: rWFree.v,
       wConflict: rWConf.v,
       maxCandidates: rMaxCands.v,
     },
     update: {
-      // Map integration deltas (log-odds). Set to 0 to disable free/occ updates.
+      // WHY: Map integration deltas (log-odds). Set to 0 to disable free/occ updates.
       freeDelta: rUpdFree.v,
       occDelta: rUpdOcc.v,
     },
-    // Initial localization (wide):
-    // - X: full map width
-    // - Y: [0..0.4*H] band
-    // - Heading: around compass +/- span
+    // WHY: Initial localization (wide):
+    // WHY: - X: full map width
+    // WHY: - Y: [0..0.4*H] band
+    // WHY: - Heading: around compass +/- span
     init: {
       yMaxFrac: rInitY.v,
       headingSpanDeg: rInitH.v,
@@ -217,22 +210,22 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       stepDegFine: 2,
       refineSpanCm: 3,
       refineSpanDeg: 10,
-      // Distance-to-wall scoring kernel width (cm). Smaller = stricter.
+      // WHY: Distance-to-wall scoring kernel width (cm). Smaller = stricter.
       wallSigmaCm: rSigma.v,
     },
     track: {
       dxCm: rTDx.v,
       dyCm: rTDy.v,
       dHeadingDeg: rTDh.v,
-      // Keep tracking fine and bounded.
+      // WHY: Keep tracking fine and bounded.
       stepCm: 1,
       stepDeg: 2,
     },
   };
 
-  // Pose model:
-  // For initial localization we snapshot odom+compass at scan start via HTTP (no background streaming).
-  // Once pose is locked, we keep using odom deltas (east/north) around an anchor.
+  // WHY: Pose model:
+  // WHY: For initial localization we snapshot odom+compass at scan start via HTTP (no background streaming).
+  // WHY: Once pose is locked, we keep using odom deltas (east/north) around an anchor.
   const state = {
     compassDeg: 0,
     odomEast: 0,
@@ -240,36 +233,43 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     odomAnchorEast: 0,
     odomAnchorNorth: 0,
     mapPose0: { x: mapW_cm * 0.5, y: mapH_cm * 0.2, headingDeg: 0 },
-    poseLocked: false, // becomes true after initial localization
+    // CONTRACT: `poseLocked` flips true only after successful initial localization.
+    poseLocked: false,
     poseSentToRobot: false,
-    posePostPending: false,   // /set_pose needs to be sent (after a scan match)
-    posePostInFlight: false,  // /set_pose request currently in flight
-    posePostLastOkMs: 0,      // last successful /set_pose time (Date.now())
+    // CONTRACT: `posePostPending` means a `/set_pose` synchronization is queued.
+    posePostPending: false,
+    // CONTRACT: `posePostInFlight` tracks the active `/set_pose` request lifecycle.
+    posePostInFlight: false,
+    // WHY: Timestamp of most recent successful `/set_pose` completion.
+    posePostLastOkMs: 0,
 
     scanActive: false,
     scanDoneSeen: false,
     scanDir: "+",
     scanPose: null,
-    scanSamples: [],  // {angleDeg, distCm}
-    scanBodyPts: [],  // {xb,yb} for matching
-    scanWorldPts: [], // for overlay
+    // CONTRACT: `scanSamples` stores `{angleDeg, distCm}` payloads from TSCAN.
+    scanSamples: [],
+    // CONTRACT: `scanBodyPts` stores body-frame points `{xb,yb}` for matching.
+    scanBodyPts: [],
+    // CONTRACT: `scanWorldPts` stores world-frame points for visual overlay only.
+    scanWorldPts: [],
 
-    // Scan direction alternation (wiring safety):
-    // - first scan must be '+'
-    // - subsequent scans alternate on DONE
+    // CONTRACT: Scan direction alternation (wiring safety):
+    // CONTRACT: - first scan must be '+'
+    // CONTRACT: - subsequent scans alternate on DONE
     nextScanDir: "+",
   };
   st = state;
 
   function currentPose() {
-    // Pose contract:
-    // - Before we align Mega world-odom to the map (no /set_pose yet), we can only
-    //   display a pose relative to our matched anchor.
-    // - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
-    //   so we must use it directly (otherwise we'd apply the correction twice).
+    // SECTION: Pose contract:
+    // CONTRACT: - Before we align Mega world-odom to the map (no /set_pose yet), we can only
+    // WHY: display a pose relative to our matched anchor.
+    // WHY: - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
+    // CONTRACT: so we must use it directly (otherwise we'd apply the correction twice).
 
-    // While synchronizing a perfectly matched pose to the robot, trust the match entirely.
-    // This prevents UI flicker and guarantees the planner gets pristine coordinates.
+    // WHY: While synchronizing a perfectly matched pose to the robot, trust the match entirely.
+    // WHY: This prevents UI flicker and guarantees the planner gets pristine coordinates.
     if (state.posePostPending || state.posePostInFlight) {
       return { x: state.mapPose0.x, y: state.mapPose0.y, headingDeg: state.mapPose0.headingDeg };
     }
@@ -284,8 +284,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   }
 
   function seedOuterWalls() {
-    // Fill map boundary cells as occupied (simple known-rectangle world).
-    // These are immutable: once seeded, they never change value.
+    // WHY: Fill map boundary cells as occupied (simple known-rectangle world).
+    // CONTRACT: These are immutable: once seeded, they never change value.
     const WALL = grid.maxLogOdds;
     for (let cx = 0; cx < grid.w; cx++) {
       grid.setOccupied(cx, 0, WALL);
@@ -306,7 +306,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     seedOuterWalls();
     state.scanWorldPts = [];
     state.scanBodyPts = [];
-    // reset anchor so current odom becomes "mapPose0"
+    // WHY: reset anchor so current odom becomes "mapPose0"
     state.odomAnchorEast = state.odomEast;
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = false;
@@ -337,7 +337,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     return false;
   }
 
-  // Queue /set_pose posts so we can retry if the robot isn't armed yet.
+  // WHY: Queue /set_pose posts so we can retry if the robot isn't armed yet.
   const posePost = { pending: false, inFlight: false, includeHeading: false, pose: null };
   function queuePoseToRobot_(pose, includeHeading) {
     posePost.pose = { x: pose.x, y: pose.y, headingDeg: pose.headingDeg };
@@ -356,8 +356,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       if (ok) {
         state.poseSentToRobot = true;
 
-        // SNAP telemetry to the baseline we just established. This eliminates the race
-        // condition where the planner asks for the pose before the next poll catches up.
+        // WHY: SNAP telemetry to the baseline we just established. This eliminates the race
+        // WHY: condition where the planner asks for the pose before the next poll catches up.
         state.odomEast = posePost.pose.x;
         state.odomNorth = posePost.pose.y;
         if (posePost.includeHeading && Number.isFinite(posePost.pose.headingDeg)) {
@@ -376,7 +376,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   }
 
-  // Buttons are wired later to start a scan and poll until DONE.
+  // WHY: Buttons are wired later to start a scan and poll until DONE.
 
   function redraw() {
     const pose = currentPose();
@@ -403,7 +403,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   }
 
-  // Transactional scanning: poll only while we are actively scanning.
+  // CONTRACT: Transactional scanning: poll only while we are actively scanning.
   let lastSeq = 0;
 
   let pollActive = false;
@@ -436,14 +436,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   }
 
   async function fetchCompassDeg() {
-    // Centralized telemetry: read from TelemetryStore (polled via /telemetry).
+    // WHY: Centralized telemetry: read from TelemetryStore (polled via /telemetry).
     const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
     const deg = Number(st?.telemetry?.compassDeg);
     return Number.isFinite(deg) ? deg : null;
   }
 
   async function fetchOdomEN() {
-    // Centralized telemetry: read from TelemetryStore (polled via /telemetry).
+    // WHY: Centralized telemetry: read from TelemetryStore (polled via /telemetry).
     const st = window.TelemetryStore ? window.TelemetryStore.get() : null;
     const e = Number(st?.telemetry?.odomEast);
     const n = Number(st?.telemetry?.odomNorth);
@@ -451,8 +451,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     return { e, n };
   }
 
-  // Live pose polling (low-rate) so the arrow moves continuously while driving.
-  // We pause this during scan polling to avoid competing for bandwidth/CPU.
+  // WHY: Live pose polling (low-rate) so the arrow moves continuously while driving.
+  // WHY: We pause this during scan polling to avoid competing for bandwidth/CPU.
   let posePollInFlight = false;
   async function pollPoseOnce() {
     if (posePollInFlight) return;
@@ -465,22 +465,22 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       const od = odR && odR.status === "fulfilled" ? odR.value : null;
       const hdg = hdgR && hdgR.status === "fulfilled" ? hdgR.value : null;
 
-      // Reject telemetry for a short window (400ms) after forcing a new pose,
-      // avoiding stale in-flight telemetry packets from resetting our perfectly snapped position.
+      // WHY: Reject telemetry for a short window (400ms) after forcing a new pose,
+      // WHY: avoiding stale in-flight telemetry packets from resetting our perfectly snapped position.
       if (Date.now() - state.posePostLastOkMs < 400) {
         redraw();
         return;
       }
 
       if (od) {
-        // Always update live odom so the arrow moves between scans (including reflex backoffs).
+        // WHY: Always update live odom so the arrow moves between scans (including reflex backoffs).
         state.odomEast = od.e;
         state.odomNorth = od.n;
       }
       if (hdg != null) state.compassDeg = hdg;
       redraw();
     } catch {
-      // ignore transient errors
+      // WHY: ignore transient errors
     } finally {
       posePollInFlight = false;
     }
@@ -493,8 +493,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   function bodyDeltaToMap(rot, xb, yb) {
     const { c, s } = rot;
-    // East  = s*xb + c*yb
-    // North = c*xb - s*yb
+    // WHY: East  = s*xb + c*yb
+    // WHY: North = c*xb - s*yb
     return { x: s * xb + c * yb, y: c * xb - s * yb };
   }
 
@@ -532,17 +532,17 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       const hasOccEndpoint = clipped.clipped === false;
       const endCell = hasOccEndpoint ? grid.worldToCell(x1, y1) : null;
 
-      // Mark FREE along the ray, excluding the OCC endpoint cell.
+      // WHY: Mark FREE along the ray, excluding the OCC endpoint cell.
       if (freeDelta > 0) {
         forEachCellOnSegmentWorld(grid, x0, y0, clipped.x, clipped.y, (cx, cy) => {
           if (hasOccEndpoint && endCell && cx === endCell.cx && cy === endCell.cy) return false;
-          // Don't erode existing occupied structure (e.g., known outer walls) due to small discretization errors.
+          // WHY: Don't erode existing occupied structure (e.g., known outer walls) due to small discretization errors.
           if (grid.cellState(cx, cy) !== "occ") grid.addFree(cx, cy, freeDelta);
           return true;
         });
       }
 
-      // Mark OCC at the endpoint (if in-bounds).
+      // WHY: Mark OCC at the endpoint (if in-bounds).
       if (occDelta > 0 && endCell) grid.addOccupied(endCell.cx, endCell.cy, occDelta);
     }
   }
@@ -563,7 +563,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       yMax: cfg.init.yMaxFrac * cfg.mapH_cm,
       hMin: priorH - cfg.init.headingSpanDeg,
       hMax: priorH + cfg.init.headingSpanDeg,
-      // Global fine search over the full uncertainty range (do not "converge early").
+      // CONTRACT: Global fine search over the full uncertainty range (do not "converge early").
       stepX: cfg.init.stepCmFine,
       stepY: cfg.init.stepCmFine,
       stepH: cfg.init.stepDegFine,
@@ -595,7 +595,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     state.odomAnchorNorth = state.odomNorth;
     state.poseLocked = true;
     if (!state.poseSentToRobot) {
-      // Initial: send position only (heading is already aligned via your manual north reset).
+      // CONTRACT: Initial sync sends position only; heading is already aligned before first scan.
       queuePoseToRobot_(state.mapPose0, false);
     }
   }
@@ -605,11 +605,11 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (!s) return;
     if (!s.startsWith("TSCAN:")) return;
 
-    // "TSCAN:" is 6 chars; pass only the payload after the colon.
+    // CONTRACT: "TSCAN:" is 6 chars; pass only the payload after the colon.
     const msg = parseTscanPayload(s.substring(6));
     if (!msg) return;
     if (msg.kind === "begin") {
-      // BEGIN can arrive multiple times (ESP synthetic + Mega real).
+      // WHY: BEGIN can arrive multiple times (ESP synthetic + Mega real).
       state.scanDir = msg.payload.includes("BEGIN,-") ? "-" : "+";
       dbg.lastEvent = "BEGIN";
       setStatus(`scanning ${state.scanDir}`);
@@ -625,9 +625,9 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
       let poseStatus = "";
 
-      // Pose update:
-      // - if not locked yet: global init match against known outer walls
-      // - if already locked: local track match around odom+compass prior
+      // WHY: Pose update:
+      // WHY: - if not locked yet: global init match against known outer walls
+      // WHY: - if already locked: local track match around odom+compass prior
       if (state.scanSamples.length) {
         const wasLocked = state.poseLocked;
         const priorPose = state.scanPose || currentPose();
@@ -636,7 +636,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         if (best.ok) {
           commitLockedPose_(best.pose);
           if (wasLocked) {
-            // Tracking: send position + matched heading for compass offset correction.
+            // WHY: Tracking: send position + matched heading for compass offset correction.
             queuePoseToRobot_(state.mapPose0, true);
           }
           poseStatus = `pose: x=${best.pose.x.toFixed(1)} y=${best.pose.y.toFixed(1)} h=${best.pose.headingDeg.toFixed(1)} score=${best.score.toFixed(3)}`;
@@ -645,8 +645,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         }
       }
 
-      // Apply scan to the map ONLY when we have a locked pose (avoid polluting map with a wrong initial guess).
-      // For UI overlay we still show endpoints using the best available pose estimate.
+      // CONTRACT: Apply scan to the map ONLY when we have a locked pose (avoid polluting map with a wrong initial guess).
+      // WHY: For UI overlay we still show endpoints using the best available pose estimate.
       const poseForOverlay = state.poseLocked ? state.mapPose0 : state.scanPose;
       state.scanWorldPts = [];
       if (state.poseLocked) {
@@ -654,14 +654,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       }
 
       if (poseForOverlay) {
-        // UI overlay: stamp endpoints only (as points).
+        // CONTRACT: UI overlay: stamp endpoints only (as points).
         for (const bp of state.scanBodyPts) {
           const xb = bp.xb + (cfg.lidarOffset.x_cm || 0);
           const yb = bp.yb + (cfg.lidarOffset.y_cm || 0);
           const d = bodyToMap(poseForOverlay.headingDeg, xb, yb);
           const xw = poseForOverlay.x + d.x;
           const yw = poseForOverlay.y + d.y;
-          // Overlay should never mutate the map; keep out-of-bounds points too for debugging.
+          // CONTRACT: Overlay should never mutate the map; keep out-of-bounds points too for debugging.
           state.scanWorldPts.push({ x: xw, y: yw });
         }
       }
@@ -669,7 +669,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       setStatus(`${poseStatus || "scan done"} (${state.scanBodyPts.length} pts)`);
       redraw();
 
-      // Enforce alternating scan direction (flip only on successful DONE).
+      // CONTRACT: Enforce alternating scan direction (flip only on successful DONE).
       state.nextScanDir = (state.scanDir === "+") ? "-" : "+";
       pushScanStatus_();
 
@@ -689,7 +689,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       setStatus("scan cancelled");
       redraw();
       pushScanStatus_();
-      // Do not flip direction on cancel.
+      // CONTRACT: Do not flip direction on cancel.
       if (scanResolve) {
         scanResolve({ ok: false, kind: "cancel", dir: state.scanDir });
         scanResolve = null;
@@ -698,7 +698,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       return;
     }
     if (msg.kind !== "sample") return;
-    if (!state.scanActive) return; // ignore stray samples when not scanning
+    // CONTRACT: Ignore stray samples unless a scan transaction is active.
+    if (!state.scanActive) return;
 
     const { xb, yb } = polarToBody(msg.angleDeg, msg.distCm);
     state.scanSamples.push({ angleDeg: msg.angleDeg, distCm: msg.distCm });
@@ -715,8 +716,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       dbg.lastEvent = "403";
       setStatus("NOT ARMED");
       pushScanStatus_();
-      // If we were in a scan transaction, terminate it cleanly so we don't
-      // leave the UI/network gate stuck in "scan" mode.
+      // WHY: If we were in a scan transaction, terminate it cleanly so we don't
+      // WHY: leave the UI/network gate stuck in "scan" mode.
       if (state.scanActive) {
         state.scanActive = false;
         state.scanDoneSeen = true;
@@ -751,8 +752,8 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
 
   function stopPolling() {
     pollActive = false;
-    // After a scan completes, post the corrected pose immediately (scan polling
-    // previously blocked /set_pose). Fire-and-forget; mapping poller will retry.
+    // WHY: After a scan completes, post the corrected pose immediately (scan polling
+    // WHY: previously blocked /set_pose). Fire-and-forget; mapping poller will retry.
     try { tryPostPoseToRobot_(); } catch {}
   }
 
@@ -779,7 +780,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       try {
         await pollOnce();
       } catch {}
-      // Stop when DONE/CANCEL was observed.
+      // WHY: Stop when DONE/CANCEL was observed.
       if (state.scanDoneSeen) {
         redraw();
         stopPolling();
@@ -795,10 +796,10 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     if (window.NetGate) window.NetGate.enterScan();
     try {
       if (window.DebugLog) window.DebugLog.push("scan", `begin ${label}`);
-      // Drain any queued events before starting, so BEGIN is seen promptly.
+      // WHY: Drain any queued events before starting, so BEGIN is seen promptly.
       try { await pollOnce(); } catch {}
-      // Freeze live pose polling during the scan transaction (bandwidth priority).
-      // Snapshot pose at click time (does NOT depend on receiving BEGIN from ESP).
+      // WHY: Freeze live pose polling during the scan transaction (bandwidth priority).
+      // WHY: Snapshot pose at click time (does NOT depend on receiving BEGIN from ESP).
       const od = await fetchOdomEN();
       const hdg = await fetchCompassDeg();
       if (od) {
@@ -806,30 +807,32 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
         state.odomNorth = od.n;
       }
       if (hdg != null) state.compassDeg = hdg;
-      state.scanPose = currentPose(); // snapshot at click time
+      // CONTRACT: `scanPose` snapshots pose at scan click time for transactional consistency.
+      state.scanPose = currentPose();
       state.scanSamples = [];
       state.scanBodyPts = [];
       state.scanWorldPts = [];
       state.scanActive = true;
       state.scanDoneSeen = false;
-      // Deterministic scan direction even if BEGIN is delayed/dropped.
+      // WHY: Deterministic scan direction even if BEGIN is delayed/dropped.
       state.scanDir = String(path).includes("minus") ? "-" : "+";
       dbg.lastEvent = "START";
       dbg.pollErrors = 0;
       dbg.lastHttp = "-";
       dbg.lastSeq = 0;
       setStatus(`starting ${label}...`);
-      lastSeq = 0; // ring is reset on scan start by the ESP
+      // CONTRACT: Scan event ring is reset at scan start on ESP.
+      lastSeq = 0;
       pushScanStatus_();
 
-      // Create a completion promise for callers (autonomy).
+      // WHY: Create a completion promise for callers (autonomy).
       scanPromise = new Promise((resolve) => { scanResolve = resolve; });
 
       await post(path);
       startPollingUntilDone();
       return scanPromise;
     } catch {
-      // Any failure starting the scan must release the scan gate and resolve callers.
+      // CONTRACT: Any failure starting the scan must release the scan gate and resolve callers.
       state.scanActive = false;
       state.scanDoneSeen = true;
       if (window.NetGate) window.NetGate.exitScan();
@@ -849,15 +852,15 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   async function requestScanAuto() {
     if (state.scanActive || pollActive) return { ok: false, status: "busy" };
 
-    // Drain any queued events BEFORE deciding the direction.
-    // If a previous scan succeeded while the network was lagging/timed out,
-    // its TSCAN:DONE is in the ESP's event backlog. Polling here ensures we
-    // process it and flip `state.nextScanDir` accurately based on true hardware reality.
+    // WHY: Drain any queued events BEFORE deciding the direction.
+    // WHY: If a previous scan succeeded while the network was lagging/timed out,
+    // WHY: its TSCAN:DONE is in the ESP's event backlog. Polling here ensures we
+    // WHY: process it and flip `state.nextScanDir` accurately based on true hardware reality.
     if (!pollActive) {
       try { await pollOnce(); } catch {}
     }
 
-    // Enforce alternation (wiring safety): ignore manual direction preference.
+    // CONTRACT: Enforce alternation (wiring safety): ignore manual direction preference.
     const dir = state.nextScanDir === "-" ? "-" : "+";
     return startScan(dir === "+" ? "/scan_plus" : "/scan_minus", `scan ${dir}`);
   }
@@ -866,14 +869,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   btnMinus.addEventListener("click", () => requestScanAuto());
   btnClear.addEventListener("click", () => { lastSeq = 0; clearMap(); });
 
-  // initial
+  // WHY: initial
   clearMap();
   setStatus("idle");
-  // Start low-rate pose polling for live arrow updates (paused automatically during scans).
+  // WHY: Start low-rate pose polling for live arrow updates (paused automatically during scans).
   pollPoseOnce();
   setInterval(pollPoseOnce, 350);
 
-  // Expose a tiny API for autonomy orchestration (does not change mapping behavior).
+  // WHY: Expose a tiny API for autonomy orchestration (does not change mapping behavior).
   window.MappingApi = {
     grid,
     cfg,

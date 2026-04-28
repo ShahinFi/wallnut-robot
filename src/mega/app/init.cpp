@@ -10,6 +10,7 @@
 #include "command_router.h"
 #include "telemetry/telemetry.h"
 
+// SECTION: Turret scan sample forwarding.
 void onTurretSweepSample(const TurretSweepScan360::Sample& s, void*) {
   Serial2.print("TSCAN:");
   Serial2.print(s.angleDeg, 2);
@@ -19,6 +20,7 @@ void onTurretSweepSample(const TurretSweepScan360::Sample& s, void*) {
 }
 
 void initHardware(RuntimeState& rt) {
+  // SECTION: Hardware and safety-critical sensor initialization.
   maze_lcd::init();
 
   if (!rt.compass.begin()) {
@@ -53,6 +55,7 @@ void initHardware(RuntimeState& rt) {
 }
 
 void initCommsAndTelemetry(RuntimeState& rt) {
+  // SECTION: ESP link and telemetry initialization.
   espSetup();
   maybeRequestEspIp(rt, millis());
   telemetryInit(200);
@@ -62,6 +65,7 @@ void initCommsAndTelemetry(RuntimeState& rt) {
 }
 
 void initMissionDefaults(RuntimeState& rt) {
+  // SECTION: Mission defaults and odometry wiring.
   rt.odom.setPulsesPerMeter(787.0f);
   odomManagerInit(&rt.odom);
   rt.seqExecTask.setSequence(rt.seqSteps);

@@ -4,6 +4,7 @@
 #include "telemetry/telemetry.h"
 #include "color/color_classifier.h"
 
+// SECTION: Color classification helpers.
 static int8_t classifyColorIdx1BasedOrNone_(RuntimeState& rt, const ColorRgb& live) {
   if (!rt.colorCalTask.hasCalibration()) return 0;
   const ColorRgb* refs = rt.colorCalTask.refs();
@@ -17,6 +18,7 @@ static int8_t classifyColorIdx1BasedOrNone_(RuntimeState& rt, const ColorRgb& li
 }
 
 static void maybeSendRgbClassToEsp_(RuntimeState& rt, const ColorRgb& live, bool liveValid) {
+  // CONTRACT: Emit RGBCLS only on transitions to reduce UART noise.
   const int8_t cls = liveValid ? classifyColorIdx1BasedOrNone_(rt, live) : (int8_t)0;
   if (cls == rt.lastRgbClassSent) return;
   rt.lastRgbClassSent = cls;
@@ -25,6 +27,7 @@ static void maybeSendRgbClassToEsp_(RuntimeState& rt, const ColorRgb& live, bool
 }
 
 static void maybeLatchForwardSpeedFromColor_(RuntimeState& rt, const ColorRgb& live) {
+  // CONTRACT: refs[1]/refs[2] map to speed modes; other classes do not alter speed.
   if (!rt.colorCalTask.hasCalibration()) return;
   const ColorRgb* refs = rt.colorCalTask.refs();
   if (!refs) return;
@@ -46,6 +49,7 @@ static void maybeLatchForwardSpeedFromColor_(RuntimeState& rt, const ColorRgb& l
 }
 
 bool updateHeading(RuntimeState& rt, CompassData& headingOut) {
+  // CONTRACT: Fall back to last valid heading after transient read failures.
   if (!rt.compass.read(headingOut)) {
     if (!rt.headingValid) return false;
     headingOut = rt.lastHeading;
@@ -62,6 +66,7 @@ void updateTurretTracking(RuntimeState& rt) {
 }
 
 bool handleTurretSweepEarlyReturn(RuntimeState& rt, uint32_t nowMs) {
+  // CONTRACT: Turret sweep owns LiDAR timing while active.
   if (!rt.turretSweep.active()) return false;
   const bool done = rt.turretSweep.update(rt.turretMotor.ticksAbs(), nowMs);
   if (done) Serial2.println("TSCAN:DONE");
@@ -80,6 +85,7 @@ float updateLidarOdomTelemetry(RuntimeState& rt, const CompassData& heading) {
 }
 
 void updateColorAndSpeedLatch(RuntimeState& rt, uint32_t nowMs) {
+  // WHY: Rate-limit color polling to reduce I2C load and serial churn.
   if (!rt.colorSensorOk || nowMs - rt.lastRgbMs < 200U) return;
   rt.lastRgbMs = nowMs;
   ColorRgb rgb;

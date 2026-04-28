@@ -1,5 +1,5 @@
 #include "esp_uart.h"
-// (Refactor) Transport module implementation.
+// SECTION: Mega->ESP UART transport implementation.
 
 #include <ESP8266WiFi.h>
 #include <math.h>
@@ -12,6 +12,7 @@ static constexpr size_t kMaxSerialLineLen = 128;
 static char gLine[kMaxSerialLineLen + 1];
 static uint8_t gLineLen = 0;
 
+// CONTRACT: Parser accepts strict decimal spans only; no locale/scientific forms.
 static bool parseDecFloatSpan_(const char* s, const char* e, float& out) {
   while (s < e && (*s == ' ' || *s == '\t')) s++;
   if (s >= e) return false;
@@ -58,11 +59,10 @@ static void processLine_(EspState& state,
                          esp_scan_events::ScanEvents& scan,
                          esp_alert_ring::AlertRing& alerts,
                          const String& data) {
+  // SECTION: Mega->ESP line protocol dispatch.
   state.noteMegaRx();
 
-  // Deterministic IP reporting for Mega LCD:
-  // Request:  IPREQ
-  // Response: ESPIP:<ip>
+  // CONTRACT: IPREQ always returns ESPIP:<ip> for LCD sync on Mega.
   if (data.equalsIgnoreCase("IPREQ")) {
     IPAddress ip;
     if (WiFi.status() == WL_CONNECTED) ip = WiFi.localIP();
@@ -156,9 +156,10 @@ static void processLine_(EspState& state,
   if (data.startsWith("EVT:")) alerts.pushFromLine(data);
 }
 
-}  // namespace
+}
 
 void poll(EspState& state, esp_scan_events::ScanEvents& scan, esp_alert_ring::AlertRing& alerts) {
+  // CONTRACT: Lines longer than buffer are dropped to keep parser state bounded.
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
     if (c == '\n' || c == '\r') {
@@ -177,4 +178,4 @@ void poll(EspState& state, esp_scan_events::ScanEvents& scan, esp_alert_ring::Al
   }
 }
 
-}  // namespace esp_uart
+}

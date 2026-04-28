@@ -4,7 +4,7 @@
 #include <Adafruit_TCS34725.h>
 
 namespace {
-// Integration time and gain can be tuned if needed.
+// WHY: Fixed defaults keep sensor behavior stable across boots.
 const auto kIntegrationTime = TCS34725_INTEGRATIONTIME_50MS;
 const auto kGain = TCS34725_GAIN_4X;
 }

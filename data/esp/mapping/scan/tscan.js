@@ -1,11 +1,6 @@
 export function parseTscanPayload(payload) {
-  // payload examples:
-  // - "BEGIN,+"
-  // - "BEGIN,-"
-  // - "DONE"
-  // - "CANCEL"
-  // - thin: "0.00,41.8"
-  // - debug: "0,0.00,41.8,573,48331"
+  // SECTION: Decode TSCAN payload variants emitted by ESP/Mega.
+  // WHY: Supports control frames (`BEGIN|DONE|CANCEL`) and thin/full sample payloads.
   const s = String(payload || "").trim();
   if (!s) return null;
 
@@ -15,12 +10,14 @@ export function parseTscanPayload(payload) {
 
   const parts = s.split(",");
   if (parts.length === 2) {
+    // CONTRACT: Thin samples omit sequence/ticks/time and default those fields to zero.
     const angleDeg = Number(parts[0]);
     const distCm = Number(parts[1]);
     if (!Number.isFinite(angleDeg) || !Number.isFinite(distCm)) return null;
     return { kind: "sample", seq: 0, angleDeg, distCm, ticksAbs: 0, ms: 0 };
   }
   if (parts.length === 5) {
+    // CONTRACT: Full samples carry `seq,angle,dist,ticksAbs,ms`.
     const seq = Number(parts[0]);
     const angleDeg = Number(parts[1]);
     const distCm = Number(parts[2]);

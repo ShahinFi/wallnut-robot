@@ -1,5 +1,5 @@
-// Alerts stream polling manager (classic script).
-// Polls GET /alerts?from= and emits lines to subscribers.
+// WHY: Alerts stream polling manager (classic script).
+// WHY: Polls GET /alerts?from= and emits lines to subscribers.
 
 (function initAlertsManager() {
   if (window.AlertsManager) return;
@@ -15,8 +15,9 @@
   let timer = 0;
   let inFlight = false;
   let fromSeq = 0;
-  const subs = new Set(); // cb({seq,line})
+  const subs = new Set(); // CONTRACT: subscriber payload is {seq,line}.
 
+  // SECTION: Poll transport helpers.
   async function fetchTextWithTimeout_(url, timeoutMs) {
     const t = Number(timeoutMs);
     const ms = Number.isFinite(t) && t > 0 ? t : 2000;
@@ -41,6 +42,7 @@
   }
 
   async function pollOnce() {
+    // SECTION: One alerts stream cycle.
     if (!enabled) return;
     if (inFlight) return;
     if (window.NetGate && !window.NetGate.allow("alerts")) return;
@@ -52,6 +54,7 @@
       if (r.status === 403) return;
       const text = String(r.text || "");
       const rows = text.split("\n");
+      // CONTRACT: `/alerts` is `seq|line` per row; malformed rows are ignored.
       for (const row of rows) {
         if (!row) continue;
         const bar = row.indexOf("|");
@@ -74,6 +77,7 @@
   }
 
   function scheduleNext_() {
+    // WHY: Self-scheduling timeout avoids overlapping intervals under slow network.
     if (!enabled) return;
     timer = setTimeout(async () => {
       await pollOnce();
@@ -101,15 +105,18 @@
 
   function subscribe(cb) {
     if (typeof cb !== "function") return () => {};
+    // CONTRACT: Subscriber callback must tolerate replay and burst delivery.
     subs.add(cb);
     return () => subs.delete(cb);
   }
 
   function resetCursor() {
+    // CONTRACT: Reset allows explicit replay from sequence zero.
     fromSeq = 0;
   }
 
   function setCursor(seq) {
+    // CONTRACT: Cursor accepts only finite non-negative integers.
     const v = Number(seq);
     if (!Number.isFinite(v) || v < 0) return;
     fromSeq = Math.floor(v);
@@ -121,3 +128,4 @@
 
   window.AlertsManager = { start, stop, setPeriod, pollOnce, subscribe, resetCursor, setCursor, cursor, _state: () => ({ enabled, periodMs, inFlight, fromSeq }) };
 })();
+

@@ -4,7 +4,7 @@
 #include <LiquidCrystal.h>
 #include <string.h>
 
-// ---- LCD PINS / SIZE ----
+// SECTION: LCD PINS / SIZE
 static const int LCD_RS = 22;
 static const int LCD_EN = 24;
 static const int LCD_D4 = 26;
@@ -17,9 +17,9 @@ static const uint8_t LCD_ROWS = 4;
 
 static LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
-// Global LCD update throttle to reduce loop load.
+// WHY: Global LCD update throttle to reduce loop load.
 static const uint32_t kLcdThrottleMs = 300;
-// Allow enough time for multi-line updates (LiquidCrystal writes are relatively slow).
+// WHY: Allow enough time for multi-line updates (LiquidCrystal writes are relatively slow).
 static const uint32_t kLcdBurstWindowMs = 80;
 static uint32_t gLastBurstMs = 0;
 static uint32_t gBurstUntilMs = 0;

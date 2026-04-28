@@ -1,12 +1,11 @@
-// Local (gitignored) secrets for the Mega firmware.
-// Copy to `src/mega/secrets.h` and edit.
-//
-// NOTE: This is not cryptographically secure. It just keeps the passcode out of
-// the public repo history.
+// SECTION: Local (gitignored) Mega secrets template.
+// WHY: Copy to `src/mega/secrets.h` and edit values locally.
+// CONTRACT: This hides credentials from repository history but is not cryptographic security.
 #pragma once
 
-// UART passcode required to ARM the robot from the web UI.
-// ESP forwards this to Mega as: `Passcode:<digits>`.
+// WHY: UART passcode required for web UI arming flow.
+// CONTRACT: ESP forwards this value as `Passcode:<digits>`.
 #define ESP_PASSCODE_STR "1234"
 #define ESP_PASSCODE_INT 1234
+
 

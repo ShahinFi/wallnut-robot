@@ -2,23 +2,15 @@
 
 #include <Arduino.h>
 
-// TurretAngleTracker: signed relative turret angle tracker driven by:
-// - single-channel encoder absolute ticks (monotonic)
-// - the last commanded motor direction (via cmd sign)
-//
-// This is intended for motor-driven motion. If the turret is rotated manually
-// while the motor command is near zero, direction cannot be inferred, so the
-// tracker ignores that motion for the signed angle accumulator.
+// WHY: Tracks signed turret angle from monotonic encoder ticks plus commanded motor direction.
+// CONTRACT: When command magnitude is in deadband, direction is treated as unknown and signed accumulation is skipped.
 class TurretAngleTracker {
 public:
   struct Config {
-    // Convention for output angle sign:
-    // +1 => positive angle when cmd>0 (logical direction)
-    // -1 => flip sign (swap positive/negative angles in software)
+    // WHY: Selects output sign convention relative to positive motor command.
     int angleSign = 1;
 
-    // If |cmd| <= deadband, treat direction as unknown and ignore tick deltas
-    // for the signed accumulator.
+    // CONTRACT: If |cmd| <= deadband, tick deltas do not contribute to signed angle.
     float cmdDeadband = 0.05f;
   };
 
@@ -27,25 +19,26 @@ public:
   void setConfig(const Config& cfg);
   const Config& config() const;
 
-  void setTicksPerRev(uint32_t ticksPerRev);               // sets both directions
+  // CONTRACT: Sets both direction calibrations to the same ticks-per-revolution.
+  void setTicksPerRev(uint32_t ticksPerRev);
   void setTicksPerRevPosNeg(uint32_t ticksPerRevPos, uint32_t ticksPerRevNeg);
   uint32_t ticksPerRevPos() const;
   uint32_t ticksPerRevNeg() const;
   uint32_t ticksPerRevForDirSign(int dirSign) const;
 
-  // Resets internal accumulation and sets current angle to 0.
+  // CONTRACT: Clears history and sets current signed angle to zero.
   void reset();
 
-  // Sets current signed angle as 0 (keeps accumulation history).
+  // WHY: Re-zeros relative angle while preserving accumulated history.
   void setZero();
 
-  // Update from latest absolute ticks and logical motor command [-1..1].
+  // CONTRACT: Update consumes latest absolute ticks and logical motor command in [-1,1].
   void update(long ticksAbsNow, float motorCmd);
 
-  // Signed relative angle in degrees since last setZero()/reset().
+  // WHY: Signed relative angle in degrees since last zero reference.
   float angleDegSigned() const;
 
-  // Wrapped [0,360) version of the signed angle.
+  // WHY: Wrapped [0,360) representation of the signed relative angle.
   float angleDegWrapped360() const;
 
 private:
@@ -56,8 +49,9 @@ private:
   bool hasPrev_;
   long prevTicksAbs_;
 
-  float angleDegAcc_;      // absolute signed angle accumulator (deg)
-  float zeroAngleDegAcc_;  // zero reference (deg)
+  // SECTION: Angle Accumulators
+  float angleDegAcc_;
+  float zeroAngleDegAcc_;
 
   uint32_t ticksPerRevPos_;
   uint32_t ticksPerRevNeg_;

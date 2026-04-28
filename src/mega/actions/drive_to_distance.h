@@ -4,16 +4,12 @@
 
 #include "actions/drive_by_distance.h"
 
-// Drive until LiDAR reports a target distance, while holding heading.
-//
-// This is intended as a fundamental movement primitive:
-// - uses LiDAR as the stop condition ("to distance")
-// - uses compass for heading hold (continuous heading)
-// - uses odometry only as an input to DriveByDistance's internal heading-hold loop
+// SECTION: LiDAR-targeted distance primitive with heading hold.
+// WHY: Uses LiDAR for stop condition and delegated steering for heading stability.
 class DriveToDistance {
 public:
   struct Config {
-    float    toleranceCm = 2.0f;      // stop when |lidar - target| <= tolerance
+    float    toleranceCm = 2.0f;
     float    minValidCm  = 5.0f;
     float    maxValidCm  = 800.0f;
     uint32_t timeoutMs   = 20000;
@@ -26,7 +22,7 @@ public:
   void setConfig(const Config& cfg);
   const Config& config() const;
 
-  // Configures the underlying DriveByDistance (heading hold / speed limits / etc).
+  // WHY: Exposes steering-loop tuning without duplicating those controls.
   void setDriveConfig(const DriveByDistance::Config& cfg);
   const DriveByDistance::Config& driveConfig() const;
 
@@ -45,7 +41,7 @@ public:
   State state() const;
 
   float targetDistanceCm() const;
-  float errorCm() const;  // lidar - target (signed)
+  float errorCm() const;
 
 private:
   void setState_(State s);

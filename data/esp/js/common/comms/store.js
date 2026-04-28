@@ -1,15 +1,15 @@
-// Shared browser-side store for ESP telemetry + events.
-// Classic script (not a module) so both modules and non-modules can use it via window.TelemetryStore.
+// WHY: Shared browser-side store for ESP telemetry + events.
+// WHY: Classic script (not a module) so both modules and non-modules can use it via window.TelemetryStore.
 
 (function initTelemetryStore() {
   if (window.TelemetryStore) return;
 
   const state = {
-    // Auth/link
+    // SECTION: Auth and link state.
     auth: { state: "DISARMED", triesLeft: 3, pending: false },
     link: { megaAgeMs: null, megaAgeMsAvg: null },
 
-    // Telemetry snapshot (normalized where useful)
+    // SECTION: Telemetry snapshot cache.
     telemetry: {
       lidarCm: NaN,
       lidarPacket: "",
@@ -22,28 +22,30 @@
       rgb: { r: null, g: null, b: null },
       rgbRaw: "",
       rgbClass: 0,
-      rgbRefs: null, // [{r,g,b},...]
+      // CONTRACT: `rgbRefs` is either null or an array of `{r,g,b}` entries.
+      rgbRefs: null,
       encCal: "--",
       turretCal: "--",
     },
 
-    // Latest alerts meta (for UI/debug)
+    // SECTION: Alerts metadata.
     alerts: { lastSeq: 0, lastLine: "" },
 
-    // Scan meta (display only)
+    // SECTION: Scan metadata (display only).
     scan: { active: false, dir: "+", nextDir: "+", last: "" },
   };
 
   let version = 0;
   const subs = new Set();
 
+  // SECTION: Snapshot and mutation API.
   function snap() {
     return { state, version };
   }
 
   function set(partial) {
     if (!partial || typeof partial !== "object") return;
-    // Shallow merge only at known top-level keys to avoid surprises.
+    // CONTRACT: Restrict merges to known top-level keys.
     if (partial.auth) Object.assign(state.auth, partial.auth);
     if (partial.link) Object.assign(state.link, partial.link);
     if (partial.telemetry) Object.assign(state.telemetry, partial.telemetry);
@@ -60,7 +62,7 @@
   function subscribe(cb) {
     if (typeof cb !== "function") return () => {};
     subs.add(cb);
-    // Fire once immediately so caller can render current values.
+    // WHY: Subscribers render immediately from current state.
     try {
       cb(snap());
     } catch {}
@@ -68,6 +70,7 @@
   }
 
   function clearTelemetry() {
+    // CONTRACT: Clearing telemetry preserves auth/link/alerts/scan state.
     state.telemetry = {
       lidarCm: NaN,
       lidarPacket: "",
@@ -94,3 +97,4 @@
 
   window.TelemetryStore = { get: () => state, set, subscribe, clearTelemetry, _snap: snap };
 })();
+

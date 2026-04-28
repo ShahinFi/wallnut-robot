@@ -1,12 +1,8 @@
 #pragma once
 
-// Copy to `src/esp/wifi_secrets.h` (gitignored) and fill in.
-// This avoids command-line quoting issues for SSIDs/passwords with spaces or '&'.
-//
-// Example:
-// #define WIFI_SSID "Titenet-IoT"
-// #define WIFI_PASSWORD "yourpassword"
+// SECTION: Local Wi-Fi secrets template.
+// WHY: Copy to `src/esp/wifi_secrets.h` (gitignored) to avoid shell-quoting issues.
+// CONTRACT: This file must not contain real credentials.
 
 #define WIFI_SSID ""
 #define WIFI_PASSWORD ""
-

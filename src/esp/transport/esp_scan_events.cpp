@@ -1,5 +1,5 @@
 #include "esp_scan_events.h"
-// (Refactor) Transport module implementation.
+// SECTION: Scan-event transport implementation.
 
 #include <math.h>
 #include <stdlib.h>
@@ -100,7 +100,7 @@ void ScanEvents::pushSample(float angleDeg, float distCm) {
 }
 
 void ScanEvents::serveHttp(ESP8266WebServer& server, uint32_t from) const {
-  // External wire format preserved: lines of "seq|TSCAN:...".
+  // CONTRACT: Preserve external wire format "seq|TSCAN:...".
   String out;
   out.reserve(2400);
 
@@ -121,7 +121,8 @@ void ScanEvents::serveHttp(ESP8266WebServer& server, uint32_t from) const {
     return;
   }
 
-  const uint16_t startIdx = (from > 0) ? (uint16_t)from : 0u;  // from=N => start at seq N+1 => index N
+  // WHY: `from=N` means return events strictly newer than N.
+  const uint16_t startIdx = (from > 0) ? (uint16_t)from : 0u;
   for (uint16_t i = startIdx; i < count_; ++i) {
     const uint32_t seq = (uint32_t)i + 1u;
 
@@ -156,4 +157,4 @@ void ScanEvents::serveHttp(ESP8266WebServer& server, uint32_t from) const {
   server.send(200, "text/plain", out);
 }
 
-}  // namespace esp_scan_events
+}

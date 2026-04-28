@@ -2,16 +2,16 @@
 
 #include <Arduino.h>
 
-// Turn in place by a given delta angle using continuous heading (unwrapped degrees).
+// SECTION: In-place turn primitive on continuous heading.
 class TurnToAngle {
 public:
   struct Config {
-    float    toleranceDeg    = 2.0f;     // stop when |remaining| <= tolerance
-    float    slowDownDeg     = 15.0f;    // taper speed for |remaining| < slowDownDeg
-    float    minSpeed        = 0.2f;     // minimum speed during taper (prevents stall)
-    float    maxSpeed        = 0.6f;     // cap speed
-    uint32_t timeoutMs       = 5000;     // safety timeout
-    float    motorTurnSign   = 1.0f;     // +1 or -1 to match wiring (flip if turn direction is wrong)
+    float    toleranceDeg    = 2.0f;
+    float    slowDownDeg     = 15.0f;
+    float    minSpeed        = 0.2f;
+    float    maxSpeed        = 0.6f;
+    uint32_t timeoutMs       = 5000;
+    float    motorTurnSign   = 1.0f;
   };
 
   enum class State : uint8_t {
@@ -27,21 +27,17 @@ public:
   void setConfig(const Config& cfg);
   const Config& config() const;
 
-  // Start a turn by deltaDeg (positive = CCW, negative = CW) with requested speed (0..1).
-  // currentHeadingDegContinuous is the latest continuous heading (unwrapped).
+  // CONTRACT: `requestedSpeed` is normalized [0..1].
   void begin(float currentHeadingDegContinuous, float deltaDeg, float requestedSpeed);
 
-  // Start a turn by deltaDeg, but always take the shortest equivalent delta in [-180, +180].
-  // This preserves the caller's intent for "turn by delta" while avoiding long spins
-  // when deltaDeg was expressed as e.g. 270 instead of -90.
+  // WHY: Normalizes delta to shortest equivalent turn in [-180, 180].
   void beginShortestDelta(float currentHeadingDegContinuous, float deltaDeg, float requestedSpeed);
 
-  // Non-blocking tick. Drives motors.
-  // Returns true when finished (Succeeded / TimedOut / Cancelled / Idle).
+  // CONTRACT: Returns true only when action is terminal or idle.
   bool update(float currentHeadingDegContinuous);
 
-  void cancel();     // stop immediately; state becomes Cancelled
-  void reset();      // stop and go to Idle
+  void cancel();
+  void reset();
 
   bool active() const;
   bool succeeded() const;
@@ -49,7 +45,7 @@ public:
 
   State state() const;
 
-  // Last computed remaining degrees: positive means CCW remaining, negative means CW remaining.
+  // WHY: Positive remaining means CCW left to turn; negative means CW.
   float remainingDeg() const;
 
 private:
@@ -60,7 +56,7 @@ private:
   State    state_;
 
   float    targetHeadingDegContinuous_;
-  float    remainingDeg_;          // last computed remaining
-  float    requestedSpeed_;        // 0..1 (caller input)
+  float    remainingDeg_;
+  float    requestedSpeed_;
   uint32_t startMs_;
 };

@@ -1,10 +1,8 @@
-// Debug/status bus for the /maze UI.
-// Pure UI/diagnostics: must not change robot behavior.
-//
-// Exposes `window.StatusBus` and renders a structured status panel if an element
-// with id `debugStatus` exists.
+// SECTION: /maze debug status bus.
+// CONTRACT: UI diagnostics only; no behavior side effects.
 
 (function initStatusBus() {
+  // SECTION: Local diagnostic state cache.
   const state = {
     startedMs: Date.now(),
     mapping: {},
@@ -83,11 +81,11 @@
   }
 
   function render() {
+    // SECTION: Status panel projection.
     const el = document.getElementById("debugStatus");
     if (!el) return;
 
-    // Match the rest of the UI: when not armed, do not show live debug status.
-    // This is display-only; it does not affect polling or robot behavior.
+    // CONTRACT: Hide live status when not armed; display-only policy.
     const authEl = document.getElementById("authStatus");
     const authText = authEl ? String(authEl.textContent || "").trim().toUpperCase() : "";
     if (!authText.startsWith("ARMED")) {
@@ -101,10 +99,10 @@
 
     const lines = [];
 
-    // 1) Mode / uptime (always)
+    // SECTION: Mode and uptime.
     lines.push(`MODE: ${fmtNetMode(s.net)} | up ${fmtNum(s.up_s, 1)}s`);
 
-    // 2) Pose (show only when we have any pose value)
+    // SECTION: Pose summary.
     const hasPose = (m.poseX != null || m.poseY != null || m.poseH != null);
     if (hasPose) {
       lines.push(
@@ -112,7 +110,7 @@
       );
     }
 
-    // 3) Scan (always)
+    // SECTION: Scan summary.
     const scanActive = !!m.scanActive;
     const scanParts = [];
     scanParts.push(`SCAN: ${scanActive ? "ACTIVE" : "idle"}`);
@@ -125,7 +123,7 @@
     if (scanActive) scanParts.push(`seq ${fmtInt(m.scanSeq)}`);
     lines.push(scanParts.join(" | "));
 
-    // 4) Autonomy / command (always, but compact when off)
+    // SECTION: Autonomy and command summary.
     const autoOn = !!a.running;
     if (!autoOn) {
       lines.push(`AUTO: OFF`);
@@ -155,13 +153,13 @@
       lines.push(tail.join(" | "));
     }
 
-    // Keep the panel scannable: cap to a small number of lines.
+    // WHY: Keep the panel compact and scannable.
     el.textContent = lines.slice(0, 5).join("\n");
   }
 
   window.StatusBus = { set, snap };
 
-  // Render loop (UI-only). Keep it light.
+  // CONTRACT: Lightweight UI-only refresh loop.
   setInterval(render, 200);
   render();
 })();

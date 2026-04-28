@@ -10,10 +10,12 @@ static const uint32_t kButtonDebounceMs = 250;
 extern RuntimeState gRt;
 
 void onButtonIsr() {
+  // CONTRACT: ISR only latches edge; heavy work runs in loop context.
   gRt.buttonEdge = true;
 }
 
 bool handleColorCalButton(RuntimeState& rt, uint32_t nowMs) {
+  // CONTRACT: Debounced edge-triggered state machine.
   if (!rt.buttonEdge) return false;
   if (nowMs - rt.lastButtonMs < kButtonDebounceMs) return false;
   rt.buttonEdge = false;
@@ -30,6 +32,7 @@ bool handleColorCalButton(RuntimeState& rt, uint32_t nowMs) {
 }
 
 bool tickColorCalibrationTask(RuntimeState& rt) {
+  // SECTION: Calibration task tick and publication.
   if (!rt.colorCalTask.active()) return false;
   rt.colorCalTask.update(&rt.lastRgb, rt.lastRgbValid);
   if (rt.colorCalTask.consumeJustSaved()) {

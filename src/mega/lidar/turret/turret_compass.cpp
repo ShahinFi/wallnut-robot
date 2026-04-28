@@ -2,7 +2,7 @@
 
 namespace {
 static const uint8_t kTurretCompassAddr = 0x61;
-}  // namespace
+}
 
 TurretCompass::TurretCompass() : compass_(kTurretCompassAddr) {}
 
