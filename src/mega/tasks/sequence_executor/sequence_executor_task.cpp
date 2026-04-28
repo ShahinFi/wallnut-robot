@@ -9,7 +9,7 @@ const float    kMaxValidCm     = 800.0f;
 const float    kMoveSpeed      = 1.0f;
 const float    kTurnSpeed      = 0.6f;
 const uint32_t kStepTimeoutMs  = 300000; // 5 minutes per step
-const uint32_t kMoveRampMs     = 1000;   // 1s accel ramp for straight MoveByDistance
+const uint32_t kMoveRampMs     = 2000;   // 2s accel ramp for straight MoveByDistance
 
 // Obstacle-aware MOVE speed policy (forward MOVE only, TURN unaffected).
 // IMPORTANT: hard safety stop/reflex is handled in main.cpp (FRONTSTOP cancels the step).

@@ -99,6 +99,11 @@ export function searchWindow(scanSamples, grid, window, matchCfg) {
     const rot = precomputeRot(headingDeg);
     for (let x = w.xMin; x <= w.xMax + 1e-6; x += stepX) {
       for (let y = w.yMin; y <= w.yMax + 1e-6; y += stepY) {
+          // Fundamentally reject candidates outside the map or inside wall grids
+          if (x < 0 || x >= grid.mapW_cm || y < 0 || y >= grid.mapH_cm) continue;
+          const c = grid.worldToCell(x, y);
+          if (!c || grid.cellState(c.cx, c.cy) === "occ") continue;
+
         const pose = { x, y, headingDeg };
         const s = scorePose(pose, rot, scanSamples, grid, matchCfg);
         if (s > best.score) best = { ok: true, pose, score: s };
@@ -173,7 +178,9 @@ function scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, cfg) {
   return sum / n;
 }
 
-export function searchWindowRectWalls(scanSamples, mapW_cm, mapH_cm, window, matchCfg) {
+export function searchWindowRectWalls(scanSamples, grid, window, matchCfg) {
+  const mapW_cm = grid.mapW_cm;
+  const mapH_cm = grid.mapH_cm;
   const w = clampWindow(window);
   const stepX = w.stepX > 0 ? w.stepX : 2;
   const stepY = w.stepY > 0 ? w.stepY : 2;
@@ -190,6 +197,11 @@ export function searchWindowRectWalls(scanSamples, mapW_cm, mapH_cm, window, mat
     const rot = precomputeRot(headingDeg);
     for (let x = w.xMin; x <= w.xMax + 1e-6; x += stepX) {
       for (let y = w.yMin; y <= w.yMax + 1e-6; y += stepY) {
+          // Fundamentally reject candidates outside the map or inside wall grids
+          if (x < 0 || x >= mapW_cm || y < 0 || y >= mapH_cm) continue;
+          const c = grid.worldToCell(x, y);
+          if (!c || grid.cellState(c.cx, c.cy) === "occ") continue;
+
         const pose = { x, y, headingDeg };
         const s = scorePoseRectWalls(pose, rot, scanSamples, mapW_cm, mapH_cm, matchCfg);
         if (s > best.score) best = { ok: true, pose, score: s };

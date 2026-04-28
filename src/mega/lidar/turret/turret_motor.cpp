@@ -7,6 +7,9 @@ static const int kTurretDirPin = 14;
 static const int kTurretPwmPin = 4;
 static const int kTurretEncAPin = 18;
 
+// Global calibration scale factor (default: 1.0f = no scaling)
+static float gTurretScale = 0.5f;
+
 volatile long gTurretTicksAbs = 0;
 
 static inline float clampSigned1(float x) {
@@ -39,7 +42,9 @@ void TurretMotor::setCmd(float cmd) {
   cmd = clampSigned1(cmd);
   lastCmd_ = cmd;
 
-  const float hwCmd = cmd * (float)cmdSign_;
+  // Apply the simple global scale here before hardware mapping
+  const float scaledCmd = clampSigned1(cmd * gTurretScale);
+  const float hwCmd = scaledCmd * (float)cmdSign_;
   const int dir = (hwCmd >= 0.0f) ? HIGH : LOW;
   const int pwm = (int)(fabsf(hwCmd) * 255.0f + 0.5f);
 

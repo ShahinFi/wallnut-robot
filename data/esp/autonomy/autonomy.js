@@ -19,7 +19,7 @@ if (!elStart || !elStop || !elStatus) {
   // ===== Tunables =====
   const kCmdTimeoutMs = 25000;
 
-  const kBackoffAfterReflexCm = -8; // tunable, "middle" value
+  const kBackoffAfterReflexCm = -15; // tunable, "middle" value
   const kMaxSegmentCm = 30; // cap single forward command length to reduce drift
 
   const MissionState = Object.freeze({
@@ -329,9 +329,19 @@ if (!elStart || !elStop || !elStatus) {
     wLen: 1.0,   // shortest path weight
     wTurn: 3.0,  // turn penalty weight
     wRisk: 6.0,  // obstacle/red proximity penalty weight
-    wFirst: 0.0, // prefer longer first straight run (0 disables)
+    wFirst: 0.0, // prefer longer first straight run from robot pose
     rRed: 3,     // risk radius around virtual red (cells)
     rOcc: 2,     // risk radius around occupied cells (cells)
+    // Code-only calibration gains (UI stays as pure intent sliders).
+    kLen: 1.00,
+    kTurn: 0.35,
+    kRisk: 4.00,
+    kFirst: 0.25,
+    // Effective calibrated weights (computed from slider * k*).
+    wLenEff: 1.0,
+    wTurnEff: 1.0,
+    wRiskEff: 1.0,
+    wFirstEff: 0.0,
   };
 
   function readPlannerConfigFromDom_() {
@@ -362,17 +372,22 @@ if (!elStart || !elStop || !elStatus) {
       return x;
     }
 
-    // UI range is 0..10 (weights are relative, not absolute counts).
-    const wl = clamp01_(wLen, 0, 10);
-    const wt = clamp01_(wTurn, 0, 10);
-    const wr = clamp01_(wRisk, 0, 10);
-    const wf = clamp01_(wFirst, 0, 10);
+    // Uncapped weights for massive detour scaling
+    const wl = clamp01_(wLen, 0, 10000);
+    const wt = clamp01_(wTurn, 0, 10000);
+    const wr = clamp01_(wRisk, 0, 10000);
+    const wf = clamp01_(wFirst, 0, 10000);
     if (wl != null) plannerCfg_.wLen = wl;
     if (wt != null) plannerCfg_.wTurn = wt;
     if (wr != null) plannerCfg_.wRisk = wr;
     if (wf != null) plannerCfg_.wFirst = wf;
-    plannerCfg_.rRed = Number.isFinite(rRed) && rRed >= 0 ? Math.floor(rRed) : plannerCfg_.rRed;
-    plannerCfg_.rOcc = Number.isFinite(rOcc) && rOcc >= 0 ? Math.floor(rOcc) : plannerCfg_.rOcc;
+
+    plannerCfg_.rRed = Number.isFinite(rRed) && rRed >= 0 ? Math.floor(rRed) : 3;
+    plannerCfg_.rOcc = Number.isFinite(rOcc) && rOcc >= 0 ? Math.floor(rOcc) : 2;
+    plannerCfg_.wLenEff = plannerCfg_.wLen * plannerCfg_.kLen;
+    plannerCfg_.wTurnEff = plannerCfg_.wTurn * plannerCfg_.kTurn;
+    plannerCfg_.wRiskEff = plannerCfg_.wRisk * plannerCfg_.kRisk;
+    plannerCfg_.wFirstEff = plannerCfg_.wFirst * plannerCfg_.kFirst;
 
     return plannerCfg_;
   }
@@ -392,6 +407,30 @@ if (!elStart || !elStop || !elStatus) {
     if (elWT && Number.isFinite(wt)) elWT.value = String(wt);
     if (elWR && Number.isFinite(wr)) elWR.value = String(wr);
     if (elWF && Number.isFinite(wf)) elWF.value = String(wf);
+    updatePlannerSliderValues_();
+  }
+
+  function updatePlannerSliderValues_() {
+    const keys = ["Len", "Turn", "Risk", "First"];
+    for (const k of keys) {
+      const input = document.getElementById(`planW${k}`);
+      const out = document.getElementById(`planW${k}Val`);
+      if (!input || !out) continue;
+      const v = Number(input.value);
+      out.textContent = Number.isFinite(v) ? v.toFixed(1) : "--";
+    }
+  }
+
+  function bindPlannerSliders_() {
+    const ids = ["planWLen", "planWTurn", "planWRisk", "planWFirst"];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const onChange = () => updatePlannerSliderValues_();
+      el.addEventListener("input", onChange);
+      el.addEventListener("change", onChange);
+    }
+    updatePlannerSliderValues_();
   }
 
   // ===== Risk precompute (distance transforms) =====
@@ -459,7 +498,8 @@ if (!elStart || !elStop || !elStatus) {
     for (let i = 0; i < n; i++) {
       const rr = riskFromDist_(distRed[i], rRedCells);
       const ro = riskFromDist_(distOcc[i], rOccCells);
-      risk[i] = rr + ro;
+      // Non-explosive merge: repulsion depends on nearest strong source, not source count.
+      risk[i] = Math.max(rr, ro);
     }
 
     return risk;
@@ -575,14 +615,17 @@ if (!elStart || !elStop || !elStatus) {
     function heuristic(cx, cy) {
       const dx = Math.abs(cx - goalCell.cx);
       const dy = Math.abs(cy - goalCell.cy);
-      return cfg.wLen * (dx + dy);
+      // Keep heuristic admissible with first-run reward: use the smallest guaranteed
+      // non-negative per-step floor.
+      const minStep = Math.max(0.001, cfg.wLenEff - cfg.wFirstEff);
+      return minStep * (dx + dy);
     }
 
     const open = new MinHeap_();
     // Seed: choose firstDir, paying the initial turn from robot heading into that firstDir.
     for (let firstDir = 0; firstDir < 4; firstDir++) {
       const initialTurnSteps = dirStepsBetween_(robotDirIdx, firstDir);
-      const initCost = cfg.wTurn * initialTurnSteps;
+      const initCost = cfg.wTurnEff * initialTurnSteps;
       const sid = stateId(startCell.cx, startCell.cy, firstDir, firstDir, false);
       if (initCost < gScore[sid]) {
         gScore[sid] = initCost;
@@ -621,9 +664,14 @@ if (!elStart || !elStop || !elStatus) {
         const nId = stateId(nx, ny, nd, st.firstDir, nextLeft);
 
         const turnSteps = dirStepsBetween_(st.moveDir, nd);
-        const riskCost = cfg.wRisk * (riskMap ? riskMap[nCellIdx] : 0.0);
-        const afterFirstPenalty = (cfg.wFirst > 0 && nextLeft) ? cfg.wFirst : 0.0;
-        const stepCost = cfg.wLen + (cfg.wTurn * turnSteps) + riskCost + afterFirstPenalty;
+        const riskCost = cfg.wRiskEff * (riskMap ? riskMap[nCellIdx] : 0.0);
+
+        // First-run preference: reward staying on the initial direction from the
+        // robot side. This is applied only while we are still on the first run.
+        const onFirstRun = !nextLeft;
+        const baseStepCost = cfg.wLenEff + (cfg.wTurnEff * turnSteps) + riskCost;
+        const firstRunReward = onFirstRun ? Math.min(cfg.wFirstEff, baseStepCost * 0.8) : 0.0;
+        const stepCost = baseStepCost - firstRunReward;
         const ng = baseG + stepCost;
         if (ng >= gScore[nId]) continue;
 
@@ -1121,6 +1169,7 @@ if (!elStart || !elStop || !elStatus) {
   // Initialize planner knobs from the map canvas data-* defaults (so UI reflects
   // the current configured weights on load).
   try { syncPlannerInputsFromDataset_(); } catch {}
+  try { bindPlannerSliders_(); } catch {}
 
   setUi_({ running: false, state: "idle" });
 

@@ -267,6 +267,13 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     //   display a pose relative to our matched anchor.
     // - After /set_pose, Mega's /odom reports absolute (east,north) in the map frame,
     //   so we must use it directly (otherwise we'd apply the correction twice).
+
+    // While synchronizing a perfectly matched pose to the robot, trust the match entirely.
+    // This prevents UI flicker and guarantees the planner gets pristine coordinates.
+    if (state.posePostPending || state.posePostInFlight) {
+      return { x: state.mapPose0.x, y: state.mapPose0.y, headingDeg: state.mapPose0.headingDeg };
+    }
+
     const headingDeg = wrap360(state.compassDeg);
     if (state.poseSentToRobot && Number.isFinite(state.odomEast) && Number.isFinite(state.odomNorth)) {
       return { x: state.odomEast, y: state.odomNorth, headingDeg };
@@ -348,6 +355,17 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       const ok = await postPoseToRobot(posePost.pose, { includeHeading: posePost.includeHeading });
       if (ok) {
         state.poseSentToRobot = true;
+
+        // SNAP telemetry to the baseline we just established. This eliminates the race
+        // condition where the planner asks for the pose before the next poll catches up.
+        state.odomEast = posePost.pose.x;
+        state.odomNorth = posePost.pose.y;
+        if (posePost.includeHeading && Number.isFinite(posePost.pose.headingDeg)) {
+          state.compassDeg = posePost.pose.headingDeg;
+        }
+        state.odomAnchorEast = state.odomEast;
+        state.odomAnchorNorth = state.odomNorth;
+
         posePost.pending = false;
         state.posePostPending = false;
         state.posePostLastOkMs = Date.now();
@@ -446,6 +464,14 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
       const [odR, hdgR] = await Promise.allSettled([fetchOdomEN(), fetchCompassDeg()]);
       const od = odR && odR.status === "fulfilled" ? odR.value : null;
       const hdg = hdgR && hdgR.status === "fulfilled" ? hdgR.value : null;
+
+      // Reject telemetry for a short window (400ms) after forcing a new pose,
+      // avoiding stale in-flight telemetry packets from resetting our perfectly snapped position.
+      if (Date.now() - state.posePostLastOkMs < 400) {
+        redraw();
+        return;
+      }
+
       if (od) {
         // Always update live odom so the arrow moves between scans (including reflex backoffs).
         state.odomEast = od.e;
@@ -560,7 +586,7 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
   }
 
   function matchRectWalls_(window) {
-    return searchWindowRectWalls(state.scanSamples, cfg.mapW_cm, cfg.mapH_cm, window, initRectWallMatchCfg_());
+    return searchWindowRectWalls(state.scanSamples, grid, window, initRectWallMatchCfg_());
   }
 
   function commitLockedPose_(pose) {
@@ -820,7 +846,17 @@ if (!elCanvas || !elStatus || !btnPlus || !btnMinus || !btnClear) {
     }
   }
 
-  function requestScanAuto() {
+  async function requestScanAuto() {
+    if (state.scanActive || pollActive) return { ok: false, status: "busy" };
+
+    // Drain any queued events BEFORE deciding the direction.
+    // If a previous scan succeeded while the network was lagging/timed out,
+    // its TSCAN:DONE is in the ESP's event backlog. Polling here ensures we
+    // process it and flip `state.nextScanDir` accurately based on true hardware reality.
+    if (!pollActive) {
+      try { await pollOnce(); } catch {}
+    }
+
     // Enforce alternation (wiring safety): ignore manual direction preference.
     const dir = state.nextScanDir === "-" ? "-" : "+";
     return startScan(dir === "+" ? "/scan_plus" : "/scan_minus", `scan ${dir}`);

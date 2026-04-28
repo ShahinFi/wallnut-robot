@@ -974,10 +974,8 @@ body .divider {
 }
 
 body .planner-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -987,72 +985,118 @@ body .planner-title {
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.78);
   white-space: nowrap;
+  line-height: 1;
 }
 
 body .planner-controls {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: max-content;
-  align-items: center;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 10px;
   min-width: 0;
 }
 
-body .planner-help {
-  margin-top: 8px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
-  line-height: 1.25;
-}
-
 body .planner-item {
   display: grid;
-  grid-template-columns: 1fr 64px;
+  grid-template-columns: minmax(80px, 112px) minmax(100px, 1fr) 44px;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+  padding: 8px 10px;
 }
 
 body .planner-label {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: none;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: rgba(255, 255, 255, 0.70);
-  white-space: normal;
-  line-height: 1.1;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 body .planner-input {
-  width: 64px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 10, 18, 0.55);
-  color: rgba(255, 255, 255, 0.92);
+  width: 100%;
+  min-width: 0;
+  color: rgba(255,255,255,.92);
   outline: none;
 }
 
-body .planner-input:focus {
+body .planner-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(90deg, rgba(88,243,255,.42), rgba(155,107,255,.28));
+}
+
+body .planner-slider:focus {
+  border-color: rgba(88,243,255,.55);
+  box-shadow: 0 0 0 3px rgba(88,243,255,.14);
+}
+
+body .planner-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.92);
+  background: radial-gradient(circle at 30% 30%, #ffffff, rgba(88,243,255,.8) 35%, rgba(155,107,255,.85) 78%);
+  box-shadow: 0 0 10px rgba(88,243,255,.26);
+}
+
+body .planner-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.92);
+  background: radial-gradient(circle at 30% 30%, #ffffff, rgba(88,243,255,.8) 35%, rgba(155,107,255,.85) 78%);
+  box-shadow: 0 0 10px rgba(88,243,255,.26);
+}
+
+body .planner-value {
+  justify-self: end;
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+body .planner-slider:focus-visible {
   border-color: rgba(130, 95, 255, 0.55);
   box-shadow: 0 0 0 3px rgba(130, 95, 255, 0.18);
 }
 
+/* Mid-width maze layout: avoid planner label/slider collisions by stacking
+   one control per row while keeping desktop layout elsewhere. */
+@media (min-width: 981px) and (max-width: 1380px) {
+  body.page-maze .planner-controls {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  body.page-maze .planner-item {
+    grid-template-columns: minmax(86px, 118px) minmax(100px, 1fr) 30px;
+    gap: 8px;
+    padding: 6px 9px;
+  }
+}
+
 @media (max-width: 520px) {
   body .planner-row {
-    align-items: flex-start;
-    flex-direction: column;
+    gap: 8px;
   }
   body .planner-controls {
-    grid-auto-flow: row;
-    justify-content: flex-start;
+    width: 100%;
+    grid-template-columns: 1fr;
   }
   body .planner-item {
-    grid-template-columns: max-content 1fr;
-  }
-  body .planner-input {
-    width: 100%;
-    max-width: 120px;
+    grid-template-columns: minmax(74px, 96px) minmax(120px, 1fr) 44px;
   }
 }
 

@@ -89,23 +89,26 @@
                 <div class="planner-controls">
                   <label class="planner-item" title="Weight for shorter paths. Higher value = stronger preference for a shorter path.">
                     <span class="planner-label">Shorter path</span>
-                    <input class="planner-input" id="planWLen" type="number" min="0" max="10" step="0.5" value="1" inputmode="decimal" />
+                    <input class="planner-input planner-slider" id="planWLen" type="range" min="0" max="10" step="0.1" value="1" />
+                    <output class="planner-value" id="planWLenVal" for="planWLen">1.0</output>
                   </label>
                   <label class="planner-item" title="Weight for clearance. Higher value = keeps more distance from red tiles and walls.">
                     <span class="planner-label">Clearance</span>
-                    <input class="planner-input" id="planWRisk" type="number" min="0" max="10" step="0.5" value="6" inputmode="decimal" />
+                    <input class="planner-input planner-slider" id="planWRisk" type="range" min="0" max="10" step="0.1" value="7" />
+                    <output class="planner-value" id="planWRiskVal" for="planWRisk">7.0</output>
                   </label>
                   <label class="planner-item" title="Turn penalty weight. Higher value = fewer turns (this is NOT a turn count).">
                     <span class="planner-label">Fewer turns</span>
-                    <input class="planner-input" id="planWTurn" type="number" min="0" max="10" step="0.5" value="3" inputmode="decimal" />
+                    <input class="planner-input planner-slider" id="planWTurn" type="range" min="0" max="10" step="0.1" value="3" />
+                    <output class="planner-value" id="planWTurnVal" for="planWTurn">3.0</output>
                   </label>
                   <label class="planner-item" title="Prefer a longer first straight run from the robot. Higher value = avoid tiny first segments.">
                     <span class="planner-label">Long first run</span>
-                    <input class="planner-input" id="planWFirst" type="number" min="0" max="10" step="0.5" value="0" inputmode="decimal" />
+                    <input class="planner-input planner-slider" id="planWFirst" type="range" min="0" max="10" step="0.1" value="5" />
+                    <output class="planner-value" id="planWFirstVal" for="planWFirst">5.0</output>
                   </label>
                 </div>
               </div>
-              <div class="planner-help">Weight: 0–10. Higher means more important. Not a count.</div>
             </div>
           </section>
 
@@ -123,7 +126,7 @@
                 height="420"
                 data-map-w-cm="105"
                 data-map-h-cm="185"
-                data-cell-cm="5"
+                data-cell-cm="10"
                 data-init-ymax-frac="0.4"
                 data-init-heading-span-deg="20"
                 data-init-wall-sigma-cm="1.5"
@@ -134,12 +137,12 @@
                 data-goal-x-cm="15"
                 data-goal-y-cm="165"
                 data-goal-tol-cells="1"
-                data-red-inflate-x-cells="1"
+                data-red-inflate-x-cells="0"
                 data-red-inflate-y-cells="0"
                 data-plan-w-len="1"
+                data-plan-w-risk="7"
                 data-plan-w-turn="3"
-                data-plan-w-risk="6"
-                data-plan-w-first="0"
+                data-plan-w-first="5"
                 data-plan-risk-radius-red-cells="3"
                 data-plan-risk-radius-occ-cells="2"
                 data-match-min-dist-cm="2"

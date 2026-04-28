@@ -387,7 +387,7 @@ void setup() {
 
   // --- DriveByDistance test config ---
   DriveByDistance::Config dcfg = driveByDistance.config();
-  dcfg.maxSpeed = 0.6f;
+  dcfg.maxSpeed = 0.8f;
   dcfg.minSpeed = 0.2f;
   dcfg.timeoutMs = 8000;
   driveByDistance.setConfig(dcfg);
