@@ -31,7 +31,7 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ## How It Works
 
-- A rotating turret with motor encoder and a 1D LiDAR produces 2D environment scans.
+- A rotating turret with a dedicated CMPS14 compass and a 1D LiDAR produces 2D environment scans; sweep stop and LiDAR sample angles are both compass-referenced.
 - Scan matching is used to continuously correct localization drift.
 - Sensor fusion combines scan matching with wheel odometry and compass heading.
 - Multi-criteria path planning selects motion, then commands are executed step-by-step.
@@ -59,6 +59,7 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 - **Mega -> ESP (UART):**
   - Sensor and telemetry packets (LiDAR, compass, odometry, color, calibration/status).
   - Scan stream (`TSCAN:BEGIN/SAMPLE/DONE/CANCEL`).
+  - `TSCAN` sample angles are generated from turret-compass heading deltas (not encoder tick angle projection).
   - Motion and safety events (`EVT:CMDOK`, `CMDFAIL`, `CMDCANCEL`, `FRONTSTOP`, `RED`).
 
 - **ESP -> Browser (HTTP):**
@@ -104,13 +105,91 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 - Arduino Mega 2560.
 - ESP8266 (NodeMCU v2).
-- 1D LiDAR sensor (mounted on rotating turret).
-- Compass sensor.
-- Drive motors.
-- Wheel encoders.
-- Color sensor (TCS34725).
-- Turret motor + encoder mechanism.
+- Garmin LIDAR-Lite v4 LED (mounted on rotating turret).
+- 2x CMPS14 tilt-compensated compass modules (body compass + turret compass).
+- 2x Pololu DRV8835 Dual Motor Driver Shield for Arduino (one shield for the two drive motors, one shield for the turret motor).
+- 3x LEGO MINDSTORMS EV3 Large Servo Motor (2 drive motors + 1 turret motor).
+- Gravity: TCS34725 RGB Color Sensor for Arduino (SKU: SEN0212).
+- Motor encoders are integrated in all LEGO MINDSTORMS EV3 Large Servo Motors (drive and turret).
 - Custom rotating turret assembly for 1D LiDAR scanning.
+
+## Hardware Schematic
+
+```mermaid
+flowchart LR
+  UI[Browser UI]
+  ESP[ESP8266 NodeMCU v2]
+  MEGA[Arduino Mega 2560]
+
+  subgraph Drive[Drive System]
+    DRV_A[Pololu DRV8835 Shield A]
+    M_L[EV3 Large Servo Motor - Left]
+    M_R[EV3 Large Servo Motor - Right]
+  end
+
+  subgraph Turret[Turret System]
+    DRV_B[Pololu DRV8835 Shield B]
+    M_T[EV3 Large Servo Motor - Turret]
+    LIDAR[Garmin LIDAR-Lite v4 LED]
+    C_T[CMPS14 Turret Compass]
+  end
+
+  subgraph Sensors[Body Sensors]
+    C_B[CMPS14 Body Compass]
+    COLOR[Gravity TCS34725 RGB Sensor SEN0212]
+    BTN[Color Cal Button]
+  end
+
+  UI <-->|HTTP| ESP
+  ESP <-->|UART2 115200| MEGA
+
+  MEGA -->|DIR/PWM L,R| DRV_A
+  DRV_A --> M_L
+  DRV_A --> M_R
+
+  MEGA -->|DIR/PWM Turret| DRV_B
+  DRV_B --> M_T
+
+  M_L -->|Encoder A pulses| MEGA
+  M_R -->|Encoder A pulses| MEGA
+  M_T -->|Encoder A pulses| MEGA
+
+  MEGA <-->|I2C| LIDAR
+  MEGA <-->|I2C| C_B
+  MEGA <-->|I2C| C_T
+  MEGA <-->|I2C| COLOR
+
+  BTN --> MEGA
+  MEGA --> LCD
+
+  subgraph Display[Display]
+    LCD[LCD 20x4 Parallel]
+  end
+```
+
+### Mega Pin Map
+
+| Function | Mega Pin(s) | Notes |
+|---|---|---|
+| Drive left motor DIR/PWM | D15 / D5 | DRV8835 shield A |
+| Drive right motor DIR/PWM | D7 / D6 | DRV8835 shield A |
+| Turret motor DIR/PWM | D14 / D4 | DRV8835 shield B |
+| Left wheel encoder A | D2 (INT) | Rising edge count |
+| Right wheel encoder A | D3 (INT) | Rising edge count |
+| Turret encoder A | D18 (INT) | Rising edge count |
+| Color calibration button | D19 (INT) | `INPUT_PULLUP`, falling edge |
+| LCD RS/EN/D4/D5/D6/D7 | D22/D24/D26/D28/D30/D32 | 20x4 parallel LCD |
+| Mega ↔ ESP UART2 | TX2 D16, RX2 D17 | 115200 baud |
+| I2C bus | SDA D20, SCL D21 | Shared by LiDAR + compasses + color sensor |
+
+### I2C Devices
+
+| Device | Address |
+|---|---|
+| CMPS14 body compass | `0x60` |
+| CMPS14 turret compass | `0x61` |
+| TCS34725 color sensor | `0x29` |
+| Garmin LIDAR-Lite v4 LED | `0x62` |
 
 WallNut is intentionally built around low-cost, noisy, lab-grade sensors, with robustness achieved primarily through software and algorithm design.
 
@@ -216,7 +295,7 @@ Important: keep all secrets and local machine settings out of git.
 
 ## Calibration and Readiness
 
-- Run color, encoder, and turret calibration before serious autonomy runs.
+- Run color calibration, drive-motion calibration, and turret compass alignment checks before serious autonomy runs.
 - Calibration quality directly affects classification, motion scale, and scan consistency.
 
 ## License

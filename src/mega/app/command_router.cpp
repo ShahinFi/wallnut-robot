@@ -258,7 +258,7 @@ bool handleEspCommand(RuntimeState& rt, const CompassData& heading, float) {
     const int dir = (espCmd.type == EspCommand::Type::TurretScanMinus) ? -1 : +1;
     Serial2.print("TSCAN:BEGIN,");
     Serial2.println(dir < 0 ? "-" : "+");
-    rt.turretSweep.begin(&rt.turretMotor, &rt.turretAngle, &rt.lidar, dir, rt.turretMotor.ticksAbs(), millis());
+    rt.turretSweep.begin(&rt.turretMotor, &rt.turretAngle, &rt.turretCompass, &rt.lidar, dir, rt.turretMotor.ticksAbs(), millis());
     return true;
   }
 

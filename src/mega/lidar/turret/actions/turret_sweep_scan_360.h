@@ -4,6 +4,7 @@
 
 class TurretMotor;
 class TurretAngleTracker;
+class TurretCompass;
 class Lidar;
 
 // WHY: Runs a one-revolution turret sweep and emits angle-distance samples.
@@ -11,8 +12,11 @@ class Lidar;
 class TurretSweepScan360 {
 public:
   struct Config {
+    enum class DoneMode : uint8_t { EncoderTicks, TurretCompass };
+
     float cmdAbs = 0.25f;
     uint32_t timeoutMs = 12000;
+    DoneMode doneMode = DoneMode::EncoderTicks;
     // CONTRACT: sampleEveryTicks==0 enables auto cadence from targetSamplesPerRev.
     uint16_t sampleEveryTicks = 1;
     uint16_t targetSamplesPerRev = 360;
@@ -39,7 +43,7 @@ public:
 
   // CONTRACT: Starts one sweep using calibration from the provided angle tracker.
   void begin(TurretMotor* motor, TurretAngleTracker* angleTracker,
-             Lidar* lidar, int dirSign, long ticksAbsNow, uint32_t nowMs);
+             TurretCompass* turretCompass, Lidar* lidar, int dirSign, long ticksAbsNow, uint32_t nowMs);
 
   // CONTRACT: Returns true when the sweep reaches any terminal state.
   bool update(long ticksAbsNow, uint32_t nowMs);
@@ -52,13 +56,14 @@ public:
 
 private:
   void stopMotor_();
-  void emitSample_(long ticksAbsNow, float lidarDistanceCm, uint32_t nowMs);
+  void emitSample_(long ticksAbsNow, float lidarDistanceCm, uint32_t nowMs, float forcedAngleDeg);
 
   Config cfg_;
   State state_;
 
   TurretMotor* motor_;
   TurretAngleTracker* angle_;
+  TurretCompass* turretCompass_;
   Lidar* lidar_;
   int dirSign_;
 
@@ -71,10 +76,15 @@ private:
   float lastCmd_;
 
   uint32_t startMs_;
+  float startCompassContinuousDeg_;
+  float targetCompassContinuousDeg_;
+  bool compassTargetValid_;
 
   // WHY: LiDAR measurement stamping (for latency compensation).
   bool lidarInFlight_;
   long lidarTicksStart_;
+  float lidarCompassStartContinuousDeg_;
+  bool lidarCompassStartValid_;
   uint32_t finishGraceStartMs_;
 
   SampleCallback cb_;

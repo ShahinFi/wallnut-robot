@@ -6,6 +6,7 @@
 #include "lidar/lidar.h"
 #include "lidar/utils/moving_average.h"
 #include "lidar/turret/turret_motor.h"
+#include "lidar/turret/turret_compass.h"
 #include "lidar/turret/turret_encoder_cal.h"
 #include "lidar/turret/turret_angle_tracker.h"
 #include "lidar/turret/actions/turret_sweep_scan_360.h"
@@ -21,6 +22,7 @@ struct RuntimeState {
   Lidar lidar;
   MovingAverage lidarAvg;
   TurretMotor turretMotor;
+  TurretCompass turretCompass;
   TurretEncoderCal turretEncCal;
   TurretAngleTracker turretAngle;
   TurretSweepScan360 turretSweep;

@@ -31,6 +31,10 @@ void initHardware(RuntimeState& rt) {
     maze_lcd::showFatal("LiDAR failed", "Check I2C/wiring");
     while (1) {}
   }
+  if (!rt.turretCompass.begin()) {
+    maze_lcd::showFatal("Turret compass failed", "Check I2C/wiring");
+    while (1) {}
+  }
 
   rt.turretMotor.begin();
   rt.turretEncCal.loadFromEeprom();
@@ -41,6 +45,7 @@ void initHardware(RuntimeState& rt) {
   {
     TurretSweepScan360::Config cfg = rt.turretSweep.config();
     cfg.cmdAbs = 0.20f;
+    cfg.doneMode = TurretSweepScan360::Config::DoneMode::TurretCompass;
     cfg.sampleEveryTicks = 1;
     rt.turretSweep.setConfig(cfg);
   }
