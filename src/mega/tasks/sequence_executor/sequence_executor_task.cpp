@@ -43,7 +43,6 @@ SequenceExecutorTask::SequenceExecutorTask()
   driveBy_(),
   driveTo_(),
   turn_(),
-  ui_(),
   driveActive_(false),
   targetCm_(0.0f),
   moveByCm_(0.0f),
@@ -96,8 +95,6 @@ void SequenceExecutorTask::clearAlignHeading() {
 
 void SequenceExecutorTask::begin(float headingDegContinuous, float avgTravelCm) {
   if (!steps_) return;
-  ui_.begin();
-  ui_.showIdle();
   driveBy_.reset();
   driveTo_.reset();
   turn_.reset();
@@ -127,16 +124,13 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (aligning_) {
-    ui_.showRunning(lidarAvgCm, drivenCmAbs_, 0, totalSteps_, SequenceExecutorUI::StepLabel::Turn);
     if (stepTimedOut_()) {
-      ui_.showFailed("Align timeout");
       setState_(State::Failed);
       return true;
     }
     const bool done = turn_.update(headingDegContinuous);
     if (!done) return false;
     if (turn_.timedOut() || !turn_.succeeded()) {
-      ui_.showFailed("Align failed");
       setState_(State::Failed);
       return true;
     }
@@ -148,14 +142,11 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   const SequenceStep& step = steps_[stepIndex_];
   drivenCmAbs_ = avgTravelCmAbs;
   if (step.type == SequenceStepType::End) {
-    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
-                    SequenceExecutorUI::StepLabel::End);
     setState_(State::Succeeded);
     return true;
   }
 
   if (stepTimedOut_()) {
-    ui_.showFailed("Step timeout");
     setState_(State::Failed);
     return true;
   }
@@ -165,8 +156,6 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   if (inMove) drivenCmAbs_ = avgTravelCmAbs;
 
   if (step.type == SequenceStepType::MoveToDistance) {
-    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
-                    SequenceExecutorUI::StepLabel::Move);
     // Forward motion uses the obstacle-aware scaling; backing up does not.
     const float error = lidarAvgCm - targetCm_;
     const float speedAbs =
@@ -180,12 +169,10 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     const bool done = driveTo_.update(headingDegContinuous, avgTravelCm, lidarAvgCm);
     if (done) {
       if (driveTo_.timedOut()) {
-        ui_.showFailed("Drive timeout");
         setState_(State::Failed);
         return true;
       }
       if (!driveTo_.succeeded()) {
-        ui_.showFailed("Invalid LiDAR");
         setState_(State::Failed);
         return true;
       }
@@ -196,8 +183,6 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (step.type == SequenceStepType::MoveByDistance) {
-    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
-                    SequenceExecutorUI::StepLabel::Move);
     if (!driveActive_) {
       startMove_(headingDegContinuous, avgTravelCm);
     }
@@ -216,7 +201,6 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
     const bool done = driveBy_.update(headingDegContinuous, avgTravelCm);
     if (done) {
       if (driveBy_.timedOut()) {
-        ui_.showFailed("Drive timeout");
         setState_(State::Failed);
         return true;
       }
@@ -229,12 +213,9 @@ bool SequenceExecutorTask::update(float headingDegContinuous, float avgTravelCm,
   }
 
   if (step.type == SequenceStepType::TurnDeg || step.type == SequenceStepType::TurnDegShortest) {
-    ui_.showRunning(lidarAvgCm, drivenCmAbs_, stepIndex_ + 1, totalSteps_,
-                    SequenceExecutorUI::StepLabel::Turn);
     const bool done = turn_.update(headingDegContinuous);
     if (!done) return false;
     if (turn_.timedOut() || !turn_.succeeded()) {
-      ui_.showFailed("Turn failed");
       setState_(State::Failed);
       return true;
     }
@@ -261,7 +242,6 @@ void SequenceExecutorTask::cancel() {
   driveActive_ = false;
   moveRampStartMs_ = 0;
   moveRampActive_ = false;
-  ui_.showFailed("Cancelled");
   setState_(State::Cancelled);
 }
 
@@ -272,8 +252,6 @@ void SequenceExecutorTask::reset() {
   driveActive_ = false;
   moveRampStartMs_ = 0;
   moveRampActive_ = false;
-  ui_.begin();
-  ui_.showIdle();
   setState_(State::Idle);
 }
 

@@ -82,20 +82,6 @@ static bool parseLine(const String& line, EspCommand& out) {
     out.text = "";
     return true;
   }
-  if (s.equalsIgnoreCase("North")) {
-    out.type = EspCommand::Type::North;
-    out.value = 0;
-    out.value2 = 0;
-    out.text = "";
-    return true;
-  }
-  if (s.equalsIgnoreCase("SetNorth")) {
-    out.type = EspCommand::Type::SetNorth;
-    out.value = 0;
-    out.value2 = 0;
-    out.text = "";
-    return true;
-  }
   if (s.equalsIgnoreCase("EncCal")) {
     out.type = EspCommand::Type::EncCal;
     out.value = 0;

@@ -95,18 +95,6 @@ static void handleCompass_() {
   g.server->send(200, "text/plain", "Compass OK");
 }
 
-static void handleNorth_() {
-  if (!isArmed_()) return rejectNotArmed_();
-  Serial.println("North");
-  g.server->send(200, "text/plain", "North OK");
-}
-
-static void handleSetNorth_() {
-  if (!isArmed_()) return rejectNotArmed_();
-  Serial.println("SetNorth");
-  g.server->send(200, "text/plain", "SetNorth OK");
-}
-
 static void handleEncCal_() {
   if (g.server->method() == HTTP_POST) {
     if (!isArmed_()) return rejectNotArmed_();
@@ -377,8 +365,6 @@ void registerRoutes(ESP8266WebServer& server,
   server.on("/backwards5", []() { handleMove_(-5); });
   server.on("/backwards20", []() { handleMove_(-20); });
   server.on("/compass", handleCompass_);
-  server.on("/north", []() { handleNorth_(); });
-  server.on("/setnorth", []() { handleSetNorth_(); });
   server.on("/maze", HTTP_GET, []() { esp_static_files::serveFile(*g.server, "/esp/maze.html", "text/html"); });
   server.on("/arm", HTTP_POST, handleArm_);
   server.on("/disarm", HTTP_POST, handleDisarm_);

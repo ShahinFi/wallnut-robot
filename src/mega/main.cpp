@@ -8,12 +8,10 @@
 #include "lidar/turret/turret_angle_tracker.h"
 #include "lidar/turret/actions/turret_sweep_scan_360.h"
 #include "motor/motor.h"
-#include "display/lcd.h"
 #include "missions/maze/maze_lcd.h"
 #include "encoder/encoder.h"
 #include "odometry/odometry.h"
 #include "odometry/odometry_manager.h"
-#include "actions/drive_by_distance.h"
 #include "tasks/encoder_calibration/encoder_calibration_task.h"
 #include "tasks/sequence_executor/sequence_executor_task.h"
 #include "esp/esp_uart.h"
@@ -44,9 +42,7 @@ static TurretMotor     turretMotor;
 static TurretEncoderCal turretEncCal;
 static TurretAngleTracker turretAngle;
 static TurretSweepScan360 turretSweep;
-static uint32_t        lastCompassUiMs = 0;
 static Odometry        odom(0.0f);
-static DriveByDistance driveByDistance;
 static EncoderCalibrationTask encCalTask;
 static SequenceExecutorTask seqExecTask;
 static ColorSensor     colorSensor;
@@ -56,14 +52,10 @@ static ColorRgb        lastRgb = {0, 0, 0};
 static bool            lastRgbValid = false;
 static char            gEspIpStr[16] = "0.0.0.0";
 static uint32_t        gLastIpReqMs = 0;
-static uint32_t        lastEncDbgMs = 0;
 static bool            headingValid = false;
 static CompassData     lastHeading = {};
-static bool            seqHeadingSet = false;
-static float           seqHeadingHoldDeg = 0.0f;
 
 // ===== Option 1 security (UART passcode arming) =====
-static const char kEspPasscode[] = ESP_PASSCODE_STR;
 static const int  kEspPasscodeInt = ESP_PASSCODE_INT;
 static bool gEspArmed = false;
 static uint8_t gEspFailCount = 0;
@@ -385,13 +377,6 @@ void setup() {
   odom.setPulsesPerMeter(787.0f);
   odomManagerInit(&odom);
 
-  // --- DriveByDistance test config ---
-  DriveByDistance::Config dcfg = driveByDistance.config();
-  dcfg.maxSpeed = 0.8f;
-  dcfg.minSpeed = 0.2f;
-  dcfg.timeoutMs = 8000;
-  driveByDistance.setConfig(dcfg);
-
   seqExecTask.setSequence(seqSteps);
 }
 
@@ -484,7 +469,6 @@ void loop() {
       if (digitalRead(kButtonPin) == LOW) {
         gLastButtonMs = nowMs;
         if (!colorCalTask.active()) {
-          if (driveByDistance.active()) driveByDistance.cancel();
           if (encCalTask.active()) encCalTask.cancel();
           if (seqExecTask.active()) seqExecTask.cancel();
           motorDrive(0.0f, 0.0f);
@@ -543,7 +527,6 @@ void loop() {
         gEspArmed = false;
         Serial2.println("AUTH:OFF");
       }
-      if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);
@@ -552,7 +535,6 @@ void loop() {
 
     if (gEspLocked) {
       Serial2.println("AUTH:LOCKED");
-      if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);
@@ -561,7 +543,6 @@ void loop() {
 
     if (!gEspArmed) {
       Serial2.println("AUTH:REQUIRED");
-      if (driveByDistance.active()) driveByDistance.cancel();
       if (encCalTask.active()) encCalTask.cancel();
       if (seqExecTask.active()) seqExecTask.cancel();
       motorDrive(0.0f, 0.0f);
@@ -652,16 +633,15 @@ void loop() {
     const bool isMotionCmd =
         (espCmd.type == EspCommand::Type::Move || espCmd.type == EspCommand::Type::Turn ||
          espCmd.type == EspCommand::Type::TurnShortest || espCmd.type == EspCommand::Type::TurnAbs ||
-         espCmd.type == EspCommand::Type::North || espCmd.type == EspCommand::Type::EncCal);
+         espCmd.type == EspCommand::Type::EncCal);
     const bool motorBusy =
-        (seqExecTask.active() || driveByDistance.active() || encCalTask.active() || turretSweep.active());
+        (seqExecTask.active() || encCalTask.active() || turretSweep.active());
     if (isMotionCmd && motorBusy) {
       sendEvtPose_("CMDFAIL", NAN);
       return;
     }
 
     // Commands below this point are motion/task-affecting.
-    if (driveByDistance.active()) driveByDistance.cancel();
     if (encCalTask.active()) encCalTask.cancel();
     if (seqExecTask.active()) seqExecTask.cancel();
 
@@ -729,22 +709,6 @@ void loop() {
       gSeqWasActive = true;
       gReflexLatchedRed = false;
       gReflexLatchedFront = false;
-    } else if (espCmd.type == EspCommand::Type::North) {
-      if (!seqHeadingSet) {
-      } else {
-        const float delta = wrapDegDiff180(seqHeadingHoldDeg, heading.headingDegContinuous);
-        espSteps[0] = {SequenceStepType::TurnDeg, delta};
-        espSteps[1] = {SequenceStepType::End, 0.0f};
-        seqExecTask.setSequence(espSteps);
-        seqExecTask.clearAlignHeading();
-        seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-        gSeqWasActive = true;
-        gReflexLatchedRed = false;
-        gReflexLatchedFront = false;
-      }
-    } else if (espCmd.type == EspCommand::Type::SetNorth) {
-      seqHeadingHoldDeg = heading.headingDegContinuous;
-      seqHeadingSet = true;
     } else if (espCmd.type == EspCommand::Type::EncCal) {
       encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
     }
@@ -777,9 +741,6 @@ void loop() {
         Serial2.println(mmPerPulse, 2);
       }
     }
-  } else if (driveByDistance.active()) {
-    OdometryData od = odomRaw();
-    driveByDistance.update(heading.headingDegContinuous, od.avgCmSigned);
   }
 
   // Command completion event (lets browser know a step finished).

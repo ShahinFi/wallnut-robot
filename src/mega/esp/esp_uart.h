@@ -9,8 +9,6 @@ struct EspCommand {
     Turn,
     TurnShortest,
     TurnAbs,
-    North,
-    SetNorth,
     EncCal,
     MapPose,
     TurretZero,

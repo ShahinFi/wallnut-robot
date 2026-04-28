@@ -5,7 +5,6 @@
 #include "actions/drive_by_distance.h"
 #include "actions/drive_to_distance.h"
 #include "actions/turn_to_angle.h"
-#include "tasks/sequence_executor/ui/sequence_executor_ui.h"
 
 enum class SequenceStepType : uint8_t { MoveToDistance, MoveByDistance, TurnDeg, TurnDegShortest, End };
 
@@ -55,7 +54,6 @@ private:
   DriveByDistance driveBy_;
   DriveToDistance driveTo_;
   TurnToAngle   turn_;
-  SequenceExecutorUI ui_;
 
   bool     driveActive_;
   float    targetCm_;

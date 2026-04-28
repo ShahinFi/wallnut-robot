@@ -60,18 +60,6 @@ function move(dir, dis) {
   console.log("Drive", dir, dis); // Log the movement command to the console for debugging
 }
 
-// Function to face north
-function faceNorth() {
-  sendCommand("/north");
-  console.log("face north");
-}
-
-// Set current heading as "north" reference (used by FACE NORTH)
-function setNorth() {
-  sendCommand("/setnorth");
-  console.log("set north");
-}
-
 // Open the dedicated maze solver page (separate from color maze).
 function openMazeSolver() {
   window.location.href = "/maze";
