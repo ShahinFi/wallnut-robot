@@ -315,6 +315,339 @@ static void maybeRequestEspIp_() {
   Serial2.println("IPREQ");
 }
 
+static void cancelMotionOwners_() {
+  if (encCalTask.active()) encCalTask.cancel();
+  if (seqExecTask.active()) seqExecTask.cancel();
+}
+
+static void stopAndCancelMotionOwners_() {
+  cancelMotionOwners_();
+  motorDrive(0.0f, 0.0f);
+}
+
+static void updateRgbPipeline_(uint32_t nowMs) {
+  if (!colorSensorOk || nowMs - lastRgbMs < 200U) return;
+  lastRgbMs = nowMs;
+  ColorRgb rgb;
+  if (colorSensor.read(rgb)) {
+    lastRgb = rgb;
+    lastRgbValid = true;
+    telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
+    maybeSendRgbClassToEsp_(rgb, true);
+    maybeLatchForwardSpeedFromColor_(rgb);
+  } else {
+    lastRgbValid = false;
+    maybeSendRgbClassToEsp_(lastRgb, false);
+  }
+}
+
+static void applyReflexSafety_(float lidarFilteredCm) {
+  // Reflex safety during browser-driven motion (low latency, no Wi-Fi dependency).
+  // Latch once per commanded motion so we don't spam events.
+  if (!seqExecTask.active()) return;
+
+  // Safety invariant: stop immediately when an obstacle is closer than 10 cm.
+  const float kFrontStopCm = 10.0f;
+  if (!gReflexLatchedFront && isfinite(lidarFilteredCm) && lidarFilteredCm > 0.0f && lidarFilteredCm < kFrontStopCm) {
+    gReflexLatchedFront = true;
+    seqExecTask.cancel();
+    motorDrive(0.0f, 0.0f);
+    sendEvtPose_("FRONTSTOP", lidarFilteredCm);
+    maze_lcd::notifyStopFront();
+  }
+
+  // Do not cancel a commanded backoff just because the color sensor is still
+  // over the red tile at the start of the reverse move.
+  if (!gReflexLatchedRed && !seqExecTask.reverseMoveActive() && lastRgbValid && isVirtualRed_(lastRgb)) {
+    gReflexLatchedRed = true;
+    seqExecTask.cancel();
+    motorDrive(0.0f, 0.0f);
+    sendEvtPose_("RED", NAN);
+    maze_lcd::notifyStopRed();
+  }
+}
+
+static void handleCalibrationButton_(uint32_t nowMs) {
+  if (!gButtonEdge) return;
+  if (nowMs - gLastButtonMs < kButtonDebounceMs) return;
+  gButtonEdge = false;
+  if (digitalRead(kButtonPin) != LOW) return;
+  gLastButtonMs = nowMs;
+  if (!colorCalTask.active()) {
+    cancelMotionOwners_();
+    motorDrive(0.0f, 0.0f);
+    colorCalTask.begin();
+  } else {
+    colorCalTask.onButtonPress(&lastRgb, lastRgbValid);
+  }
+}
+
+static void startMotionSequence_(const CompassData& heading, const OdometryData& od) {
+  seqExecTask.clearAlignHeading();
+  seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+  // Ensure CMD completion events are never missed even if the step finishes
+  // within the same loop iteration (edge detector needs "was active" true).
+  gSeqWasActive = true;
+  gReflexLatchedRed = false;
+  gReflexLatchedFront = false;
+}
+
+static bool handleEspCommand_(const CompassData& heading) {
+  EspCommand espCmd;
+  if (!espPoll(espCmd)) return false;
+
+  if (espCmd.type == EspCommand::Type::EspIp) {
+    if (espCmd.text.length() > 0) {
+      espCmd.text.toCharArray(gEspIpStr, sizeof(gEspIpStr));
+      gEspIpStr[sizeof(gEspIpStr) - 1] = '\0';
+      maze_lcd::setIp(gEspIpStr);
+    }
+    return true;
+  }
+  if (espCmd.type == EspCommand::Type::Passcode) {
+    if (gEspLocked) {
+      Serial2.println("AUTH:LOCKED");
+    } else if (espCmd.value == kEspPasscodeInt) {
+      const bool wasArmed = gEspArmed;
+      gEspArmed = true;
+      gEspFailCount = 0;
+      Serial2.println("AUTH:OK");
+      if (!wasArmed) sendTelemetrySnapshotToEsp_();
+    } else {
+      gEspArmed = false;
+      // If the payload was malformed (no digits parsed), do not count it as a try.
+      if (espCmd.value >= 0) {
+        if (gEspFailCount < 255) gEspFailCount++;
+      }
+      const uint8_t triesLeft = (gEspFailCount >= kEspMaxFails) ? 0 : (uint8_t)(kEspMaxFails - gEspFailCount);
+      if (gEspFailCount >= kEspMaxFails) {
+        gEspLocked = true;
+        Serial2.println("AUTH:LOCKED");
+      } else {
+        Serial2.print("AUTH:FAIL:");
+        Serial2.println(triesLeft);
+      }
+    }
+    motorDrive(0.0f, 0.0f);
+    return true;
+  }
+
+  if (espCmd.type == EspCommand::Type::Disarm) {
+    // IMPORTANT: once locked, do not allow disarm/unlock until reset.
+    if (gEspLocked) {
+      Serial2.println("AUTH:LOCKED");
+    } else {
+      gEspArmed = false;
+      Serial2.println("AUTH:OFF");
+    }
+    stopAndCancelMotionOwners_();
+    return true;
+  }
+
+  if (gEspLocked) {
+    Serial2.println("AUTH:LOCKED");
+    stopAndCancelMotionOwners_();
+    return true;
+  }
+
+  if (!gEspArmed) {
+    Serial2.println("AUTH:REQUIRED");
+    stopAndCancelMotionOwners_();
+    return true;
+  }
+
+  if (espCmd.type == EspCommand::Type::MapPose) {
+    float east = 0.0f, north = 0.0f, hdgMatch = 0.0f;
+    bool hasH = false;
+    if (parseCommaFloats3Opt_(espCmd.text, east, north, hdgMatch, hasH)) {
+      // Position alignment: set world odom position in map coordinates.
+      odomWorldSetPos(east, north, heading.headingDegContinuous);
+
+      // Optional compass alignment: adjust heading offset so compass agrees with map-matched heading.
+      // Keep compass as heading source of truth, and slowly steer offset toward the match.
+      if (hasH) {
+        const float matchWrapped = wrapDeg360_(hdgMatch);
+        const float compassWrapped = wrapDeg360_(heading.headingDegWrapped);
+        const float err = wrapDegDiff180(matchWrapped, compassWrapped);
+
+        // Low-pass correction to avoid overreacting to scan noise.
+        const float kAlpha = 0.25f;
+        float off = compass.headingOffsetDeg();
+        off += kAlpha * err;
+        // Keep offset in a reasonable range for readability (functionally any range works).
+        off = clamp_(off, -180.0f, 180.0f);
+        compass.setHeadingOffsetDeg(off);
+        compass.resetHeadingContinuous();
+
+        // Rebase world odometry with the matched heading to avoid a fake "turn jump" in the integrator.
+        odomWorldRebase(matchWrapped);
+      }
+    }
+    return true;
+  }
+
+  if (espCmd.type == EspCommand::Type::TurretZero) {
+    turretEncCal.setZeroTicks(turretMotor.ticksAbs());
+    // Also zero the continuous turret-to-body angle state.
+    turretAngle.setZero();
+    // NOTE: Keep TURCAL:* reserved for ticks/rev calibration values only.
+    // Turret zero is a scan-control action, so it uses its own channel.
+    Serial2.println("TURZERO:OK");
+    return true;
+  } else if (espCmd.type == EspCommand::Type::TurretTpr) {
+    // Manual override: set CW/CCW ticks/rev from UI (persist to EEPROM).
+    const uint32_t pos = (uint32_t)espCmd.value;
+    const uint32_t neg = (uint32_t)espCmd.value2;
+    // Keep range aligned with TurretEncoderCal EEPROM sanity checks.
+    if (pos < 10u || pos > 200000u || neg < 10u || neg > 200000u) {
+      Serial2.println("TURCAL:FAIL");
+      if (turretEncCal.hasCalibration()) {
+        Serial2.print("TURCAL:");
+        Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+        Serial2.print(",");
+        Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+      }
+      return true;
+    }
+
+    const bool okPos = turretEncCal.setTicksPerRevPos(pos);
+    const bool okNeg = turretEncCal.setTicksPerRevNeg(neg);
+    if (okPos && okNeg && turretEncCal.hasCalibration()) {
+      turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
+      Serial2.print("TURCAL:");
+      Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+      Serial2.print(",");
+      Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+    } else {
+      Serial2.println("TURCAL:FAIL");
+      if (turretEncCal.hasCalibration()) {
+        Serial2.print("TURCAL:");
+        Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
+        Serial2.print(",");
+        Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
+      }
+    }
+    return true;
+  }
+
+  // Motion exclusivity (fundamental safety invariant):
+  // Never start a new motion command while another motion owner is active.
+  //
+  // Do NOT cancel the in-flight motion here, because the browser has no command IDs.
+  // Preempt/cancel would emit completion events that can be mis-attributed to the
+  // new command. Instead: reject the new request immediately and keep the current
+  // motion running.
+  const bool isMotionCmd = (espCmd.type == EspCommand::Type::Move || espCmd.type == EspCommand::Type::Turn ||
+                            espCmd.type == EspCommand::Type::TurnShortest || espCmd.type == EspCommand::Type::TurnAbs ||
+                            espCmd.type == EspCommand::Type::EncCal);
+  const bool motorBusy = (seqExecTask.active() || encCalTask.active() || turretSweep.active());
+  if (isMotionCmd && motorBusy) {
+    sendEvtPose_("CMDFAIL", NAN);
+    return true;
+  }
+
+  // Commands below this point are motion/task-affecting.
+  cancelMotionOwners_();
+
+  // Turret scan commands (from browser). These must not be blocked by odom resets.
+  if (espCmd.type == EspCommand::Type::TurretScanCancel) {
+    if (turretSweep.active()) {
+      turretSweep.cancel();
+      Serial2.println("TSCAN:CANCEL");
+    }
+    motorDrive(0.0f, 0.0f);
+    return true;
+  }
+  if (espCmd.type == EspCommand::Type::TurretScanPlus || espCmd.type == EspCommand::Type::TurretScanMinus) {
+    if (turretSweep.active()) return true;  // ignore if already scanning
+    motorDrive(0.0f, 0.0f);
+    const int dir = (espCmd.type == EspCommand::Type::TurretScanMinus) ? -1 : +1;
+    Serial2.print("TSCAN:BEGIN,");
+    Serial2.println(dir < 0 ? "-" : "+");
+    turretSweep.begin(&turretMotor, &turretAngle, &lidar, dir, turretMotor.ticksAbs(), millis());
+    return true;
+  }
+
+  odomHardResetKeepWorld(heading.headingDegContinuous);
+  const OdometryData od = odomRaw();
+
+  if (espCmd.type == EspCommand::Type::Move) {
+    espSteps[0] = {SequenceStepType::MoveByDistance, (float)espCmd.value};
+    espSteps[1] = {SequenceStepType::End, 0.0f};
+    seqExecTask.setSequence(espSteps);
+    startMotionSequence_(heading, od);
+  } else if (espCmd.type == EspCommand::Type::Turn) {
+    espSteps[0] = {SequenceStepType::TurnDeg, (float)espCmd.value};
+    espSteps[1] = {SequenceStepType::End, 0.0f};
+    seqExecTask.setSequence(espSteps);
+    startMotionSequence_(heading, od);
+  } else if (espCmd.type == EspCommand::Type::TurnShortest) {
+    espSteps[0] = {SequenceStepType::TurnDegShortest, (float)espCmd.value};
+    espSteps[1] = {SequenceStepType::End, 0.0f};
+    seqExecTask.setSequence(espSteps);
+    startMotionSequence_(heading, od);
+  } else if (espCmd.type == EspCommand::Type::TurnAbs) {
+    const float targetWrapped = wrapDeg360_((float)espCmd.value);
+    const float curWrapped = wrapDeg360_(heading.headingDegWrapped);
+    const float delta = wrapDegDiff180(targetWrapped, curWrapped);
+    espSteps[0] = {SequenceStepType::TurnDegShortest, delta};
+    espSteps[1] = {SequenceStepType::End, 0.0f};
+    seqExecTask.setSequence(espSteps);
+    startMotionSequence_(heading, od);
+  } else if (espCmd.type == EspCommand::Type::EncCal) {
+    encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
+  }
+
+  return false;
+}
+
+static bool tickColorCalibrationTask_() {
+  // Allow ESP Disarm/Passcode handling above to work even while these are active.
+  if (!colorCalTask.active()) return false;
+  colorCalTask.update(&lastRgb, lastRgbValid);
+  // Publish updated ref swatches immediately after a successful save (even if
+  // we already had a previous calibration).
+  if (colorCalTask.consumeJustSaved()) sendRgbRefsToEsp_();
+  // While color calibration is active, keep the LCD dedicated to the color
+  // calibration UI (do not overwrite it with the maze mission LCD).
+  return true;
+}
+
+static void tickActiveTasks_(const CompassData& heading, float lidarFilteredCm) {
+  if (seqExecTask.active()) {
+    OdometryData od = odomRaw();
+    seqExecTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
+  } else if (encCalTask.active()) {
+    OdometryData od = odomRaw();
+    const EncoderCalibrationTask::State prev = encCalTask.state();
+    encCalTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
+    if (prev != EncoderCalibrationTask::State::Succeeded &&
+        encCalTask.state() == EncoderCalibrationTask::State::Succeeded) {
+      const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
+      if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
+        Serial2.print("ENC_CAL:");
+        Serial2.println(mmPerPulse, 2);
+      }
+    }
+  }
+}
+
+static void emitCommandCompletionEvents_() {
+  // Command completion event (lets browser know a step finished).
+  const bool seqActiveNow = seqExecTask.active();
+  if (gSeqWasActive && !seqActiveNow) {
+    const SequenceExecutorTask::State st = seqExecTask.state();
+    if (st == SequenceExecutorTask::State::Succeeded) {
+      sendEvtPose_("CMDOK", NAN);
+    } else if (st == SequenceExecutorTask::State::Failed) {
+      sendEvtPose_("CMDFAIL", NAN);
+    } else if (st == SequenceExecutorTask::State::Cancelled) {
+      sendEvtPose_("CMDCANCEL", NAN);
+    }
+  }
+  gSeqWasActive = seqActiveNow;
+}
+
 void setup() {
   maze_lcd::init();
 
@@ -424,338 +757,13 @@ void loop() {
   telemetryUpdate(lidarFilteredCm, (int)lroundf(heading.headingDegContinuous), heading.headingDirLabel,
                   wOdom.eastCm, wOdom.northCm);
 
-  if (colorSensorOk && nowMs - lastRgbMs >= 200U) {
-    lastRgbMs = nowMs;
-    ColorRgb rgb;
-    if (colorSensor.read(rgb)) {
-      lastRgb = rgb;
-      lastRgbValid = true;
-      telemetryRgbUpdate(rgb.r, rgb.g, rgb.b);
-      maybeSendRgbClassToEsp_(rgb, true);
-      maybeLatchForwardSpeedFromColor_(rgb);
-    } else {
-      lastRgbValid = false;
-      maybeSendRgbClassToEsp_(lastRgb, false);
-    }
-  }
-
-  // Reflex safety during browser-driven motion (low latency, no Wi-Fi dependency).
-  // Latch once per commanded motion so we don't spam events.
-  if (seqExecTask.active()) {
-    // Safety invariant: stop immediately when an obstacle is closer than 10 cm.
-    const float kFrontStopCm = 10.0f;
-    if (!gReflexLatchedFront && isfinite(lidarFilteredCm) && lidarFilteredCm > 0.0f && lidarFilteredCm < kFrontStopCm) {
-      gReflexLatchedFront = true;
-      seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-      sendEvtPose_("FRONTSTOP", lidarFilteredCm);
-      maze_lcd::notifyStopFront();
-    }
-
-    // Do not cancel a commanded backoff just because the color sensor is still
-    // over the red tile at the start of the reverse move.
-    if (!gReflexLatchedRed && !seqExecTask.reverseMoveActive() && lastRgbValid && isVirtualRed_(lastRgb)) {
-      gReflexLatchedRed = true;
-      seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-      sendEvtPose_("RED", NAN);
-      maze_lcd::notifyStopRed();
-    }
-  }
-
-  if (gButtonEdge) {
-    if (nowMs - gLastButtonMs >= kButtonDebounceMs) {
-      gButtonEdge = false;
-      if (digitalRead(kButtonPin) == LOW) {
-        gLastButtonMs = nowMs;
-        if (!colorCalTask.active()) {
-          if (encCalTask.active()) encCalTask.cancel();
-          if (seqExecTask.active()) seqExecTask.cancel();
-          motorDrive(0.0f, 0.0f);
-          colorCalTask.begin();
-        } else {
-          colorCalTask.onButtonPress(&lastRgb, lastRgbValid);
-        }
-      }
-    }
-  }
-
-  EspCommand espCmd;
-  if (espPoll(espCmd)) {
-    if (espCmd.type == EspCommand::Type::EspIp) {
-      if (espCmd.text.length() > 0) {
-        espCmd.text.toCharArray(gEspIpStr, sizeof(gEspIpStr));
-        gEspIpStr[sizeof(gEspIpStr) - 1] = '\0';
-        maze_lcd::setIp(gEspIpStr);
-      }
-      return;
-    }
-    if (espCmd.type == EspCommand::Type::Passcode) {
-      if (gEspLocked) {
-        Serial2.println("AUTH:LOCKED");
-      } else if (espCmd.value == kEspPasscodeInt) {
-        const bool wasArmed = gEspArmed;
-        gEspArmed = true;
-        gEspFailCount = 0;
-        Serial2.println("AUTH:OK");
-        if (!wasArmed) sendTelemetrySnapshotToEsp_();
-      } else {
-        gEspArmed = false;
-        // If the payload was malformed (no digits parsed), do not count it as a try.
-        if (espCmd.value >= 0) {
-          if (gEspFailCount < 255) gEspFailCount++;
-        }
-        const uint8_t triesLeft =
-            (gEspFailCount >= kEspMaxFails) ? 0 : (uint8_t)(kEspMaxFails - gEspFailCount);
-        if (gEspFailCount >= kEspMaxFails) {
-          gEspLocked = true;
-          Serial2.println("AUTH:LOCKED");
-        } else {
-          Serial2.print("AUTH:FAIL:");
-          Serial2.println(triesLeft);
-        }
-      }
-      motorDrive(0.0f, 0.0f);
-      return;
-    }
-
-    if (espCmd.type == EspCommand::Type::Disarm) {
-      // IMPORTANT: once locked, do not allow disarm/unlock until reset.
-      if (gEspLocked) {
-        Serial2.println("AUTH:LOCKED");
-      } else {
-        gEspArmed = false;
-        Serial2.println("AUTH:OFF");
-      }
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-      return;
-    }
-
-    if (gEspLocked) {
-      Serial2.println("AUTH:LOCKED");
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-      return;
-    }
-
-    if (!gEspArmed) {
-      Serial2.println("AUTH:REQUIRED");
-      if (encCalTask.active()) encCalTask.cancel();
-      if (seqExecTask.active()) seqExecTask.cancel();
-      motorDrive(0.0f, 0.0f);
-      return;
-    }
-
-    if (espCmd.type == EspCommand::Type::MapPose) {
-      float east = 0.0f, north = 0.0f, hdgMatch = 0.0f;
-      bool hasH = false;
-      if (parseCommaFloats3Opt_(espCmd.text, east, north, hdgMatch, hasH)) {
-        // Position alignment: set world odom position in map coordinates.
-        odomWorldSetPos(east, north, heading.headingDegContinuous);
-
-        // Optional compass alignment: adjust heading offset so compass agrees with map-matched heading.
-        // Keep compass as heading source of truth, and slowly steer offset toward the match.
-        if (hasH) {
-          const float matchWrapped = wrapDeg360_(hdgMatch);
-          const float compassWrapped = wrapDeg360_(heading.headingDegWrapped);
-          const float err = wrapDegDiff180(matchWrapped, compassWrapped);
-
-          // Low-pass correction to avoid overreacting to scan noise.
-          const float kAlpha = 0.25f;
-          float off = compass.headingOffsetDeg();
-          off += kAlpha * err;
-          // Keep offset in a reasonable range for readability (functionally any range works).
-          off = clamp_(off, -180.0f, 180.0f);
-          compass.setHeadingOffsetDeg(off);
-          compass.resetHeadingContinuous();
-
-          // Rebase world odometry with the matched heading to avoid a fake "turn jump" in the integrator.
-          odomWorldRebase(matchWrapped);
-        }
-      }
-      return;
-    }
-
-    if (espCmd.type == EspCommand::Type::TurretZero) {
-      turretEncCal.setZeroTicks(turretMotor.ticksAbs());
-      // Also zero the continuous turret-to-body angle state.
-      turretAngle.setZero();
-      // NOTE: Keep TURCAL:* reserved for ticks/rev calibration values only.
-      // Turret zero is a scan-control action, so it uses its own channel.
-      Serial2.println("TURZERO:OK");
-      return;
-    } else if (espCmd.type == EspCommand::Type::TurretTpr) {
-      // Manual override: set CW/CCW ticks/rev from UI (persist to EEPROM).
-      const uint32_t pos = (uint32_t)espCmd.value;
-      const uint32_t neg = (uint32_t)espCmd.value2;
-      // Keep range aligned with TurretEncoderCal EEPROM sanity checks.
-      if (pos < 10u || pos > 200000u || neg < 10u || neg > 200000u) {
-        Serial2.println("TURCAL:FAIL");
-        if (turretEncCal.hasCalibration()) {
-          Serial2.print("TURCAL:");
-          Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
-          Serial2.print(",");
-          Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
-        }
-        return;
-      }
-
-      const bool okPos = turretEncCal.setTicksPerRevPos(pos);
-      const bool okNeg = turretEncCal.setTicksPerRevNeg(neg);
-      if (okPos && okNeg && turretEncCal.hasCalibration()) {
-        turretAngle.setTicksPerRevPosNeg(turretEncCal.ticksPerRevPos(), turretEncCal.ticksPerRevNeg());
-        Serial2.print("TURCAL:");
-        Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
-        Serial2.print(",");
-        Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
-      } else {
-        Serial2.println("TURCAL:FAIL");
-        if (turretEncCal.hasCalibration()) {
-          Serial2.print("TURCAL:");
-          Serial2.print((unsigned long)turretEncCal.ticksPerRevPos());
-          Serial2.print(",");
-          Serial2.println((unsigned long)turretEncCal.ticksPerRevNeg());
-        }
-      }
-      return;
-    }
-
-    // Motion exclusivity (fundamental safety invariant):
-    // Never start a new motion command while another motion owner is active.
-    //
-    // Do NOT cancel the in-flight motion here, because the browser has no command IDs.
-    // Preempt/cancel would emit completion events that can be mis-attributed to the
-    // new command. Instead: reject the new request immediately and keep the current
-    // motion running.
-    const bool isMotionCmd =
-        (espCmd.type == EspCommand::Type::Move || espCmd.type == EspCommand::Type::Turn ||
-         espCmd.type == EspCommand::Type::TurnShortest || espCmd.type == EspCommand::Type::TurnAbs ||
-         espCmd.type == EspCommand::Type::EncCal);
-    const bool motorBusy =
-        (seqExecTask.active() || encCalTask.active() || turretSweep.active());
-    if (isMotionCmd && motorBusy) {
-      sendEvtPose_("CMDFAIL", NAN);
-      return;
-    }
-
-    // Commands below this point are motion/task-affecting.
-    if (encCalTask.active()) encCalTask.cancel();
-    if (seqExecTask.active()) seqExecTask.cancel();
-
-    // Turret scan commands (from browser). These must not be blocked by odom resets.
-    if (espCmd.type == EspCommand::Type::TurretScanCancel) {
-      if (turretSweep.active()) {
-        turretSweep.cancel();
-        Serial2.println("TSCAN:CANCEL");
-      }
-      motorDrive(0.0f, 0.0f);
-      return;
-    }
-    if (espCmd.type == EspCommand::Type::TurretScanPlus ||
-        espCmd.type == EspCommand::Type::TurretScanMinus) {
-      if (turretSweep.active()) return;  // ignore if already scanning
-      motorDrive(0.0f, 0.0f);
-      const int dir = (espCmd.type == EspCommand::Type::TurretScanMinus) ? -1 : +1;
-      Serial2.print("TSCAN:BEGIN,");
-      Serial2.println(dir < 0 ? "-" : "+");
-      turretSweep.begin(&turretMotor, &turretAngle, &lidar, dir, turretMotor.ticksAbs(), millis());
-      return;
-    }
-
-    odomHardResetKeepWorld(heading.headingDegContinuous);
-    OdometryData od = odomRaw();
-
-    if (espCmd.type == EspCommand::Type::Move) {
-      espSteps[0] = {SequenceStepType::MoveByDistance, (float)espCmd.value};
-      espSteps[1] = {SequenceStepType::End, 0.0f};
-      seqExecTask.setSequence(espSteps);
-      seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      // Ensure CMD completion events are never missed even if the step finishes
-      // within the same loop iteration (edge detector needs "was active" true).
-      gSeqWasActive = true;
-      gReflexLatchedRed = false;
-      gReflexLatchedFront = false;
-    } else if (espCmd.type == EspCommand::Type::Turn) {
-      espSteps[0] = {SequenceStepType::TurnDeg, (float)espCmd.value};
-      espSteps[1] = {SequenceStepType::End, 0.0f};
-      seqExecTask.setSequence(espSteps);
-      seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      gSeqWasActive = true;
-      gReflexLatchedRed = false;
-      gReflexLatchedFront = false;
-    } else if (espCmd.type == EspCommand::Type::TurnShortest) {
-      espSteps[0] = {SequenceStepType::TurnDegShortest, (float)espCmd.value};
-      espSteps[1] = {SequenceStepType::End, 0.0f};
-      seqExecTask.setSequence(espSteps);
-      seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      gSeqWasActive = true;
-      gReflexLatchedRed = false;
-      gReflexLatchedFront = false;
-    } else if (espCmd.type == EspCommand::Type::TurnAbs) {
-      const float targetWrapped = wrapDeg360_((float)espCmd.value);
-      const float curWrapped = wrapDeg360_(heading.headingDegWrapped);
-      const float delta = wrapDegDiff180(targetWrapped, curWrapped);
-      espSteps[0] = {SequenceStepType::TurnDegShortest, delta};
-      espSteps[1] = {SequenceStepType::End, 0.0f};
-      seqExecTask.setSequence(espSteps);
-      seqExecTask.clearAlignHeading();
-      seqExecTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-      gSeqWasActive = true;
-      gReflexLatchedRed = false;
-      gReflexLatchedFront = false;
-    } else if (espCmd.type == EspCommand::Type::EncCal) {
-      encCalTask.begin(heading.headingDegContinuous, od.avgCmSigned);
-    }
-  }
-
-  // Allow ESP Disarm/Passcode handling above to work even while these are active.
-  if (colorCalTask.active()) {
-    colorCalTask.update(&lastRgb, lastRgbValid);
-    // Publish updated ref swatches immediately after a successful save (even if
-    // we already had a previous calibration).
-    if (colorCalTask.consumeJustSaved()) sendRgbRefsToEsp_();
-    // While color calibration is active, keep the LCD dedicated to the color
-    // calibration UI (do not overwrite it with the maze mission LCD).
-    return;
-  }
-
-  // ---- Run tasks/actions ----
-  if (seqExecTask.active()) {
-    OdometryData od = odomRaw();
-    seqExecTask.update(heading.headingDegContinuous, od.avgCmSigned, od.avgCmAbs, lidarFilteredCm);
-  } else if (encCalTask.active()) {
-    OdometryData od = odomRaw();
-    const EncoderCalibrationTask::State prev = encCalTask.state();
-    encCalTask.update(heading.headingDegContinuous, od.avgCmSigned, lidarFilteredCm);
-    if (prev != EncoderCalibrationTask::State::Succeeded &&
-        encCalTask.state() == EncoderCalibrationTask::State::Succeeded) {
-      const float mmPerPulse = encCalTask.calibratedCmPerPulse() * 10.0f;
-      if (isfinite(mmPerPulse) && mmPerPulse > 0.0f) {
-        Serial2.print("ENC_CAL:");
-        Serial2.println(mmPerPulse, 2);
-      }
-    }
-  }
-
-  // Command completion event (lets browser know a step finished).
-  const bool seqActiveNow = seqExecTask.active();
-  if (gSeqWasActive && !seqActiveNow) {
-    const SequenceExecutorTask::State st = seqExecTask.state();
-    if (st == SequenceExecutorTask::State::Succeeded) {
-      sendEvtPose_("CMDOK", NAN);
-    } else if (st == SequenceExecutorTask::State::Failed) {
-      sendEvtPose_("CMDFAIL", NAN);
-    } else if (st == SequenceExecutorTask::State::Cancelled) {
-      sendEvtPose_("CMDCANCEL", NAN);
-    }
-  }
-  gSeqWasActive = seqActiveNow;
+  updateRgbPipeline_(nowMs);
+  applyReflexSafety_(lidarFilteredCm);
+  handleCalibrationButton_(nowMs);
+  if (handleEspCommand_(heading)) return;
+  if (tickColorCalibrationTask_()) return;
+  tickActiveTasks_(heading, lidarFilteredCm);
+  emitCommandCompletionEvents_();
 
   maybeRequestEspIp_();
   mazeLcdTick_(heading.headingDegWrapped, lidarFilteredCm);
