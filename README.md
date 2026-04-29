@@ -4,8 +4,11 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ## Demo
 
-- [Maze Solving Demo (UI + Robot Side-by-Side)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
-- Shows full autonomous maze solving with live dashboard visualization and robot motion side-by-side.
+<a href="https://youtu.be/Jd3l6BgcNAk">
+  <img src="docs/images/WallNut-thumbnail.jpg" alt="Watch the demo video" width="100%" />
+</a>
+
+Shows full autonomous maze solving with live dashboard visualization and robot motion side-by-side.
 
 ## Gallery
 
