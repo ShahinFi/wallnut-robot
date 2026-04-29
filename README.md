@@ -36,16 +36,20 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ### UI
 
-<p>
-  <figure style="display:block; width:100%; margin:0 0 12px 0; vertical-align:top;">
-    <img src="docs/images/dash-1.jpg" alt="WallNut dashboard page" width="100%" />
-    <figcaption>Figure 5. Main dashboard (<code>/</code>) showing authentication, manual control, and live telemetry.</figcaption>
-  </figure>
-  <figure style="display:block; width:100%; margin:0; vertical-align:top;">
-    <img src="docs/images/dash-2.jpg" alt="WallNut maze page" width="100%" />
-    <figcaption>Figure 6. Maze dashboard (<code>/maze</code>) showing authentication, mapping, planning, autonomy state, telemetry, and calibration.</figcaption>
-  </figure>
-</p>
+<table>
+  <tr>
+    <td>
+      <img src="docs/images/dash-1.jpg" alt="WallNut dashboard page" width="100%" /><br/>
+      Figure 5. Main dashboard (<code>/</code>) showing authentication, manual control, and live telemetry.
+    </td>
+  </tr>
+  <tr>
+    <td style="padding-top:6px;">
+      <img src="docs/images/dash-2.jpg" alt="WallNut maze page" width="100%" /><br/>
+      Figure 6. Maze dashboard (<code>/maze</code>) showing authentication, mapping, planning, autonomy state, telemetry, and calibration.
+    </td>
+  </tr>
+</table>
 
 ## What WallNut Does
 
