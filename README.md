@@ -11,26 +11,28 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ### Robot
 
-<p>
-  <figure style="display:inline-block; width:49%; margin:0 0 12px 0; vertical-align:top;">
-    <img src="docs/images/robot-1.jpeg" alt="WallNut robot view 1" width="100%" />
-    <figcaption>Figure 1. Front view of WallNut.</figcaption>
-  </figure>
-  <figure style="display:inline-block; width:49%; margin:0 0 12px 0; vertical-align:top;">
-    <img src="docs/images/robot-2.jpeg" alt="WallNut robot view 2" width="100%" />
-    <figcaption>Figure 2. Front-right view of WallNut.</figcaption>
-  </figure>
-</p>
-<p>
-  <figure style="display:inline-block; width:49%; margin:0; vertical-align:top;">
-    <img src="docs/images/robot-3.jpeg" alt="WallNut robot view 3" width="100%" />
-    <figcaption>Figure 3. Front-left view of WallNut.</figcaption>
-  </figure>
-  <figure style="display:inline-block; width:49%; margin:0; vertical-align:top;">
-    <img src="docs/images/robot-4.jpeg" alt="WallNut robot view 4" width="100%" />
-    <figcaption>Figure 4. Rear-right view of WallNut.</figcaption>
-  </figure>
-</p>
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/robot-1.jpeg" alt="WallNut robot view 1" width="100%" /><br/>
+      Figure 1. Front view of WallNut.
+    </td>
+    <td width="50%">
+      <img src="docs/images/robot-2.jpeg" alt="WallNut robot view 2" width="100%" /><br/>
+      Figure 2. Front-right view of WallNut.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/robot-3.jpeg" alt="WallNut robot view 3" width="100%" /><br/>
+      Figure 3. Front-left view of WallNut.
+    </td>
+    <td width="50%">
+      <img src="docs/images/robot-4.jpeg" alt="WallNut robot view 4" width="100%" /><br/>
+      Figure 4. Rear-right view of WallNut.
+    </td>
+  </tr>
+</table>
 
 ### UI
 
