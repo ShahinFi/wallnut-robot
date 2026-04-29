@@ -11,17 +11,39 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ### Robot
 
-- Front view.
-  ![WallNut Robot Front](path/to/robot-front.jpg)
-- Back view (perfboard).
-  ![WallNut Robot Back Perfboard](path/to/robot-back-perfboard.jpg)
+<p>
+  <figure style="display:inline-block; width:49%; margin:0 0 12px 0; vertical-align:top;">
+    <img src="docs/images/robot-1.jpeg" alt="WallNut robot view 1" width="100%" />
+    <figcaption>Figure 1. Front view of WallNut.</figcaption>
+  </figure>
+  <figure style="display:inline-block; width:49%; margin:0 0 12px 0; vertical-align:top;">
+    <img src="docs/images/robot-2.jpeg" alt="WallNut robot view 2" width="100%" />
+    <figcaption>Figure 2. Front-right view of WallNut.</figcaption>
+  </figure>
+</p>
+<p>
+  <figure style="display:inline-block; width:49%; margin:0; vertical-align:top;">
+    <img src="docs/images/robot-3.jpeg" alt="WallNut robot view 3" width="100%" />
+    <figcaption>Figure 3. Front-left view of WallNut.</figcaption>
+  </figure>
+  <figure style="display:inline-block; width:49%; margin:0; vertical-align:top;">
+    <img src="docs/images/robot-4.jpeg" alt="WallNut robot view 4" width="100%" />
+    <figcaption>Figure 4. Rear-right view of WallNut.</figcaption>
+  </figure>
+</p>
 
 ### UI
 
-- Dashboard page.
-  ![WallNut Dashboard UI](path/to/ui-dashboard.png)
-- Maze solver page (map + planner).
-  ![WallNut Maze UI](path/to/ui-maze.png)
+<p>
+  <figure style="display:block; width:100%; margin:0 0 12px 0; vertical-align:top;">
+    <img src="docs/images/dash-1.jpg" alt="WallNut dashboard page" width="100%" />
+    <figcaption>Figure 5. Main dashboard (<code>/</code>) showing authentication, manual control, and live telemetry.</figcaption>
+  </figure>
+  <figure style="display:block; width:100%; margin:0; vertical-align:top;">
+    <img src="docs/images/dash-2.jpg" alt="WallNut maze page" width="100%" />
+    <figcaption>Figure 6. Maze dashboard (<code>/maze</code>) showing authentication, mapping, planning, autonomy state, telemetry, and calibration.</figcaption>
+  </figure>
+</p>
 
 ## What WallNut Does
 
