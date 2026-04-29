@@ -334,10 +334,10 @@ if (!elStart || !elStop || !elStatus) {
     // WHY: Risk radius around occupied cells (in grid cells).
     rOcc: 2,
     // CONTRACT: Code-only calibration gains (UI stays as pure intent sliders).
-    kLen: 1.00,
-    kTurn: 0.35,
-    kRisk: 4.00,
-    kFirst: 0.25,
+    kLen: 0.10,
+    kTurn: 0.25,
+    kRisk: 8.00,
+    kFirst: 0.38,
     // WHY: Effective calibrated weights (computed from slider * k*).
     wLenEff: 1.0,
     wTurnEff: 1.0,

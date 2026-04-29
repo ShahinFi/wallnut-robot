@@ -27,21 +27,20 @@ static void maybeSendRgbClassToEsp_(RuntimeState& rt, const ColorRgb& live, bool
 }
 
 static void maybeLatchForwardSpeedFromColor_(RuntimeState& rt, const ColorRgb& live) {
-  // CONTRACT: refs[1]/refs[2] map to speed modes; other classes do not alter speed.
+  // CONTRACT: refs[1] maps to speed mode; other classes do not alter speed.
   if (!rt.colorCalTask.hasCalibration()) return;
   const ColorRgb* refs = rt.colorCalTask.refs();
   if (!refs) return;
 
   constexpr float kSpeed75 = 0.75f;
-  constexpr float kSpeed35 = 0.35f;
 
   color::ClassifyConfig cfg;
   cfg.absMaxDist = 0.18f;
   cfg.bestOverSecondMax = 0.80f;
   const color::ClassifyResult r = color::classifyNearest(live, refs, ColorCalibrationTask::kColorCount, cfg);
-  if (!(r.idx == 1 || r.idx == 2)) return;
+  if (r.idx != 1) return;
 
-  const float desired = (r.idx == 1) ? kSpeed75 : kSpeed35;
+  const float desired = kSpeed75;
   if (!isfinite(desired)) return;
   if (fabsf(desired - rt.forwardSpeedScale) < 0.001f) return;
   rt.forwardSpeedScale = desired;

@@ -31,7 +31,8 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 
 ## How It Works
 
-- A rotating turret with a dedicated CMPS14 compass and a 1D LiDAR produces 2D environment scans; sweep stop and LiDAR sample angles are both compass-referenced.
+- A rotating turret with a dedicated CMPS14 compass and a 1D LiDAR produces 2D environment scans; LiDAR sample angles are compass-referenced, and sweep completion in compass mode is accepted when either compass span or calibrated encoder-turn span is reached.
+- In compass sweep mode, a single-step turret-compass jump over 10 degrees is ignored for stop-decision evaluation only.
 - Scan matching is used to continuously correct localization drift.
 - Sensor fusion combines scan matching with wheel odometry and compass heading.
 - Multi-criteria path planning selects motion, then commands are executed step-by-step.
@@ -89,7 +90,8 @@ WallNut is an autonomous maze-solving robot engineered to work reliably with low
 ## Environment Semantics and Tunables
 
 - Physical obstacles come from LiDAR occupancy mapping.
-- Red-floor detections become virtual blocked cells for planning/safety logic.
+- Calibrated color 1 (red floor marker) is treated as a virtual blocked cell for planning/safety logic.
+- Calibrated color 2 (blue floor marker) increases forward speed by 50% from the default behavior.
 - Virtual red obstacles are separate from LiDAR occupancy and can be inflated in planner space.
 - Color meanings and reactions are tunable through calibration/configuration.
 

@@ -17,13 +17,13 @@ void setup() {
 }
 
 void loop() {
-  CompassData heading;
-  if (!updateHeading(gRt, heading)) return;
-
   const uint32_t nowMs = millis();
 
   updateTurretTracking(gRt);
   if (handleTurretSweepEarlyReturn(gRt, nowMs)) return;
+
+  CompassData heading;
+  if (!updateHeading(gRt, heading)) return;
 
   const float lidarFilteredCm = updateLidarOdomTelemetry(gRt, heading);
   updateColorAndSpeedLatch(gRt, nowMs);

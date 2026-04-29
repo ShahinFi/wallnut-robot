@@ -7,14 +7,25 @@
 
 #include <math.h>
 
+#ifndef DEBUG_TURRET_SWEEP
+#define DEBUG_TURRET_SWEEP 0
+#endif
+
 namespace {
 const float kCompassSweepCorrCwDeg = 0.0f;
 const float kCompassSweepCorrCcwDeg = 0.0f;
+const float kCompassJumpDeg = 10.0f;
 
 static float wrap360(float deg) {
   while (deg < 0.0f) deg += 360.0f;
   while (deg >= 360.0f) deg -= 360.0f;
   return deg;
+}
+
+static float wrapDiff180(float d) {
+  while (d > 180.0f) d -= 360.0f;
+  while (d < -180.0f) d += 360.0f;
+  return d;
 }
 }
 
@@ -37,6 +48,8 @@ TurretSweepScan360::TurretSweepScan360()
   startCompassContinuousDeg_(0.0f),
   targetCompassContinuousDeg_(0.0f),
   compassTargetValid_(false),
+  prevCompassWrappedDeg_(0.0f),
+  prevCompassValid_(false),
   lidarInFlight_(false),
   lidarTicksStart_(0),
   lidarCompassStartContinuousDeg_(0.0f),
@@ -117,9 +130,11 @@ void TurretSweepScan360::begin(TurretMotor* motor, TurretAngleTracker* angleTrac
       stopMotor_();
       return;
     }
-    // WHY: Keep sweep start and per-sample angle progression in the same compass frame.
-    startAngleDegWrapped_ = wrap360(turretHeading.headingDegWrapped);
+    // CONTRACT: In compass mode, scan-relative angle starts at zero for each new scan.
+    startAngleDegWrapped_ = 0.0f;
     startCompassContinuousDeg_ = turretHeading.headingDegContinuous;
+    prevCompassWrappedDeg_ = turretHeading.headingDegWrapped;
+    prevCompassValid_ = true;
     if (dirSign_ < 0) {
       targetCompassContinuousDeg_ = startCompassContinuousDeg_ - (360.0f - kCompassSweepCorrCcwDeg);
     } else {
@@ -168,8 +183,9 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
   }
 
   bool reachedRev = false;
+  const bool reachedTicks = ((uint32_t)dt >= ticksPerRev_);
   if (cfg_.doneMode == Config::DoneMode::EncoderTicks) {
-    reachedRev = ((uint32_t)dt >= ticksPerRev_);
+    reachedRev = reachedTicks;
   } else {
     if (!compassTargetValid_ || !turretCompass_) {
       stopMotor_();
@@ -182,11 +198,25 @@ bool TurretSweepScan360::update(long ticksAbsNow, uint32_t nowMs) {
       state_ = State::Cancelled;
       return true;
     }
-    if (dirSign_ < 0) {
-      reachedRev = (turretHeading.headingDegContinuous <= targetCompassContinuousDeg_);
-    } else {
-      reachedRev = (turretHeading.headingDegContinuous >= targetCompassContinuousDeg_);
+    bool compassJump = false;
+    if (prevCompassValid_) {
+      const float d = wrapDiff180(turretHeading.headingDegWrapped - prevCompassWrappedDeg_);
+      if (fabsf(d) > kCompassJumpDeg) compassJump = true;
     }
+    if (!compassJump) {
+      prevCompassWrappedDeg_ = turretHeading.headingDegWrapped;
+      prevCompassValid_ = true;
+    }
+    bool reachedCompass = false;
+    if (!compassJump) {
+      if (dirSign_ < 0) {
+        reachedCompass = (turretHeading.headingDegContinuous <= targetCompassContinuousDeg_);
+      } else {
+        reachedCompass = (turretHeading.headingDegContinuous >= targetCompassContinuousDeg_);
+      }
+    }
+    // CONTRACT: Compass mode completion accepts either angular span or calibrated encoder turn span.
+    reachedRev = (reachedCompass || reachedTicks);
   }
   if (reachedRev && finishGraceStartMs_ == 0) {
     // WHY: Stop rotation at 1 rev; allow a short grace period to collect the in-flight LiDAR sample.
@@ -283,6 +313,7 @@ void TurretSweepScan360::reset() {
   turretCompass_ = nullptr;
   seq_ = 0;
   compassTargetValid_ = false;
+  prevCompassValid_ = false;
   lidarCompassStartValid_ = false;
 }
 

@@ -79,6 +79,8 @@ private:
   float startCompassContinuousDeg_;
   float targetCompassContinuousDeg_;
   bool compassTargetValid_;
+  float prevCompassWrappedDeg_;
+  bool prevCompassValid_;
 
   // WHY: LiDAR measurement stamping (for latency compensation).
   bool lidarInFlight_;

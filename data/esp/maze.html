@@ -94,18 +94,18 @@
                 <div class="planner-controls">
                   <label class="planner-item" title="Weight for shorter paths. Higher value = stronger preference for a shorter path.">
                     <span class="planner-label">Shorter path</span>
-                    <input class="planner-input planner-slider" id="planWLen" type="range" min="0" max="10" step="0.1" value="1" />
-                    <output class="planner-value" id="planWLenVal" for="planWLen">1.0</output>
+                    <input class="planner-input planner-slider" id="planWLen" type="range" min="0" max="10" step="0.1" value="5" />
+                    <output class="planner-value" id="planWLenVal" for="planWLen">5.0</output>
                   </label>
                   <label class="planner-item" title="Weight for clearance. Higher value = keeps more distance from red tiles and walls.">
                     <span class="planner-label">Clearance</span>
-                    <input class="planner-input planner-slider" id="planWRisk" type="range" min="0" max="10" step="0.1" value="7" />
-                    <output class="planner-value" id="planWRiskVal" for="planWRisk">7.0</output>
+                    <input class="planner-input planner-slider" id="planWRisk" type="range" min="0" max="10" step="0.1" value="5" />
+                    <output class="planner-value" id="planWRiskVal" for="planWRisk">5.0</output>
                   </label>
                   <label class="planner-item" title="Turn penalty weight. Higher value = fewer turns (this is NOT a turn count).">
                     <span class="planner-label">Fewer turns</span>
-                    <input class="planner-input planner-slider" id="planWTurn" type="range" min="0" max="10" step="0.1" value="3" />
-                    <output class="planner-value" id="planWTurnVal" for="planWTurn">3.0</output>
+                    <input class="planner-input planner-slider" id="planWTurn" type="range" min="0" max="10" step="0.1" value="5" />
+                    <output class="planner-value" id="planWTurnVal" for="planWTurn">5.0</output>
                   </label>
                   <label class="planner-item" title="Prefer a longer first straight run from the robot. Higher value = avoid tiny first segments.">
                     <span class="planner-label">Long first run</span>
@@ -145,9 +145,9 @@
                 data-goal-tol-cells="1"
                 data-red-inflate-x-cells="0"
                 data-red-inflate-y-cells="0"
-                data-plan-w-len="1"
-                data-plan-w-risk="7"
-                data-plan-w-turn="3"
+                data-plan-w-len="5"
+                data-plan-w-risk="5"
+                data-plan-w-turn="5"
                 data-plan-w-first="5"
                 data-plan-risk-radius-red-cells="3"
                 data-plan-risk-radius-occ-cells="2"
