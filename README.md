@@ -333,5 +333,4 @@ Important: keep all secrets and local machine settings out of git.
 
 ## License
 
-CC BY-NC 4.0 (non-commercial, source-available)
-See [LICENSE](LICENSE) for full terms.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
